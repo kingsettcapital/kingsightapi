@@ -1,0 +1,87 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "idpapi",
+    "version": "1.0"
+  },
+  "paths": {
+    "/api/Funds": {
+      "get": {
+        "tags": [
+          "Funds"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FundDto"
+                  }
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FundDto"
+                  }
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FundDto"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FundDto": {
+        "type": "object",
+        "properties": {
+          "fundKey": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "fundId": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "fundCode": {
+            "type": "string",
+            "nullable": true
+          },
+          "fundName": {
+            "type": "string",
+            "nullable": true
+          },
+          "fundType": {
+            "type": "string",
+            "nullable": true
+          },
+          "fundStrat": {
+            "type": "string",
+            "nullable": true
+          },
+          "fundStart": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  }
+}

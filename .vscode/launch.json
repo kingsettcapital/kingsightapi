@@ -1,0 +1,19 @@
+{
+    "connectionStrings": {
+        "Analytics": "Data Source=xrfnt5tsksxuhk3gsvzg4wvqzq-v6leweskkazebke2ampxnbikdy.datawarehouse.fabric.microsoft.com;Persist Security Info=True;User ID=ddd06b7b-67de-42a6-8bd5-851fd30679a7;Password=pND8Q~yn-RadndgQJGdoLkbhA8ZUdRgow03kdade;Pooling=False;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=True;Authentication=ActiveDirectoryServicePrincipal;Command Timeout=0;",
+        "IFTS": "Server=victoria\\uat; Database=IFTS; Trusted_Connection=True; MultipleActiveResultSets=True;"
+    },
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "chrome",
+            "request": "launch",
+            "name": "Launch Chrome against localhost",
+            "url": "http://localhost:8080",
+            "webRoot": "${workspaceFolder}"
+        }
+    ]
+}
