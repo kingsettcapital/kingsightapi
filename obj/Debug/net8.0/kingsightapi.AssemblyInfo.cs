@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c4d27448b3ccc7e5c6d6b4e97bc2227bda12b534")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+87eae404cf52a6392365d0e49750bf8cdf36f1dd")]
 [assembly: System.Reflection.AssemblyProductAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
