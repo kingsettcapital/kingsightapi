@@ -16,12 +16,14 @@ namespace kingsightapi.Entities
     }
 
     /// <summary>
-    /// One investor key and alias name pair for batch updates.
+    /// One investor row for batch upsert via PUT /api/investor/aliases.
     /// </summary>
     public sealed class DimInvestorAliasUpdateItem
     {
         [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
         public long investor_key { get; init; }
+        public string investor_code { get; init; } = string.Empty;
+        public string investor_name { get; init; } = string.Empty;
         public string investor_alias_name { get; init; } = string.Empty;
         public DateTime? user_updated_date { get; init; }
         public string? user_updated_by { get; init; } = string.Empty;
@@ -37,11 +39,22 @@ namespace kingsightapi.Entities
     }
 
     /// <summary>
-    /// Outcome of a batch investor alias update.
+    /// Outcome of a batch investor alias upsert.
     /// </summary>
     public sealed class DimInvestorAliasBatchUpdateResult
     {
         public int UpdatedCount { get; init; }
-        public IReadOnlyList<long> NotFoundInvestorKeys { get; init; } = Array.Empty<long>();
+        public int InsertedCount { get; init; }
+        public IReadOnlyList<long> FailedInvestorKeys { get; init; } = Array.Empty<long>();
+    }
+
+    /// <summary>
+    /// Investor name option for the filter multi-select (mort.dim_investor).
+    /// </summary>
+    public sealed class InvestorNameOptionDto
+    {
+        public long investor_key { get; init; }
+        public string investor_code { get; init; } = string.Empty;
+        public string investor_name { get; init; } = string.Empty;
     }
 }

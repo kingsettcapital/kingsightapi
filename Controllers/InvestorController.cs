@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -18,13 +19,37 @@ namespace kingsightapi.Controllers
             _logger = logger;
         }
 
-        // GET: api/investor
-        [HttpGet]
-        public async Task<ActionResult<List<DimInvestorDto>>> GetAll()
+        // GET: api/investor/names — options for the Investor Name filter dropdown
+        [HttpGet("names")]
+        public async Task<ActionResult<List<InvestorNameOptionDto>>> GetInvestorNames()
         {
             try
             {
-                var result = await _service.GetInvestorsAsync();
+                var result = await _service.GetInvestorNameOptionsAsync();
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get investor names cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving investor names");
+                return StatusCode(500, "An error occurred while retrieving investor names.");
+            }
+        }
+
+        // GET: api/investor?investorNames=...&page=1&pageSize=50
+        [HttpGet]
+        public async Task<ActionResult<PagedResult<DimInvestorDto>>> GetAll(
+            [FromQuery] List<string>? investorNames,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 50)
+        {
+            try
+            {
+                var result = await _service.GetInvestorsAsync(investorNames, page, pageSize);
                 return Ok(result);
             }
             catch (OperationCanceledException)
@@ -39,7 +64,7 @@ namespace kingsightapi.Controllers
             }
         }
 
-        // PUT: api/investor/alias or api/investor/aliases (Angular often uses plural)
+        // PUT: api/investor/alias or api/investor/aliases — batch upsert (update by key/code, insert when missing)
         [HttpPut("alias")]
         [HttpPut("aliases")]
         public async Task<ActionResult<DimInvestorAliasBatchUpdateResult>> PutAliases([FromBody] DimInvestorAliasBatchUpdateRequest request)
@@ -51,12 +76,12 @@ namespace kingsightapi.Controllers
 
             if (request.Investors is null || request.Investors.Count == 0)
             {
-                return BadRequest("At least one investor key and alias name is required.");
+                return BadRequest("At least one investor is required.");
             }
 
             try
             {
-                var result = await _service.UpdateInvestorAliasesAsync(request);
+                var result = await _service.UpdateInvestorAliasesAsync(request, GetCurrentUser());
                 return Ok(result);
             }
             catch (OperationCanceledException)
@@ -70,5 +95,11 @@ namespace kingsightapi.Controllers
                 return StatusCode(500, "An error occurred while updating investor aliases.");
             }
         }
+
+        private string GetCurrentUser() =>
+            User.FindFirstValue("preferred_username")
+            ?? User.FindFirstValue(ClaimTypes.Upn)
+            ?? User.Identity?.Name
+            ?? "System";
     }
 }

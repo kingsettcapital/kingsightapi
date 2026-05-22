@@ -1,6 +1,7 @@
 using System.Text.Json;
+using kingsightapi.Configuration;
 using kingsightapi.Services;
-using kingsightapi.Entities;
+using Microsoft.OpenApi.Models;
 
 namespace kingsightapi
 {
@@ -10,40 +11,48 @@ namespace kingsightapi
         {
             var builder = WebApplication.CreateBuilder(args);
 
-            // Configuration
             var configuration = builder.Configuration;
 
-
-            // DI registrations
-           
-            // Add services to the container.
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
-                    // Angular sends camelCase; accept it reliably even if defaults change.
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
                 });
-            //builder.Services.AddScoped<DBService>();
+
+            // Validates Bearer tokens issued by Entra for this API (MSAL acquires them on the Angular app).
+            builder.Services.AddEntraAuthentication(configuration);
+
             builder.Services.AddSingleton<IDBService, DBService>();
             builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<ILoanService, LoanService>();
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
 
-            // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
-            builder.Services.AddSwaggerGen();
+            builder.Services.AddSwaggerGen(options =>
+            {
+                options.SwaggerDoc("v1", new OpenApiInfo
+                {
+                    Title = "Kingsight API",
+                    Version = "v1"
+                });
 
-            // CORS - allow Angular dev origin; adjust for production
+                EntraAuthExtensions.ConfigureBearerSwagger(options);
+            });
+
+            var corsOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                ?? ["http://localhost:4200"];
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAngularDev", policy =>
-                    policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod());
+                    policy.WithOrigins(corsOrigins)
+                        .AllowAnyHeader()
+                        .AllowAnyMethod());
             });
 
             var app = builder.Build();
 
-            // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
@@ -53,7 +62,10 @@ namespace kingsightapi
 
             app.UseHttpsRedirection();
             app.UseCors("AllowAngularDev");
+
+            app.UseAuthentication();
             app.UseAuthorization();
+
             app.MapControllers();
             app.Run();
         }

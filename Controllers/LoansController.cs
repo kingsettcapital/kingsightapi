@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using kingsightapi.Services;
@@ -18,24 +19,29 @@ namespace kingsightapi.Controllers
             _logger = logger;
         }
 
-        // GET: api/funds
+        // GET: api/loans
         [HttpGet]
-        public async Task<ActionResult<List<FundDto>>> Get()
+        public async Task<ActionResult<PagedResult<LoanDto>>> Get(
+            [FromQuery] string? description,
+            [FromQuery] string? status,
+            [FromQuery] string? loanAlias,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 50)
         {
             try
             {
-                var result = await _service.GetLoansAsync();
+                var result = await _service.GetLoansAsync(description, status, loanAlias, page, pageSize);
                 return Ok(result);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Get all funds cancelled");
-                return StatusCode(499); // Client Closed Request (non-standard) � indicates cancellation
+                _logger.LogInformation("Get loans cancelled");
+                return StatusCode(499);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error retrieving funds");
-                return StatusCode(500, "An error occurred while retrieving funds.");
+                _logger.LogError(ex, "Error retrieving loans");
+                return StatusCode(500, "An error occurred while retrieving loans.");
             }
         }
 
@@ -107,9 +113,9 @@ namespace kingsightapi.Controllers
             }
         }
 
-        // PUT: api/loans/loanalias
+        // PUT: api/loans/loanalias — batch upsert (update by key/code, insert when missing)
         [HttpPut("loanalias")]
-        public async Task<IActionResult> PutLoanAlias([FromBody] LoanAliasParent request)
+        public async Task<ActionResult<LoanBatchUpsertResult>> PutLoanAlias([FromBody] LoanAliasParent request)
         {
             if (request is null || request.LoanAliases is null || request.LoanAliases.Count == 0)
             {
@@ -118,8 +124,8 @@ namespace kingsightapi.Controllers
 
             try
             {
-                var affected = await _service.LoanAliasUpdate(request);
-                return affected > 0 ? NoContent() : NotFound();
+                var result = await _service.LoanAliasUpdate(request, GetCurrentUser());
+                return Ok(result);
             }
             catch (OperationCanceledException)
             {
@@ -158,6 +164,12 @@ namespace kingsightapi.Controllers
                 return StatusCode(500, "An error occurred while updating the loan.");
             }
         }
+
+        private string GetCurrentUser() =>
+            User.FindFirstValue("preferred_username")
+            ?? User.FindFirstValue(ClaimTypes.Upn)
+            ?? User.Identity?.Name
+            ?? "System";
 
         //// GET: api/funds/{fundKey}
         //[HttpGet("{fundKey:int}")]

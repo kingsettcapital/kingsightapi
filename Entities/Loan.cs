@@ -31,6 +31,7 @@ namespace kingsightapi.Entities
         public string LoanDesc { get; init; } = string.Empty;
         public string LoanAliasName { get; init; } = string.Empty;
         public short LoanRanking { get; init; }
+        public DateTime? CreatedDate { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
         public string UserUpdatedBy { get; init; } = string.Empty;
 
@@ -74,6 +75,7 @@ namespace kingsightapi.Entities
     public sealed class LoanAlias
     {
         public long LoanKey { get; init; }
+        public string LoanCode { get; init; } = string.Empty;
         public string LoanAliasName { get; init; } = string.Empty;
         public short? LoanRanking { get; init; }
         public bool? IsLoanInterestApplicable { get; init; }
@@ -86,5 +88,15 @@ namespace kingsightapi.Entities
     public sealed class LoanAliasParent
     {
         public List<LoanAlias> LoanAliases { get; init; } = [];
+    }
+
+    /// <summary>
+    /// Result of a batch loan upsert via PUT /api/loans/loanalias.
+    /// </summary>
+    public sealed class LoanBatchUpsertResult
+    {
+        public int UpdatedCount { get; init; }
+        public int InsertedCount { get; init; }
+        public IReadOnlyList<long> FailedLoanKeys { get; init; } = [];
     }
 }
