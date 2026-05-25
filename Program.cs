@@ -27,6 +27,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<ILoanService, LoanService>();
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<ILoanFormService, LoanFormService>();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>

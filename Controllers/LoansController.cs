@@ -6,6 +6,11 @@ using kingsightapi.Entities;
 
 namespace kingsightapi.Controllers
 {
+    /// <summary>
+    /// Form: Loan Syndicate Details — loan alias, ranking, late interest applicable capture.
+    /// GET /api/loans | PUT /api/loans/loanalias
+    /// Other loan forms: <see cref="LoanFormController"/> (api/loan-form/*).
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class LoansController : ControllerBase

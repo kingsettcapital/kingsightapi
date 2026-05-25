@@ -6,6 +6,10 @@ using Microsoft.Extensions.Logging;
 
 namespace kingsightapi.Controllers
 {
+    /// <summary>
+    /// Form: Investor Alias — GET /api/investor, /api/investor/names | PUT /api/investor/aliases
+    /// Loan forms: <see cref="LoanFormController"/> (api/loan-form/*).
+    /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class InvestorController : ControllerBase
