@@ -177,10 +177,10 @@
         }
       }
     },
-    "/api/Loans": {
+    "/api/InvestorAlias": {
       "get": {
         "tags": [
-          "Loans"
+          "InvestorAlias"
         ],
         "responses": {
           "200": {
@@ -190,7 +190,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/FundDto"
+                    "$ref": "#/components/schemas/InvestorAliasDto"
                   }
                 }
               },
@@ -198,7 +198,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/FundDto"
+                    "$ref": "#/components/schemas/InvestorAliasDto"
                   }
                 }
               },
@@ -206,46 +206,54 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/FundDto"
+                    "$ref": "#/components/schemas/InvestorAliasDto"
                   }
                 }
               }
             }
           }
         }
-      }
-    },
-    "/api/Loans/investor-details": {
-      "get": {
+      },
+      "post": {
         "tags": [
-          "Loans"
+          "InvestorAlias"
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestorAliasSaveRequest"
+              }
+            },
+            "text/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestorAliasSaveRequest"
+              }
+            },
+            "application/*+json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestorAliasSaveRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK",
             "content": {
               "text/plain": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/InvestorDto"
-                  }
+                  "$ref": "#/components/schemas/InvestorAliasDto"
                 }
               },
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/InvestorDto"
-                  }
+                  "$ref": "#/components/schemas/InvestorAliasDto"
                 }
               },
               "text/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/InvestorDto"
-                  }
+                  "$ref": "#/components/schemas/InvestorAliasDto"
                 }
               }
             }
@@ -253,19 +261,57 @@
         }
       }
     },
-    "/api/Loans/{loanKey}/investor-alias": {
-      "put": {
+    "/api/InvestorAlias/{investorAliasId}": {
+      "get": {
         "tags": [
-          "Loans"
+          "InvestorAlias"
         ],
         "parameters": [
           {
-            "name": "loanKey",
+            "name": "investorAliasId",
             "in": "path",
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "int32"
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestorAliasDto"
+                }
+              },
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestorAliasDto"
+                }
+              },
+              "text/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvestorAliasDto"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "InvestorAlias"
+        ],
+        "parameters": [
+          {
+            "name": "investorAliasId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
             }
           }
         ],
@@ -293,43 +339,22 @@
             "description": "OK"
           }
         }
-      }
-    },
-    "/api/Loans/{loanKey}": {
-      "put": {
+      },
+      "delete": {
         "tags": [
-          "Loans"
+          "InvestorAlias"
         ],
         "parameters": [
           {
-            "name": "loanKey",
+            "name": "investorAliasId",
             "in": "path",
             "required": true,
             "schema": {
               "type": "integer",
-              "format": "int32"
+              "format": "int64"
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoanUpdateRequest"
-              }
-            },
-            "text/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoanUpdateRequest"
-              }
-            },
-            "application/*+json": {
-              "schema": {
-                "$ref": "#/components/schemas/LoanUpdateRequest"
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "OK"
@@ -467,6 +492,52 @@
         },
         "additionalProperties": false
       },
+      "InvestorAliasDto": {
+        "type": "object",
+        "properties": {
+          "investorAliasId": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "investorAliasName": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdDtm": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "updatedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "updatedDtm": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvestorAliasSaveRequest": {
+        "type": "object",
+        "properties": {
+          "investorAliasName": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
       "InvestorAliasUpdateRequest": {
         "type": "object",
         "properties": {
@@ -474,63 +545,7 @@
             "type": "string",
             "nullable": true
           },
-          "userUpdatedDate": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "userUpdatedBy": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "InvestorDto": {
-        "type": "object",
-        "properties": {
-          "loanKey": {
-            "type": "integer",
-            "format": "int32"
-          },
-          "investorName": {
-            "type": "string",
-            "nullable": true
-          },
-          "investorAliasName": {
-            "type": "string",
-            "nullable": true
-          },
-          "userUpdatedDate": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "userUpdatedBy": {
-            "type": "string",
-            "nullable": true
-          }
-        },
-        "additionalProperties": false
-      },
-      "LoanUpdateRequest": {
-        "type": "object",
-        "properties": {
-          "loanAliasName": {
-            "type": "string",
-            "nullable": true
-          },
-          "loanRanking": {
-            "type": "integer",
-            "format": "int32",
-            "nullable": true
-          },
-          "userUpdatedDate": {
-            "type": "string",
-            "format": "date-time",
-            "nullable": true
-          },
-          "userUpdatedBy": {
+          "updatedBy": {
             "type": "string",
             "nullable": true
           }

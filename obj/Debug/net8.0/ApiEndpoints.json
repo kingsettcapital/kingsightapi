@@ -92,16 +92,16 @@
     ]
   },
   {
-    "ContainingType": "kingsightapi.Controllers.LoansController",
-    "Method": "Get",
-    "RelativePath": "api/Loans",
+    "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
+    "Method": "GetAll",
+    "RelativePath": "api/InvestorAlias",
     "HttpMethod": "GET",
     "IsController": true,
     "Order": 0,
     "Parameters": [],
     "ReturnTypes": [
       {
-        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.FundDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.InvestorAliasDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
         "MediaTypes": [
           "text/plain",
           "application/json",
@@ -112,37 +112,68 @@
     ]
   },
   {
-    "ContainingType": "kingsightapi.Controllers.LoansController",
-    "Method": "Put",
-    "RelativePath": "api/Loans/{loanKey}",
-    "HttpMethod": "PUT",
+    "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
+    "Method": "Save",
+    "RelativePath": "api/InvestorAlias",
+    "HttpMethod": "POST",
     "IsController": true,
     "Order": 0,
     "Parameters": [
       {
-        "Name": "loanKey",
-        "Type": "System.Int32",
-        "IsRequired": true
-      },
-      {
         "Name": "request",
-        "Type": "kingsightapi.Entities.LoanUpdateRequest",
+        "Type": "kingsightapi.Entities.InvestorAliasSaveRequest",
         "IsRequired": true
       }
     ],
-    "ReturnTypes": []
+    "ReturnTypes": [
+      {
+        "Type": "kingsightapi.Entities.InvestorAliasDto",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
   },
   {
-    "ContainingType": "kingsightapi.Controllers.LoansController",
-    "Method": "PutInvestorAlias",
-    "RelativePath": "api/Loans/{loanKey}/investor-alias",
+    "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
+    "Method": "GetById",
+    "RelativePath": "api/InvestorAlias/{investorAliasId}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "investorAliasId",
+        "Type": "System.Int64",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "kingsightapi.Entities.InvestorAliasDto",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
+    "Method": "Update",
+    "RelativePath": "api/InvestorAlias/{investorAliasId}",
     "HttpMethod": "PUT",
     "IsController": true,
     "Order": 0,
     "Parameters": [
       {
-        "Name": "loanKey",
-        "Type": "System.Int32",
+        "Name": "investorAliasId",
+        "Type": "System.Int64",
         "IsRequired": true
       },
       {
@@ -154,23 +185,19 @@
     "ReturnTypes": []
   },
   {
-    "ContainingType": "kingsightapi.Controllers.LoansController",
-    "Method": "GetInvestorDetails",
-    "RelativePath": "api/Loans/investor-details",
-    "HttpMethod": "GET",
+    "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
+    "Method": "Delete",
+    "RelativePath": "api/InvestorAlias/{investorAliasId}",
+    "HttpMethod": "DELETE",
     "IsController": true,
     "Order": 0,
-    "Parameters": [],
-    "ReturnTypes": [
+    "Parameters": [
       {
-        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.InvestorDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
-        "MediaTypes": [
-          "text/plain",
-          "application/json",
-          "text/json"
-        ],
-        "StatusCode": 200
+        "Name": "investorAliasId",
+        "Type": "System.Int64",
+        "IsRequired": true
       }
-    ]
+    ],
+    "ReturnTypes": []
   }
 ]

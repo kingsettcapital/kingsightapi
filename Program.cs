@@ -9,6 +9,7 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            builder.WebHost.UseUrls("https://localhost:7140"); // Set the URL for the API
 
             // Configuration
             var configuration = builder.Configuration;
@@ -26,9 +27,10 @@ namespace kingsightapi
                 });
             //builder.Services.AddScoped<DBService>();
             builder.Services.AddSingleton<IDBService, DBService>();
-            builder.Services.AddSingleton<IFundService, FundService>();
-            builder.Services.AddSingleton<ILoanService, LoanService>();
-            builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            //builder.Services.AddSingleton<IFundService, FundService>();
+            //builder.Services.AddSingleton<ILoanService, LoanService>();
+            //builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
 
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();

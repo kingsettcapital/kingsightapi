@@ -64,7 +64,7 @@ namespace kingsightapi.Entities
         public string UserUpdatedBy { get; init; } = string.Empty;
     }
 
-    public sealed class InvestorAliasUpdateRequest
+    public sealed class LoanInvestorAliasUpdateRequest
     {
         public string InvestorAliasName { get; init; } = string.Empty;
         public DateTime? UserUpdatedDate { get; init; }
