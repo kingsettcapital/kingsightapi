@@ -19,7 +19,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds?search=&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<PagedResult<FundListItemDto>>> GetAll(
         [FromQuery] string? search,
@@ -44,7 +43,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}")]
     public async Task<ActionResult<FundDetailDto>> GetByKey(int fundKey)
     {
@@ -66,7 +64,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/investors
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/investors")]
     public async Task<ActionResult<IReadOnlyList<FundInvestorDto>>> GetInvestors(int fundKey)
     {
