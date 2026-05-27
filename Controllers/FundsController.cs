@@ -1,63 +1,89 @@
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using kingsightapi.Services;
 using kingsightapi.Entities;
+using kingsightapi.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 
-namespace kingsightapi.Controllers
+namespace kingsightapi.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class FundsController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    public class FundsController : ControllerBase
+    private readonly IFundPortalService _service;
+    private readonly ILogger<FundsController> _logger;
+
+    public FundsController(IFundPortalService service, ILogger<FundsController> logger)
     {
-        private readonly IFundService _service;
-        private readonly ILogger<FundsController> _logger;
+        _service = service;
+        _logger = logger;
+    }
 
-        public FundsController(IFundService service, ILogger<FundsController> logger)
+    // GET: api/funds?search=&page=1&pageSize=50
+    [AllowAnonymous]
+    [HttpGet]
+    public async Task<ActionResult<PagedResult<FundListItemDto>>> GetAll(
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        try
         {
-            _service = service;
-            _logger = logger;
+            var result = await _service.GetFundsAsync(search, page, pageSize);
+            return Ok(result);
         }
-
-        // GET: api/funds
-        [HttpGet]
-        public async Task<ActionResult<List<FundDto>>> Get()
+        catch (OperationCanceledException)
         {
-            try
-            {
-                var result = await _service.GetFundsAsync();
-                return Ok(result);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("Get all funds cancelled");
-                return StatusCode(499); // Client Closed Request (non-standard) — indicates cancellation
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving funds");
-                return StatusCode(500, "An error occurred while retrieving funds.");
-            }
+            _logger.LogInformation("Get funds cancelled");
+            return StatusCode(499);
         }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving funds");
+            return StatusCode(500, "An error occurred while retrieving funds.");
+        }
+    }
 
-        //// GET: api/funds/{fundKey}
-        //[HttpGet("{fundKey:int}")]
-        //public async Task<ActionResult<FundDto>> GetByKey(int fundKey)
-        //{
-        //    try
-        //    {
-        //        var dto = await _service.GetByKeyAsync(fundKey, cancellationToken);
-        //        return dto is null ? NotFound() : Ok(dto);
-        //    }
-        //    catch (OperationCanceledException)
-        //    {
-        //        _logger.LogInformation("Get fund by key {FundKey} cancelled", fundKey);
-        //        return StatusCode(499);
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        _logger.LogError(ex, "Error retrieving fund {FundKey}", fundKey);
-        //        return StatusCode(500, "An error occurred while retrieving the fund.");
-        //    }
-        //}
+    // GET: api/funds/{fundKey}
+    [AllowAnonymous]
+    [HttpGet("{fundKey:int}")]
+    public async Task<ActionResult<FundDetailDto>> GetByKey(int fundKey)
+    {
+        try
+        {
+            var result = await _service.GetFundByKeyAsync(fundKey);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving the fund.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/investors
+    [AllowAnonymous]
+    [HttpGet("{fundKey:int}/investors")]
+    public async Task<ActionResult<IReadOnlyList<FundInvestorDto>>> GetInvestors(int fundKey)
+    {
+        try
+        {
+            var result = await _service.GetFundInvestorsAsync(fundKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get investors for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving investors for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund investors.");
+        }
     }
 }
