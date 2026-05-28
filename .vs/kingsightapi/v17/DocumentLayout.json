@@ -17,14 +17,6 @@
     {
       "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\controllers\\loanscontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:controllers\\loanscontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\services\\loanservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:services\\loanservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -34,7 +26,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 11,
+          "SelectedChildIndex": 9,
           "Children": [
             {
               "$type": "Bookmark",
@@ -70,8 +62,7 @@
               "RelativeToolTip": "Services\\InvestorAliasService.cs",
               "ViewState": "AgIAAKwAAAAAAAAAAAAjwLoAAAAIAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-26T01:41:20.351Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-26T01:41:20.351Z"
             },
             {
               "$type": "Document",
@@ -96,30 +87,6 @@
               "ViewState": "AgIAADEAAAAAAAAAAAAEwBUAAAARAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-25T23:45:57.257Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 4,
-              "Title": "LoansController.cs",
-              "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Controllers\\LoansController.cs",
-              "RelativeDocumentMoniker": "Controllers\\LoansController.cs",
-              "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Controllers\\LoansController.cs",
-              "RelativeToolTip": "Controllers\\LoansController.cs",
-              "ViewState": "AgIAAJcAAAAAAAAAAAAUwLYAAAADAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-25T23:45:47.756Z"
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "LoanService.cs",
-              "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Services\\LoanService.cs",
-              "RelativeDocumentMoniker": "Services\\LoanService.cs",
-              "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Services\\LoanService.cs",
-              "RelativeToolTip": "Services\\LoanService.cs",
-              "ViewState": "AgIAABgBAAAAAAAAAAAUwDcBAAADAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-25T23:45:38.727Z"
             },
             {
               "$type": "Document",
