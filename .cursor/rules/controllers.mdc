@@ -1,0 +1,118 @@
+---
+description: ASP.NET Core API controller patterns for kingsightapi
+globs: Controllers/**/*.cs
+alwaysApply: false
+---
+
+# Controllers
+
+## Boilerplate
+
+```csharp
+[ApiController]
+[Route("api/[controller]")]
+public class ExampleController : ControllerBase
+{
+    private readonly IExampleService _service;
+    private readonly ILogger<ExampleController> _logger;
+
+    public ExampleController(IExampleService service, ILogger<ExampleController> logger)
+    {
+        _service = service;
+        _logger = logger;
+    }
+}
+```
+
+- Namespace: `kingsightapi.Controllers`
+- Inject `I*Service` + `ILogger<TController>` only — no `SqlConnection` in controllers
+- Register new services in `Program.cs` before adding endpoints
+
+## Routes
+
+- Base route: `api/[controller]` (controller name drives URL, e.g. `LoansController` → `/api/loans`)
+- Use explicit route templates for sub-resources: `[HttpGet("investor-details")]`, `[HttpPut("{loanKey:int}/investor-alias")]`
+- Prefer `int` route constraints for numeric keys
+
+## Request validation
+
+Return `BadRequest` with a clear message when:
+
+- Body is null
+- Required collections are null or empty
+- Required fields are missing
+
+Do this in the controller before calling the service.
+
+## Response conventions
+
+| Outcome | Status |
+|---------|--------|
+| Success with body | `Ok(result)` |
+| Update succeeded | `NoContent()` |
+| Row not found | `NotFound()` |
+| Client cancelled | `499` (non-standard; existing pattern) |
+| Unhandled error | `500` with generic message (no exception details to client) |
+
+## Error handling
+
+Wrap action bodies in try/catch:
+
+```csharp
+catch (OperationCanceledException)
+{
+    _logger.LogInformation("… cancelled");
+    return StatusCode(499);
+}
+catch (Exception ex)
+{
+    _logger.LogError(ex, "Error …");
+    return StatusCode(500, "An error occurred while …");
+}
+```
+
+Use structured logging placeholders (`{LoanKey}`, `{Count}`) — not string interpolation in log messages.
+
+## Comments & readability
+
+Every public action must have a route comment immediately above it (matches existing controllers):
+
+```csharp
+// GET: api/loans/investor-details
+[HttpGet("investor-details")]
+public async Task<ActionResult<List<InvestorDto>>> GetInvestorDetails()
+```
+
+Use the HTTP verb and full path (including route template segments), not just the method name.
+
+### When to add extra comments
+
+Add a short `//` line when the code is not self-explanatory:
+
+- Duplicate routes for Angular (`// alias and aliases — Angular client uses plural`)
+- Non-standard status codes (`// 499 — client closed request / cancellation`)
+- Validation rules that mirror product wording (`// batch body must include at least one investor`)
+- Group related actions with a blank line and optional section header:
+
+```csharp
+// --- Loan alias batch ---
+
+// GET: api/loans/loanalias
+```
+
+### Controller class header (optional)
+
+For new controllers, a one-line class comment is fine if the name alone is ambiguous:
+
+```csharp
+// Exposes mort.dim_investor read and alias batch update for the Kingsight UI.
+[ApiController]
+```
+
+### What not to comment
+
+- Constructor parameter assignments
+- Standard try/catch structure (documented in this rule file)
+- `return Ok(result)` when the route comment and method name already describe the action
+
+Prefer improving `BadRequest` message text over commenting `if (request is null)`.

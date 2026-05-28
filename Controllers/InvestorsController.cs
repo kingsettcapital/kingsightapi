@@ -19,6 +19,7 @@ public class InvestorsController : ControllerBase
     }
 
     // GET: api/investors?search=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<PagedResult<InvestorListItemDto>>> GetAll(
         [FromQuery] string? search,
@@ -43,6 +44,7 @@ public class InvestorsController : ControllerBase
     }
 
     // GET: api/investors/{investorKey}
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}")]
     public async Task<ActionResult<InvestorDetailDto>> GetByKey(long investorKey)
     {
@@ -64,6 +66,7 @@ public class InvestorsController : ControllerBase
     }
 
     // GET: api/investors/{investorKey}/investments
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/investments")]
     public async Task<ActionResult<IReadOnlyList<InvestorInvestmentDto>>> GetInvestments(long investorKey)
     {

@@ -20,8 +20,9 @@ namespace kingsightapi
                     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
                 });
 
-            // Validates Bearer tokens issued by Entra for this API (MSAL acquires them on the Angular app).
-            builder.Services.AddEntraAuthentication(configuration);
+            builder.Services.AddEntraAuthentication(
+                configuration,
+                allowAnonymousForLocalTesting: builder.Environment.IsDevelopment());
 
             builder.Services.AddSingleton<IDBService, DBService>();
             builder.Services.AddSingleton<IFundService, FundService>();
@@ -45,14 +46,33 @@ namespace kingsightapi
             });
 
             var corsOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? ["http://localhost:4200"];
+                ?? ["http://localhost:4200", "https://localhost:4200"];
+            var isDevelopment = builder.Environment.IsDevelopment();
 
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAngularDev", policy =>
-                    policy.WithOrigins(corsOrigins)
-                        .AllowAnyHeader()
-                        .AllowAnyMethod());
+                {
+                    if (isDevelopment)
+                    {
+                        policy.SetIsOriginAllowed(origin =>
+                        {
+                            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
+                            {
+                                return false;
+                            }
+
+                            return uri.Host is "localhost" or "127.0.0.1";
+                        });
+                    }
+                    else
+                    {
+                        policy.WithOrigins(corsOrigins);
+                    }
+
+                    policy.AllowAnyHeader()
+                        .AllowAnyMethod();
+                });
             });
 
             var app = builder.Build();
@@ -64,7 +84,12 @@ namespace kingsightapi
                 app.UseSwaggerUI();
             }
 
-            app.UseHttpsRedirection();
+            if (!app.Environment.IsDevelopment())
+            {
+                app.UseHttpsRedirection();
+            }
+
+            app.UseRouting();
             app.UseCors("AllowAngularDev");
 
             app.UseAuthentication();

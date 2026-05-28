@@ -1,0 +1,84 @@
+---
+description: Kingsight API project context, architecture, and cross-cutting conventions
+alwaysApply: true
+---
+
+# Kingsight API — Project Overview
+
+ASP.NET Core 8 Web API (`kingsightapi`) that exposes read/update endpoints for mortgage dimension data in Microsoft Fabric, consumed by an Angular frontend.
+
+## Structure
+
+| Folder | Purpose |
+|--------|---------|
+| `Controllers/` | Thin HTTP layer — validation, status codes, logging |
+| `Services/` | Business logic, raw SQL, `I*Service` interfaces + `sealed` implementations |
+| `Entities/` | DTOs, request/response models (no EF entities) |
+| `Program.cs` | DI, CORS, Swagger, JSON options |
+
+## Stack
+
+- .NET 8, nullable enabled, implicit usings
+- `Microsoft.Data.SqlClient` against Fabric (`FabricConnectionString` in config)
+- Swashbuckle for OpenAPI in Development
+- No ORM — parameterized SQL only
+
+## Schemas
+
+- `mort.dim_loan`, `mort.dim_investor` — loan and investor dimensions
+- `wh_enterprise_gold.dbo.dim_fund` — fund dimension
+
+Filter current rows with `is_current = 1` where applicable.
+
+## DI & lifetime
+
+Register services as **Singleton** in `Program.cs`:
+
+```csharp
+builder.Services.AddSingleton<IInvestorService, InvestorService>();
+```
+
+Match existing registrations when adding new services.
+
+## JSON & Angular
+
+- Serialize responses with **camelCase** (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`)
+- Accept camelCase request bodies (`PropertyNameCaseInsensitive = true`)
+- CORS policy `AllowAngularDev` allows `http://localhost:4200`
+
+Support plural route aliases when Angular uses them (e.g. `alias` and `aliases` on investor updates).
+
+## Security
+
+- Never commit connection strings or secrets in `appsettings.json`; use User Secrets locally and secure config in deployed environments
+- Do not log passwords or full connection strings
+
+## Comments & readability (project-wide)
+
+Code should be understandable without reading every line. Prefer clear names first; add comments only where they add context names cannot carry.
+
+| Layer | Comment style |
+|-------|----------------|
+| `Controllers/` | `// GET: api/...` above each action; brief notes for non-obvious routes (Angular aliases, status codes) |
+| `Services/` | One-line summary above SQL constants; section headers for complex methods |
+| `Entities/` | `/// <summary>` on public DTOs and non-obvious properties |
+| `Program.cs` | Section comments for DI, CORS, JSON, pipeline blocks |
+
+**Do**
+
+- Explain *why* (business rule, Angular contract, Fabric filter such as `is_current = 1`)
+- Keep comments up to date when behavior changes
+- Use full sentences for multi-line or XML summaries
+
+**Do not**
+
+- Restate obvious code (`// increment i`, `// return Ok`)
+- Leave large blocks of commented-out code — delete or ask before restoring
+- Use comments instead of renaming unclear variables or methods
+
+## Scope of changes
+
+- Keep diffs minimal and localized to the requested feature
+- Reuse existing service/controller patterns before introducing new abstractions
+- Do not modify `FundServiceOld.cs` or commented legacy code unless explicitly asked
+- When adding features, include comments per the table above so new code matches existing readability
