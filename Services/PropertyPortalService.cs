@@ -244,26 +244,31 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append(" else 'Inactive' ");
         sql.Append(" end as fund_status, ");
         sql.Append(" df.fund_start_date, ");
-        sql.Append(" sum(isnull(fi.invested_amount, 0)) as invested_amount_total, ");
-        sql.Append(" sum(isnull(fi.invested_amount_fmv, 0)) as invested_amount_fmv_total, ");
-        WarehouseSql.AppendReturnPercentFromFactSums(sql, "fi");
-        sql.Append(" as total_return_percent ");
+        sql.Append(" isnull(committed.invested_amount_total, 0) as invested_amount_total, ");
+        sql.Append(" isnull(currentvals.invested_amount_fmv_total, 0) as invested_amount_fmv_total, ");
+        sql.Append(" case ");
+        sql.Append(" when abs(isnull(currentvals.return_amount_total, 0)) > 0 ");
+        sql.Append(" then ((isnull(currentvals.return_amount_fmv_total, 0) - isnull(currentvals.return_amount_total, 0)) / abs(currentvals.return_amount_total)) * 100.0 ");
+        sql.Append(" else null ");
+        sql.Append(" end as total_return_percent ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
         WarehouseSql.AppendPropertyFundJoin(sql, "p", "df");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "df");
-        sql.Append($" left join {WarehouseTables.FactInvestment} fi on fi.fund_key = df.fund_key ");
+        sql.Append(" outer apply ( ");
+        sql.Append(" select sum(isnull(fc.committed_amount, 0)) as invested_amount_total ");
+        sql.Append($" from {WarehouseTables.FactCommitted} fc where fc.fund_key = df.fund_key ");
+        sql.Append(" ) committed ");
+        sql.Append(" outer apply ( ");
+        sql.Append(" select ");
+        sql.Append(" sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) as invested_amount_fmv_total, ");
+        sql.Append(" sum(isnull(fi.invested_amount, 0)) as return_amount_total, ");
+        sql.Append(" sum(isnull(fi.invested_amount_fmv, 0)) as return_amount_fmv_total ");
+        sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = df.fund_key ");
+        sql.Append(" ) currentvals ");
         sql.Append(" where p.property_key = @propertyKey ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        sql.Append(" group by ");
-        sql.Append(" df.fund_key, ");
-        sql.Append(" df.fund_name, ");
-        sql.Append(" df.fund_type_name, ");
-        sql.Append(" df.fund_strategy_name, ");
-        sql.Append(" df.dissolution_date, ");
-        sql.Append(" df.is_current, ");
-        sql.Append(" df.fund_start_date ");
         sql.Append(" order by df.fund_name ");
 
         await using var command = new SqlCommand(sql.ToString(), connection)
@@ -282,7 +287,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
             var fundStrategy = reader.GetStringOrEmpty("fund_strategy_name");
             var status = reader.GetStringOrEmpty("fund_status");
             var fundStartDate = reader.GetNullableDateTime("fund_start_date");
-            var totalValue = reader.GetDecimalOrDefault("invested_amount_fmv_total");
+            var totalValue = reader.GetDecimalOrDefault("invested_amount_total");
             var totalReturnPercent = reader.GetNullableDecimal("total_return_percent");
 
             items.Add(new PropertyInvestmentDto
