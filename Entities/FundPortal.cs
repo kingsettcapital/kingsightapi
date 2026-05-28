@@ -26,6 +26,7 @@ public sealed class FundSummaryDto
     public string FundType { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
     public decimal CurrentValue { get; init; }
+    public decimal? CapitalDeployed { get; init; }
     public decimal? TotalReturnPercent { get; init; }
     public int Assets { get; init; }
     public int Investors { get; init; }

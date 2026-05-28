@@ -113,7 +113,7 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" select ");
         sql.Append(" (select sum(isnull(fc.committed_amount, 0)) ");
         sql.Append($" from {WarehouseTables.FactCommitted} fc where fc.fund_key = f.fund_key) as total_value_total, ");
-        sql.Append(" (select sum(case when lower(isnull(f.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) ");
+        sql.Append(" (select case when lower(isnull(f.fund_type_name, '')) = 'unitized' then sum(isnull(fi.invested_units, 0)) else sum(isnull(fi.invested_amount, 0)) end ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = f.fund_key) as current_value_total, ");
         sql.Append(" (select sum(isnull(fi.invested_amount, 0)) ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = f.fund_key) as invested_amount_total, ");
@@ -186,6 +186,7 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" f.fund_start_date, ");
         sql.Append(" isnull(f.is_sidecar, 0) as is_sidecar, ");
         sql.Append(" isnull(agg.total_value_total, 0) as total_value_total, ");
+        sql.Append(" isnull(agg.invested_amount_total, 0) as invested_amount_total, ");
         sql.Append(" isnull(agg.current_value_total, 0) as current_value_total, ");
         WarehouseSql.AppendReturnPercentExpression(sql);
         sql.Append(" as total_return_percent, ");
@@ -196,7 +197,7 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" select ");
         sql.Append(" (select sum(isnull(fc.committed_amount, 0)) ");
         sql.Append($" from {WarehouseTables.FactCommitted} fc where fc.fund_key = f.fund_key) as total_value_total, ");
-        sql.Append(" (select sum(case when lower(isnull(f.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) ");
+        sql.Append(" (select case when lower(isnull(f.fund_type_name, '')) = 'unitized' then sum(isnull(fi.invested_units, 0)) else sum(isnull(fi.invested_amount, 0)) end ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = f.fund_key) as current_value_total, ");
         sql.Append(" (select sum(isnull(fi.invested_amount, 0)) ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = f.fund_key) as invested_amount_total, ");
@@ -246,9 +247,10 @@ public sealed class FundPortalService : IFundPortalService
         var fundStartDate = reader.GetNullableDateTime("fund_start_date");
         var isSidecar = reader.GetInt32OrDefault("is_sidecar") == 1;
         var totalValue = reader.GetDecimalOrDefault("total_value_total");
+        var investedAmount = reader.GetDecimalOrDefault("invested_amount_total");
         var currentValue = reader.GetDecimalOrDefault("current_value_total");
-        var capitalDeployedPercent = totalValue > 0m
-            ? (currentValue / totalValue) * 100m
+        var capitalDeployedPercent = Math.Abs(totalValue) > 0m
+            ? Math.Min(100m, Math.Round((Math.Abs(investedAmount) / Math.Abs(totalValue)) * 100m, 2))
             : (decimal?)null;
         var totalReturnPercent = reader.GetNullableDecimal("total_return_percent");
         var assetsCount = reader.GetInt32OrDefault("assets_count");
@@ -263,6 +265,7 @@ public sealed class FundPortalService : IFundPortalService
             FundType = fundType,
             Status = status,
             CurrentValue = currentValue,
+            CapitalDeployed = capitalDeployedPercent,
             TotalReturnPercent = totalReturnPercent,
             Assets = assetsCount,
             Investors = investorsCount
@@ -279,9 +282,8 @@ public sealed class FundPortalService : IFundPortalService
         var financialSummary = new List<DynamicFieldDto>
         {
             DisplayFieldBuilder.ToDynamicField("totalValue", DisplayFieldBuilder.Money(totalValue)),
-            DisplayFieldBuilder.ToDynamicField("investedAmount", DisplayFieldBuilder.Money(totalValue)),
+            DisplayFieldBuilder.ToDynamicField("investedAmount", DisplayFieldBuilder.Money(investedAmount)),
             DisplayFieldBuilder.ToDynamicField("currentValue", DisplayFieldBuilder.Money(currentValue)),
-            DisplayFieldBuilder.ToDynamicField("capitalDeployed", DisplayFieldBuilder.Percent(capitalDeployedPercent)),
             DisplayFieldBuilder.ToDynamicField("totalReturn", DisplayFieldBuilder.Percent(totalReturnPercent)),
             DisplayFieldBuilder.ToDynamicField("isSidecar", DisplayFieldBuilder.Boolean(isSidecar))
         };
@@ -333,15 +335,9 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append($" from {WarehouseTables.FactCommitted} fc where fc.fund_key = @fundKey and fc.investor_key = i.investor_key ");
         sql.Append(" ) committed ");
         sql.Append(" outer apply ( ");
-        sql.Append(" select sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) as total_invested_fmv ");
+        sql.Append(" select case when lower(isnull(df.fund_type_name, '')) = 'unitized' then sum(isnull(fi.invested_units, 0)) else sum(isnull(fi.invested_amount, 0)) end as total_invested_fmv ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = @fundKey and fi.investor_key = i.investor_key ");
         sql.Append(" ) currentvals ");
-        sql.Append(" group by ");
-        sql.Append(" i.investor_key, ");
-        sql.Append(" i.investor_name, ");
-        sql.Append(" i.investor_type_name, ");
-        sql.Append(" i.is_current, ");
-        sql.Append(" i.valid_from ");
         sql.Append(" order by i.investor_name ");
 
         await using var connection = new SqlConnection(_connectionString);

@@ -245,7 +245,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append(" end as fund_status, ");
         sql.Append(" df.fund_start_date, ");
         sql.Append(" isnull(committed.invested_amount_total, 0) as invested_amount_total, ");
-        sql.Append(" isnull(currentvals.invested_amount_fmv_total, 0) as invested_amount_fmv_total, ");
+        sql.Append(" isnull(currentvals.invested_amount_fmv_total, 0) as total_value, ");
         sql.Append(" case ");
         sql.Append(" when abs(isnull(currentvals.return_amount_total, 0)) > 0 ");
         sql.Append(" then ((isnull(currentvals.return_amount_fmv_total, 0) - isnull(currentvals.return_amount_total, 0)) / abs(currentvals.return_amount_total)) * 100.0 ");
@@ -261,7 +261,10 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append(" ) committed ");
         sql.Append(" outer apply ( ");
         sql.Append(" select ");
-        sql.Append(" sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) as invested_amount_fmv_total, ");
+        sql.Append(" case ");
+        sql.Append(" when lower(isnull(df.fund_type_name, '')) = 'unitized' then sum(isnull(fi.invested_units, 0)) ");
+        sql.Append(" else sum(isnull(fi.invested_amount, 0)) ");
+        sql.Append(" end as invested_amount_fmv_total, ");
         sql.Append(" sum(isnull(fi.invested_amount, 0)) as return_amount_total, ");
         sql.Append(" sum(isnull(fi.invested_amount_fmv, 0)) as return_amount_fmv_total ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.fund_key = df.fund_key ");
@@ -287,7 +290,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
             var fundStrategy = reader.GetStringOrEmpty("fund_strategy_name");
             var status = reader.GetStringOrEmpty("fund_status");
             var fundStartDate = reader.GetNullableDateTime("fund_start_date");
-            var totalValue = reader.GetDecimalOrDefault("invested_amount_total");
+            var totalValue = reader.GetDecimalOrDefault("total_value");
             var totalReturnPercent = reader.GetNullableDecimal("total_return_percent");
 
             items.Add(new PropertyInvestmentDto

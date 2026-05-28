@@ -344,7 +344,7 @@ public sealed class InvestorPortalService : IInvestorPortalService
         sql.Append(" ) committed ");
         sql.Append(" outer apply ( ");
         sql.Append(" select ");
-        sql.Append(" sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) as invested_amount_fmv_total, ");
+        sql.Append(" case when lower(isnull(df.fund_type_name, '')) = 'unitized' then sum(isnull(fi.invested_units, 0)) else sum(isnull(fi.invested_amount, 0)) end as invested_amount_fmv_total, ");
         sql.Append(" sum(isnull(fi.invested_amount, 0)) as return_amount_total, ");
         sql.Append(" sum(isnull(fi.invested_amount_fmv, 0)) as return_amount_fmv_total ");
         sql.Append($" from {WarehouseTables.FactInvestment} fi where fi.investor_key = @investorKey and fi.fund_key = df.fund_key ");
