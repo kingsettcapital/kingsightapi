@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+6c2899319adc2e222b31efb4784ba6860f526e65")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+88e9b0839803562c9406528f6fdfb81342cf6462")]
 [assembly: System.Reflection.AssemblyProductAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyTitleAttribute("kingsightapi")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
