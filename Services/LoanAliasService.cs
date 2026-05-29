@@ -19,8 +19,6 @@ namespace kingsightapi.Services
         private const string ListSql = """
             select loan_alias_id,
                    loan_alias_name,
-                   collateral_value,
-                   security_value,
                    created_by,
                    created_dtm,
                    updated_by,
@@ -32,8 +30,6 @@ namespace kingsightapi.Services
         private const string GetByIdSql = """
             select loan_alias_id,
                    loan_alias_name,
-                   collateral_value,
-                   security_value,
                    created_by,
                    created_dtm,
                    updated_by,
@@ -49,14 +45,13 @@ namespace kingsightapi.Services
 
         private const string InsertSql = """
             insert into mort.loan_alias_master
-                (loan_alias_id, loan_alias_name, security_value, created_by, created_dtm)
-            values (@loan_alias_id, @loan_alias_name, @security_value, @created_by, getutcdate())
+                (loan_alias_id, loan_alias_name, created_by, created_dtm)
+            values (@loan_alias_id, @loan_alias_name, @created_by, getutcdate())
             """;
 
         private const string UpdateSql = """
             update mort.loan_alias_master
             set loan_alias_name = @loan_alias_name,
-                security_value = @security_value,
                 updated_by = @updated_by,
                 updated_dtm = getutcdate()
             where loan_alias_id = @loan_alias_id
@@ -138,7 +133,6 @@ namespace kingsightapi.Services
                 };
                 command.Parameters.AddWithValue("@loan_alias_id", newId);
                 command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-                command.Parameters.AddWithValue("@security_value", (object?)request.SecurityValue ?? DBNull.Value);
                 command.Parameters.AddWithValue("@created_by", request.CreatedBy);
 
                 await command.ExecuteNonQueryAsync();
@@ -176,7 +170,6 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
             command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-            command.Parameters.AddWithValue("@security_value", (object?)request.SecurityValue ?? DBNull.Value);
             command.Parameters.AddWithValue("@updated_by", request.UpdatedBy);
 
             var affectedRows = await command.ExecuteNonQueryAsync();
@@ -218,21 +211,11 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static (
-            int Id,
-            int Name,
-            int CollateralValue,
-            int SecurityValue,
-            int CreatedBy,
-            int CreatedDtm,
-            int UpdatedBy,
-            int UpdatedDtm) GetOrdinals(SqlDataReader reader)
+        private static (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) GetOrdinals(SqlDataReader reader)
         {
             return (
                 reader.GetOrdinal("loan_alias_id"),
                 reader.GetOrdinal("loan_alias_name"),
-                reader.GetOrdinal("collateral_value"),
-                reader.GetOrdinal("security_value"),
                 reader.GetOrdinal("created_by"),
                 reader.GetOrdinal("created_dtm"),
                 reader.GetOrdinal("updated_by"),
@@ -241,14 +224,12 @@ namespace kingsightapi.Services
 
         private static LoanAliasDto MapRow(
             SqlDataReader reader,
-            (int Id, int Name, int CollateralValue, int SecurityValue, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) ordinals)
+            (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) ordinals)
         {
             return new LoanAliasDto
             {
                 LoanAliasId = reader.IsDBNull(ordinals.Id) ? 0L : Convert.ToInt64(reader.GetValue(ordinals.Id)),
                 LoanAliasName = reader.IsDBNull(ordinals.Name) ? string.Empty : reader.GetString(ordinals.Name),
-                CollateralValue = reader.IsDBNull(ordinals.CollateralValue) ? null : Convert.ToDecimal(reader.GetValue(ordinals.CollateralValue)),
-                SecurityValue = reader.IsDBNull(ordinals.SecurityValue) ? null : Convert.ToDecimal(reader.GetValue(ordinals.SecurityValue)),
                 CreatedBy = reader.IsDBNull(ordinals.CreatedBy) ? string.Empty : reader.GetString(ordinals.CreatedBy),
                 CreatedDtm = reader.IsDBNull(ordinals.CreatedDtm) ? null : reader.GetDateTime(ordinals.CreatedDtm),
                 UpdatedBy = reader.IsDBNull(ordinals.UpdatedBy) ? string.Empty : reader.GetString(ordinals.UpdatedBy),
