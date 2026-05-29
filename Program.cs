@@ -26,11 +26,13 @@ namespace kingsightapi
                 allowAnonymousForLocalTesting: builder.Environment.IsDevelopment());
 
             builder.Services.AddSingleton<IDBService, DBService>();
-            //builder.Services.AddSingleton<IFundService, FundService>();
-            //builder.Services.AddSingleton<ILoanService, LoanService>();
-            //builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<IFundService, FundService>();
+            builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<IInvestorPortalService, InvestorPortalService>();
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
+            builder.Services.AddSingleton<IFundPortalService, FundPortalService>();
+            builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
