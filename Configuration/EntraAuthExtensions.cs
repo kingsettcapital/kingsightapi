@@ -19,29 +19,18 @@ public static class EntraAuthExtensions
     /// </summary>
     public static IServiceCollection AddEntraAuthentication(
         this IServiceCollection services,
-        IConfiguration configuration,
-        bool allowAnonymousForLocalTesting = false)
+        IConfiguration configuration)
     {
-        if (allowAnonymousForLocalTesting)
-        {
-            services.AddAuthentication();
-        }
-        else
-        {
-            services
-                .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-                .AddMicrosoftIdentityWebApi(configuration.GetSection(AzureAdSectionName));
-        }
+        services
+            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddMicrosoftIdentityWebApi(configuration.GetSection(AzureAdSectionName));
 
         services.AddAuthorization(options =>
         {
-            if (!allowAnonymousForLocalTesting)
-            {
-                // Require a valid token on all endpoints unless [AllowAnonymous].
-                options.FallbackPolicy = new AuthorizationPolicyBuilder()
-                    .RequireAuthenticatedUser()
-                    .Build();
-            }
+            // Require a valid token on all endpoints unless [AllowAnonymous].
+            options.FallbackPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build();
         });
 
         return services;

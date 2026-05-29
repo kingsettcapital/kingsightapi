@@ -21,9 +21,7 @@ namespace kingsightapi
                     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
                 });
 
-            builder.Services.AddEntraAuthentication(
-                configuration,
-                allowAnonymousForLocalTesting: builder.Environment.IsDevelopment());
+            builder.Services.AddEntraAuthentication(configuration);
 
             builder.Services.AddSingleton<IDBService, DBService>();
             builder.Services.AddSingleton<IFundService, FundService>();
@@ -47,33 +45,14 @@ namespace kingsightapi
             });
 
             var corsOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? ["http://localhost:4200", "https://localhost:4200"];
-            var isDevelopment = builder.Environment.IsDevelopment();
+                ?? ["http://localhost:4200"];
 
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAngularDev", policy =>
-                {
-                    if (isDevelopment)
-                    {
-                        policy.SetIsOriginAllowed(origin =>
-                        {
-                            if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri))
-                            {
-                                return false;
-                            }
-
-                            return uri.Host is "localhost" or "127.0.0.1";
-                        });
-                    }
-                    else
-                    {
-                        policy.WithOrigins(corsOrigins);
-                    }
-
-                    policy.AllowAnyHeader()
-                        .AllowAnyMethod();
-                });
+                    policy.WithOrigins(corsOrigins)
+                        .AllowAnyHeader()
+                        .AllowAnyMethod());
             });
 
             var app = builder.Build();
@@ -85,11 +64,8 @@ namespace kingsightapi
                 app.UseSwaggerUI();
             }
 
-            if (!app.Environment.IsDevelopment())
-            {
-                app.UseHttpsRedirection();
-            }
-
+            app.UseHttpsRedirection();
+            
             app.UseRouting();
             app.UseCors("AllowAngularDev");
 
