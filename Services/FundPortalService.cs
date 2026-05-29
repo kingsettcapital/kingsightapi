@@ -264,6 +264,7 @@ public sealed class FundPortalService : IFundPortalService
             FundName = fundName,
             FundType = fundType,
             Status = status,
+            TotalValue  = totalValue,
             CurrentValue = currentValue,
             CapitalDeployed = capitalDeployedPercent,
             TotalReturnPercent = totalReturnPercent,
