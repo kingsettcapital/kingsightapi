@@ -10,6 +10,7 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            builder.WebHost.UseUrls("https://localhost:7140"); // Set the URL for the API
 
             var configuration = builder.Configuration;
 
@@ -25,13 +26,11 @@ namespace kingsightapi
                 allowAnonymousForLocalTesting: builder.Environment.IsDevelopment());
 
             builder.Services.AddSingleton<IDBService, DBService>();
-            builder.Services.AddSingleton<IFundService, FundService>();
-            builder.Services.AddSingleton<ILoanService, LoanService>();
-            builder.Services.AddSingleton<IInvestorService, InvestorService>();
-            builder.Services.AddSingleton<ILoanFormService, LoanFormService>();
-            builder.Services.AddSingleton<IInvestorPortalService, InvestorPortalService>();
-            builder.Services.AddSingleton<IFundPortalService, FundPortalService>();
-            builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
+            //builder.Services.AddSingleton<IFundService, FundService>();
+            //builder.Services.AddSingleton<ILoanService, LoanService>();
+            //builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
+            builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
