@@ -10,7 +10,7 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
-            builder.WebHost.UseUrls("https://localhost:7140"); // Set the URL for the API
+            builder.WebHost.UseUrls("http://localhost:7140"); // Set the URL for the API
 
             var configuration = builder.Configuration;
 
