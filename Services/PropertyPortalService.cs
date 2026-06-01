@@ -7,7 +7,7 @@ namespace kingsightapi.Services;
 
 public interface IPropertyPortalService
 {
-    Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize);
+    Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize, string? fundCode);
     Task<PropertyDetailDto?> GetPropertyByKeyAsync(long propertyKey);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
 }
@@ -24,11 +24,11 @@ public sealed class PropertyPortalService : IPropertyPortalService
         _logger = logger;
     }
 
-    public async Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize)
+    public async Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize, string? fundCode)
     {
         try
         {
-            return await GetPropertiesInternalAsync(search, page, pageSize);
+            return await GetPropertiesInternalAsync(search, page, pageSize, fundCode);
         }
         catch (OperationCanceledException)
         {
@@ -37,7 +37,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving properties. Search={Search}, Page={Page}, PageSize={PageSize}", search, page, pageSize);
+            _logger.LogError(ex, "Error retrieving properties. Search={Search}, FundCode={FundCode}, Page={Page}, PageSize={PageSize}", search, fundCode, page, pageSize);
             throw;
         }
     }
@@ -78,10 +78,11 @@ public sealed class PropertyPortalService : IPropertyPortalService
         }
     }
 
-    private async Task<PagedResult<PropertyListItemDto>> GetPropertiesInternalAsync(string? search, int page, int pageSize)
+    private async Task<PagedResult<PropertyListItemDto>> GetPropertiesInternalAsync(string? search, int page, int pageSize, string? fundCode)
     {
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var fundCodeTerm = string.IsNullOrWhiteSpace(fundCode) ? null : fundCode.Trim();
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -92,12 +93,14 @@ public sealed class PropertyPortalService : IPropertyPortalService
         countSql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
         WarehouseSql.AppendPropertySearchFilter(countSql, "p");
+        WarehouseSql.AppendFundCodeSearchFilter(countSql, "p");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
         countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        countCommand.Parameters.AddWithValue("@fund_code", (object?)fundCodeTerm ?? DBNull.Value);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
         var sql = new StringBuilder();
@@ -106,6 +109,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertySearchFilter(sql, "p");
+        WarehouseSql.AppendFundCodeSearchFilter(sql, "p");
         sql.Append(" order by p.property_name ");
         sql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -114,6 +118,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        command.Parameters.AddWithValue("@fund_code", (object?)fundCodeTerm ?? DBNull.Value);
         command.Parameters.AddWithValue("@offset", offset);
         command.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 

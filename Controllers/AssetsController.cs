@@ -18,16 +18,17 @@ public class AssetsController : ControllerBase
         _logger = logger;
     }
 
-    // GET: api/assets?search=&page=1&pageSize=50
+    // GET: api/assets?search=&fundCode=&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PagedResult<PropertyListItemDto>>> GetAll(
         [FromQuery] string? search,
+        [FromQuery] string? fundCode,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
         try
         {
-            var result = await _service.GetPropertiesAsync(search, page, pageSize);
+            var result = await _service.GetPropertiesAsync(search, page, pageSize, fundCode);
             return Ok(result);
         }
         catch (OperationCanceledException)

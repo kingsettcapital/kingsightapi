@@ -81,7 +81,13 @@ internal static class WarehouseSql
         sql.Append($" or isnull({propertyAlias}.province, '') like '%' + @search + '%' ");
         sql.Append($" or isnull({propertyAlias}.asset_type, '') like '%' + @search + '%' ");
         sql.Append($" or isnull({propertyAlias}.property_code, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({propertyAlias}.fund, '') like '%' + @search + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendFundCodeSearchFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@fund_code is null ");
+        sql.Append($" or {propertyAlias}.fund like '%' + @fund_code + '%' ");
         sql.Append(" ) ");
     }
 
