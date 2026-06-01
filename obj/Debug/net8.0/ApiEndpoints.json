@@ -1,97 +1,5 @@
 [
   {
-    "ContainingType": "kingsightapi.Controllers.FundsController",
-    "Method": "Get",
-    "RelativePath": "api/Funds",
-    "HttpMethod": "GET",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [],
-    "ReturnTypes": [
-      {
-        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.FundDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
-        "MediaTypes": [
-          "text/plain",
-          "application/json",
-          "text/json"
-        ],
-        "StatusCode": 200
-      }
-    ]
-  },
-  {
-    "ContainingType": "kingsightapi.Controllers.InvestorController",
-    "Method": "GetAll",
-    "RelativePath": "api/Investor",
-    "HttpMethod": "GET",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [],
-    "ReturnTypes": [
-      {
-        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.DimInvestorDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
-        "MediaTypes": [
-          "text/plain",
-          "application/json",
-          "text/json"
-        ],
-        "StatusCode": 200
-      }
-    ]
-  },
-  {
-    "ContainingType": "kingsightapi.Controllers.InvestorController",
-    "Method": "PutAliases",
-    "RelativePath": "api/Investor/alias",
-    "HttpMethod": "PUT",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [
-      {
-        "Name": "request",
-        "Type": "kingsightapi.Entities.DimInvestorAliasBatchUpdateRequest",
-        "IsRequired": true
-      }
-    ],
-    "ReturnTypes": [
-      {
-        "Type": "kingsightapi.Entities.DimInvestorAliasBatchUpdateResult",
-        "MediaTypes": [
-          "text/plain",
-          "application/json",
-          "text/json"
-        ],
-        "StatusCode": 200
-      }
-    ]
-  },
-  {
-    "ContainingType": "kingsightapi.Controllers.InvestorController",
-    "Method": "PutAliases",
-    "RelativePath": "api/Investor/aliases",
-    "HttpMethod": "PUT",
-    "IsController": true,
-    "Order": 0,
-    "Parameters": [
-      {
-        "Name": "request",
-        "Type": "kingsightapi.Entities.DimInvestorAliasBatchUpdateRequest",
-        "IsRequired": true
-      }
-    ],
-    "ReturnTypes": [
-      {
-        "Type": "kingsightapi.Entities.DimInvestorAliasBatchUpdateResult",
-        "MediaTypes": [
-          "text/plain",
-          "application/json",
-          "text/json"
-        ],
-        "StatusCode": 200
-      }
-    ]
-  },
-  {
     "ContainingType": "kingsightapi.Controllers.InvestorAliasController",
     "Method": "GetAll",
     "RelativePath": "api/InvestorAlias",
@@ -194,6 +102,156 @@
     "Parameters": [
       {
         "Name": "investorAliasId",
+        "Type": "System.Int64",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.InvestorsController",
+    "Method": "GetAll",
+    "RelativePath": "api/Investors",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.InvestorDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.InvestorsController",
+    "Method": "Update",
+    "RelativePath": "api/Investors/{investorKey}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "investorKey",
+        "Type": "System.Int64",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "kingsightapi.Entities.InvestorUpdateRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.LoanAliasController",
+    "Method": "GetAll",
+    "RelativePath": "api/LoanAlias",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [],
+    "ReturnTypes": [
+      {
+        "Type": "System.Collections.Generic.List\u00601[[kingsightapi.Entities.LoanAliasDto, kingsightapi, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.LoanAliasController",
+    "Method": "Save",
+    "RelativePath": "api/LoanAlias",
+    "HttpMethod": "POST",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "request",
+        "Type": "kingsightapi.Entities.LoanAliasSaveRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "kingsightapi.Entities.LoanAliasDto",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.LoanAliasController",
+    "Method": "GetById",
+    "RelativePath": "api/LoanAlias/{loanAliasId}",
+    "HttpMethod": "GET",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "loanAliasId",
+        "Type": "System.Int64",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": [
+      {
+        "Type": "kingsightapi.Entities.LoanAliasDto",
+        "MediaTypes": [
+          "text/plain",
+          "application/json",
+          "text/json"
+        ],
+        "StatusCode": 200
+      }
+    ]
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.LoanAliasController",
+    "Method": "Update",
+    "RelativePath": "api/LoanAlias/{loanAliasId}",
+    "HttpMethod": "PUT",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "loanAliasId",
+        "Type": "System.Int64",
+        "IsRequired": true
+      },
+      {
+        "Name": "request",
+        "Type": "kingsightapi.Entities.LoanAliasUpdateRequest",
+        "IsRequired": true
+      }
+    ],
+    "ReturnTypes": []
+  },
+  {
+    "ContainingType": "kingsightapi.Controllers.LoanAliasController",
+    "Method": "Delete",
+    "RelativePath": "api/LoanAlias/{loanAliasId}",
+    "HttpMethod": "DELETE",
+    "IsController": true,
+    "Order": 0,
+    "Parameters": [
+      {
+        "Name": "loanAliasId",
         "Type": "System.Int64",
         "IsRequired": true
       }
