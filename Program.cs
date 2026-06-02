@@ -28,7 +28,7 @@ namespace kingsightapi
             //builder.Services.AddScoped<DBService>();
             builder.Services.AddSingleton<IDBService, DBService>();
             //builder.Services.AddSingleton<IFundService, FundService>();
-            //builder.Services.AddSingleton<ILoanService, LoanService>();
+            builder.Services.AddSingleton<ILoanService, LoanService>();
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
