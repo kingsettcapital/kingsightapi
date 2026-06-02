@@ -63,13 +63,15 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/investors
+    // GET: api/funds/{fundKey}/investors?search=
     [HttpGet("{fundKey:int}/investors")]
-    public async Task<ActionResult<IReadOnlyList<FundInvestorDto>>> GetInvestors(int fundKey)
+    public async Task<ActionResult<IReadOnlyList<FundInvestorDto>>> GetInvestors(
+        int fundKey,
+        [FromQuery] string? search)
     {
         try
         {
-            var result = await _service.GetFundInvestorsAsync(fundKey);
+            var result = await _service.GetFundInvestorsAsync(fundKey, search);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -81,6 +83,27 @@ public class FundsController : ControllerBase
         {
             _logger.LogError(ex, "Error retrieving investors for fund {FundKey}", fundKey);
             return StatusCode(500, "An error occurred while retrieving fund investors.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/nav
+    [HttpGet("{fundKey:int}/nav")]
+    public async Task<ActionResult<IReadOnlyList<FundNavDto>>> GetNav(int fundKey)
+    {
+        try
+        {
+            var result = await _service.GetFundNavAsync(fundKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get NAV for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving NAV for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund NAV.");
         }
     }
 }

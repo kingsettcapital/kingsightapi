@@ -8,4 +8,6 @@ internal static class WarehouseTables
     public const string DimProperty = "dbo.dim_property";
     public const string FactCommitted = "dbo.fact_commitment";
     public const string FactInvestment = "dbo.fact_investment";
+    public const string FactInvestorPortfolioQuarterly = "dbo.fact_investor_portfolio_quarterly";
+    public const string FactFundNav = "dbo.fact_fund_nav";
 }

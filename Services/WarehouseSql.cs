@@ -51,20 +51,14 @@ internal static class WarehouseSql
     public static void AppendInvestorSearchFilter(StringBuilder sql, string investorAlias = "i")
     {
         sql.Append(" and (@search is null ");
-        sql.Append($" or {investorAlias}.investor_name like '%' + @search + '%' ");
-        sql.Append($" or isnull({investorAlias}.investor_short_name, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({investorAlias}.investor_type_name, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({investorAlias}.relationship_name, '') like '%' + @search + '%' ");
+        sql.Append($" or lower(isnull({investorAlias}.investor_name, '')) like '%' + lower(@search) + '%' ");
         sql.Append(" ) ");
     }
 
     public static void AppendFundSearchFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" and (@search is null ");
-        sql.Append($" or {fundAlias}.fund_name like '%' + @search + '%' ");
-        sql.Append($" or isnull({fundAlias}.fund_code, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({fundAlias}.fund_strategy_name, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({fundAlias}.fund_type_name, '') like '%' + @search + '%' ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_name, '')) like '%' + lower(@search) + '%' ");
         sql.Append(" ) ");
     }
 
@@ -76,18 +70,14 @@ internal static class WarehouseSql
     public static void AppendPropertySearchFilter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append(" and (@search is null ");
-        sql.Append($" or {propertyAlias}.property_name like '%' + @search + '%' ");
-        sql.Append($" or isnull({propertyAlias}.city, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({propertyAlias}.province, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({propertyAlias}.asset_type, '') like '%' + @search + '%' ");
-        sql.Append($" or isnull({propertyAlias}.property_code, '') like '%' + @search + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
         sql.Append(" ) ");
     }
 
     public static void AppendFundCodeSearchFilter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append(" and (@fund_code is null ");
-        sql.Append($" or {propertyAlias}.fund like '%' + @fund_code + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.fund, '')) like '%' + lower(@fund_code) + '%' ");
         sql.Append(" ) ");
     }
 

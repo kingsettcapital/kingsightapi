@@ -10,9 +10,13 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
-            builder.WebHost.UseUrls("https://localhost:7140"); // Set the URL for the API
 
             var configuration = builder.Configuration;
+            var apiUrl = configuration.GetSection("Api").GetValue<string>("Url");
+            if (!string.IsNullOrWhiteSpace(apiUrl))
+            {
+                builder.WebHost.UseUrls(apiUrl);
+            }
 
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
