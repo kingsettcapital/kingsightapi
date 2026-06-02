@@ -8,7 +8,10 @@ namespace kingsightapi.Entities
         public long InvestorKey { get; init; }
         public string InvestorCode { get; init; } = string.Empty;
         public string InvestorName { get; init; } = string.Empty;
+        public long? InvestorAliasKey { get; init; }
         public string InvestorAliasName { get; init; } = string.Empty;
+        public string UserUpdatedBy { get; init; } = string.Empty;
+        public DateTime? UserUpdatedDate { get; init; }
     }
 
     /// <summary>
@@ -16,6 +19,7 @@ namespace kingsightapi.Entities
     /// </summary>
     public sealed class InvestorUpdateRequest
     {
+        public int InvestorKey { get; init; }
         public string InvestorAliasName { get; init; } = string.Empty;
         public string UserUpdatedBy { get; init; } = string.Empty;
     }

@@ -8,24 +8,28 @@ namespace kingsightapi.Services
     public interface IInvestorService
     {
         Task<IReadOnlyList<InvestorDto>> GetAllAsync();
-        Task<bool> UpdateAsync(long investorKey, InvestorUpdateRequest request);
+        Task<bool> UpdateAsync(InvestorUpdateBatchRequest request);
     }
 
     public sealed class InvestorService : IInvestorService
     {
         private const string ListSql = """
-            select investor_key,
-                   investor_code,
-                   investor_name,
-                   investor_alias_name
-            from mort.dim_investor
+            select a.investor_key,
+                   a.investor_code,
+                   a.investor_name,
+                   a.investor_alias_key,
+                   investor_alias_name=isNull(b.investor_alias_name, ''),
+                   a.user_updated_by,
+                   a.user_updated_date
+            from mort.dim_investor a Left outer Join mort.investor_alias_master b
+                on a.investor_alias_key = b.investor_alias_id
             where is_current = 1
             order by investor_code
             """;
 
         private const string UpdateSql = """
             update mort.dim_investor
-            set investor_alias_name = @investor_alias_name,
+            set investor_alias_key = @investor_alias_key,
                 user_updated_by = @user_updated_by,
                 user_updated_date = getutcdate()
             where investor_key = @investor_key
@@ -59,60 +63,79 @@ namespace kingsightapi.Services
 
             while (await reader.ReadAsync())
             {
-                rows.Add(MapRow(reader, ordinals));
+                var dto = new InvestorDto
+                {
+                    InvestorKey = reader.IsDBNull(ordinals.Key)
+                        ? 0L
+                        : Convert.ToInt64(reader.GetValue(ordinals.Key)),
+                    InvestorCode = reader.IsDBNull(ordinals.Code)
+                        ? string.Empty
+                        : reader.GetString(ordinals.Code),
+                    InvestorName = reader.IsDBNull(ordinals.Name)
+                        ? string.Empty
+                        : reader.GetString(ordinals.Name),
+                    InvestorAliasKey = reader.IsDBNull(ordinals.AliasKey)
+                        ? (long?)null
+                        : Convert.ToInt64(reader.GetValue(ordinals.AliasKey)),
+                    InvestorAliasName = reader.IsDBNull(ordinals.AliasName)
+                        ? string.Empty
+                        : reader.GetString(ordinals.AliasName),
+                    UserUpdatedBy = reader.IsDBNull(ordinals.UpdatedBy)
+                        ? string.Empty
+                        : reader.GetString(ordinals.UpdatedBy),
+                    UserUpdatedDate = reader.IsDBNull(ordinals.UpdatedDate)
+                        ? null
+                        : reader.GetDateTime(ordinals.UpdatedDate)
+                };
+
+                rows.Add(dto);
             }
 
             _logger.LogInformation("Retrieved {Count} current investor rows.", rows.Count);
             return rows;
         }
 
-        public async Task<bool> UpdateAsync(long investorKey, InvestorUpdateRequest request)
+        public async Task<bool> UpdateAsync(InvestorUpdateBatchRequest request)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand(UpdateSql, connection)
+            var affectedRows = 0;
+            foreach (var investor in request.Investors)
             {
-                CommandType = System.Data.CommandType.Text
-            };
-            command.Parameters.AddWithValue("@investor_key", investorKey);
-            command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-            command.Parameters.AddWithValue("@user_updated_by", request.UserUpdatedBy);
+                await using var command = new SqlCommand(UpdateSql, connection)
+                {
+                    CommandType = System.Data.CommandType.Text
+                };
+                command.Parameters.AddWithValue("@investor_key", investor.InvestorKey);
+                command.Parameters.AddWithValue("@investor_alias_key", investor.InvestorAliasKey.HasValue ? (object)investor.InvestorAliasKey.Value : DBNull.Value);
+                command.Parameters.AddWithValue("@user_updated_by", investor.UserUpdatedBy);
 
-            var affectedRows = await command.ExecuteNonQueryAsync();
+                affectedRows += await command.ExecuteNonQueryAsync();
+            }
+
             if (affectedRows > 0)
             {
                 _logger.LogInformation(
-                    "Updated investor row {InvestorKey}. Rows affected: {AffectedRows}",
-                    investorKey,
+                    "investor Rows affected: {AffectedRows}",
                     affectedRows);
                 return true;
             }
 
-            _logger.LogWarning("No row updated for investor_key {InvestorKey}.", investorKey);
+            _logger.LogWarning("No row updated.");
             return false;
         }
 
-        private static (int Key, int Code, int Name, int AliasName) GetOrdinals(SqlDataReader reader)
+        private static (int Key, int Code, int Name, int AliasKey, int AliasName, int UpdatedBy, int UpdatedDate) GetOrdinals(SqlDataReader reader)
         {
             return (
                 reader.GetOrdinal("investor_key"),
                 reader.GetOrdinal("investor_code"),
                 reader.GetOrdinal("investor_name"),
-                reader.GetOrdinal("investor_alias_name"));
-        }
-
-        private static InvestorDto MapRow(
-            SqlDataReader reader,
-            (int Key, int Code, int Name, int AliasName) ordinals)
-        {
-            return new InvestorDto
-            {
-                InvestorKey = reader.IsDBNull(ordinals.Key) ? 0L : Convert.ToInt64(reader.GetValue(ordinals.Key)),
-                InvestorCode = reader.IsDBNull(ordinals.Code) ? string.Empty : reader.GetString(ordinals.Code),
-                InvestorName = reader.IsDBNull(ordinals.Name) ? string.Empty : reader.GetString(ordinals.Name),
-                InvestorAliasName = reader.IsDBNull(ordinals.AliasName) ? string.Empty : reader.GetString(ordinals.AliasName)
-            };
+                reader.GetOrdinal("investor_alias_key"),
+                reader.GetOrdinal("investor_alias_name"),
+                reader.GetOrdinal("user_updated_by"),
+                reader.GetOrdinal("user_updated_date"));
         }
     }
 }

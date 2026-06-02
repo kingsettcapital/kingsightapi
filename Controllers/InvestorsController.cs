@@ -42,32 +42,36 @@ namespace kingsightapi.Controllers
         }
 
         // PUT: api/Investors/{investorKey}
-        [HttpPut("{investorKey:long}")]
-        public async Task<IActionResult> Update(long investorKey, [FromBody] InvestorUpdateRequest request)
+        //[HttpPut("{investorKey:long}")]
+        [HttpPut]
+        public async Task<IActionResult> Update([FromBody] InvestorUpdateBatchRequest request)
         {
             if (request is null)
             {
                 return BadRequest("Request body is required.");
             }
-
-            if (string.IsNullOrWhiteSpace(request.InvestorAliasName))
+            foreach (var investor in request.Investors)
             {
-                return BadRequest("Investor alias name is required.");
+                if (!investor.InvestorAliasKey.HasValue)
+                {
+                    return BadRequest("Investor alias name is required.");
+                }
             }
+                
 
             try
             {
-                var updated = await _service.UpdateAsync(investorKey, request);
+                var updated = await _service.UpdateAsync(request);
                 return updated ? NoContent() : NotFound();
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Update investor row {InvestorKey} cancelled", investorKey);
+                _logger.LogInformation("Update investor cancelled");
                 return StatusCode(499);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error updating investor row {InvestorKey}", investorKey);
+                _logger.LogError(ex, "Error updating investor row");
                 return StatusCode(500, "An error occurred while updating the investor row.");
             }
         }

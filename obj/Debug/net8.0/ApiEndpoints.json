@@ -131,19 +131,14 @@
   {
     "ContainingType": "kingsightapi.Controllers.InvestorsController",
     "Method": "Update",
-    "RelativePath": "api/Investors/{investorKey}",
+    "RelativePath": "api/Investors",
     "HttpMethod": "PUT",
     "IsController": true,
     "Order": 0,
     "Parameters": [
       {
-        "Name": "investorKey",
-        "Type": "System.Int64",
-        "IsRequired": true
-      },
-      {
         "Name": "request",
-        "Type": "kingsightapi.Entities.InvestorUpdateRequest",
+        "Type": "kingsightapi.Entities.InvestorUpdateBatchRequest",
         "IsRequired": true
       }
     ],

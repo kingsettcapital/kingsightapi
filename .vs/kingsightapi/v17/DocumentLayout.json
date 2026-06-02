@@ -7,8 +7,20 @@
       "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:controllers\\investorscontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\controllers\\investoraliascontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:controllers\\investoraliascontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\services\\investorservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:services\\investorservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\entities\\investorupdaterequestdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:entities\\investorupdaterequestdto.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\entities\\investor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:entities\\investor.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
       "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\services\\investoraliasservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -19,8 +31,8 @@
       "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:appsettings.json||{90A6B3A7-C1A3-4009-A288-E2FF89E96FA0}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|c:\\000 projects\\app\\050 kingsight - data portal\\kingsightapi\\controllers\\investoraliascontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{73440913-C78E-4CB9-8668-E66A32672C4E}|kingsightapi.csproj|solutionrelative:controllers\\investoraliascontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -30,7 +42,7 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 6,
+          "SelectedChildIndex": 9,
           "Children": [
             {
               "$type": "Bookmark",
@@ -58,20 +70,59 @@
             },
             {
               "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "InvestorUpdateRequestDto.cs",
+              "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Entities\\InvestorUpdateRequestDto.cs",
+              "RelativeDocumentMoniker": "Entities\\InvestorUpdateRequestDto.cs",
+              "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Entities\\InvestorUpdateRequestDto.cs",
+              "RelativeToolTip": "Entities\\InvestorUpdateRequestDto.cs",
+              "ViewState": "AgIAAAMAAAAAAAAAAAAuwA4AAAAtAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-06-01T16:49:51.893Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "Investor.cs",
+              "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Entities\\Investor.cs",
+              "RelativeDocumentMoniker": "Entities\\Investor.cs",
+              "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Entities\\Investor.cs",
+              "RelativeToolTip": "Entities\\Investor.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAuwAUAAAAjAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-06-01T16:33:26.56Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "InvestorService.cs",
+              "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Services\\InvestorService.cs",
+              "RelativeDocumentMoniker": "Services\\InvestorService.cs",
+              "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Services\\InvestorService.cs",
+              "RelativeToolTip": "Services\\InvestorService.cs",
+              "ViewState": "AgIAAF4AAAAAAAAAAAAtwG4AAACNAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-06-01T16:32:54.934Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 0,
               "Title": "InvestorsController.cs",
               "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Controllers\\InvestorsController.cs",
               "RelativeDocumentMoniker": "Controllers\\InvestorsController.cs",
               "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Controllers\\InvestorsController.cs",
               "RelativeToolTip": "Controllers\\InvestorsController.cs",
-              "ViewState": "AgIAACcAAAAAAAAAAAAYwAAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAACYAAAAAAAAAAAAtwDsAAAAQAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-06-01T11:35:25.322Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 5,
               "Title": "InvestorAliasService.cs",
               "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Services\\InvestorAliasService.cs",
               "RelativeDocumentMoniker": "Services\\InvestorAliasService.cs",
@@ -79,11 +130,12 @@
               "RelativeToolTip": "Services\\InvestorAliasService.cs",
               "ViewState": "AgIAAKwAAAAAAAAAAAAjwLoAAAAIAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-26T01:41:20.351Z"
+              "WhenOpened": "2026-05-26T01:41:20.351Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 6,
               "Title": "appsettings.json",
               "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\appsettings.json",
               "RelativeDocumentMoniker": "appsettings.json",
@@ -91,7 +143,8 @@
               "RelativeToolTip": "appsettings.json",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAQAAAAOAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001642|",
-              "WhenOpened": "2026-05-26T01:41:58.528Z"
+              "WhenOpened": "2026-05-26T01:41:58.528Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -101,13 +154,14 @@
               "RelativeDocumentMoniker": "Program.cs",
               "ToolTip": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Program.cs",
               "RelativeToolTip": "Program.cs",
-              "ViewState": "AgIAADEAAAAAAAAAAAAEwBUAAAARAAAAAAAAAA==",
+              "ViewState": "AgIAAA0AAAAAAAAAAAAQwBEAAAAfAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-25T23:45:57.257Z"
+              "WhenOpened": "2026-05-25T23:45:57.257Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 7,
               "Title": "InvestorAliasController.cs",
               "DocumentMoniker": "C:\\000 Projects\\App\\050 KingSight - Data Portal\\kingsightapi\\Controllers\\InvestorAliasController.cs",
               "RelativeDocumentMoniker": "Controllers\\InvestorAliasController.cs",

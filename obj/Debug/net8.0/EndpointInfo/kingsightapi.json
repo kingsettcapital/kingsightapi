@@ -226,39 +226,26 @@
             }
           }
         }
-      }
-    },
-    "/api/Investors/{investorKey}": {
+      },
       "put": {
         "tags": [
           "Investors"
-        ],
-        "parameters": [
-          {
-            "name": "investorKey",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "integer",
-              "format": "int64"
-            }
-          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/InvestorUpdateRequest"
+                "$ref": "#/components/schemas/InvestorUpdateBatchRequest"
               }
             },
             "text/json": {
               "schema": {
-                "$ref": "#/components/schemas/InvestorUpdateRequest"
+                "$ref": "#/components/schemas/InvestorUpdateBatchRequest"
               }
             },
             "application/*+json": {
               "schema": {
-                "$ref": "#/components/schemas/InvestorUpdateRequest"
+                "$ref": "#/components/schemas/InvestorUpdateBatchRequest"
               }
             }
           }
@@ -533,18 +520,50 @@
             "type": "string",
             "nullable": true
           },
+          "investorAliasKey": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
           "investorAliasName": {
             "type": "string",
+            "nullable": true
+          },
+          "userUpdatedBy": {
+            "type": "string",
+            "nullable": true
+          },
+          "userUpdatedDate": {
+            "type": "string",
+            "format": "date-time",
             "nullable": true
           }
         },
         "additionalProperties": false
       },
-      "InvestorUpdateRequest": {
+      "InvestorUpdateBatchRequest": {
         "type": "object",
         "properties": {
-          "investorAliasName": {
-            "type": "string",
+          "investors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InvestorUpdateRequestDto"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "InvestorUpdateRequestDto": {
+        "type": "object",
+        "properties": {
+          "investorKey": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "investorAliasKey": {
+            "type": "integer",
+            "format": "int32",
             "nullable": true
           },
           "userUpdatedBy": {
