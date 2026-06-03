@@ -2,6 +2,9 @@
 [Bb]in/
 [Oo]bj/
 
+## CMHC uploads (local dev storage)
+CmhcUploads/
+
 ## Visual Studio / VS Code / Rider
 .vs/
 .vscode/*

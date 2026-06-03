@@ -1,6 +1,8 @@
 using System.Text.Json;
+using kingsightapi.Configuration;
 using kingsightapi.Services;
 using kingsightapi.Entities;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace kingsightapi
 {
@@ -9,7 +11,15 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
-            builder.WebHost.UseUrls("https://localhost:7140"); // Set the URL for the API
+            if (builder.Environment.IsDevelopment())
+            {
+                // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
+                builder.WebHost.UseUrls("https://localhost:7140", "http://localhost:5181");
+            }
+            else
+            {
+                builder.WebHost.UseUrls("https://localhost:7140");
+            }
 
             // Configuration
             var configuration = builder.Configuration;
@@ -34,6 +44,14 @@ namespace kingsightapi
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
             builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
 
+            builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
+            builder.Services.Configure<FormOptions>(options =>
+            {
+                options.MultipartBodyLengthLimit = 52_428_800;
+            });
+            builder.Services.AddScoped<ICmhcFileStorage, LocalCmhcFileStorage>();
+            builder.Services.AddScoped<ICmhcUploadService, CmhcUploadService>();
+
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen();
@@ -42,10 +60,18 @@ namespace kingsightapi
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowAngularDev", policy =>
-                    policy.WithOrigins("http://localhost:4200").AllowAnyHeader().AllowAnyMethod());
+                    policy
+                        .WithOrigins("http://localhost:4200", "https://localhost:4200")
+                        .AllowAnyHeader()
+                        .AllowAnyMethod());
             });
 
             var app = builder.Build();
+
+            using (var scope = app.Services.CreateScope())
+            {
+                scope.ServiceProvider.GetRequiredService<ICmhcFileStorage>().EnsureStorageReady();
+            }
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())
