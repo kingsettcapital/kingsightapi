@@ -32,6 +32,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
+            builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
 
             // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
             builder.Services.AddEndpointsApiExplorer();
