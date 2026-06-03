@@ -5,6 +5,8 @@ namespace kingsightapi.Services;
 
 internal static class SqlReaderExtensions
 {
+    private const int RoundedDecimalPlaces = 4;
+
     public static string GetStringOrEmpty(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
@@ -32,19 +34,56 @@ internal static class SqlReaderExtensions
     public static decimal GetDecimalOrDefault(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
-        return reader.IsDBNull(ordinal) ? 0m : Convert.ToDecimal(reader.GetValue(ordinal));
+        var value = reader.IsDBNull(ordinal) ? 0m : Convert.ToDecimal(reader.GetValue(ordinal));
+        return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
     }
 
     public static decimal? GetNullableDecimal(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
-        return reader.IsDBNull(ordinal) ? null : Convert.ToDecimal(reader.GetValue(ordinal));
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var value = Convert.ToDecimal(reader.GetValue(ordinal));
+        return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
     }
 
     public static DateTime? GetNullableDateTime(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
         return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+    }
+
+    public static string? GetNullableStringIfPresent(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return reader.GetString(ordinal);
+    }
+
+    public static DateTime? GetNullableDateTimeIfPresent(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return reader.GetDateTime(ordinal);
+    }
+
+    public static int GetInt32OrDefaultIfPresent(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return 0;
+        }
+
+        return Convert.ToInt32(reader.GetValue(ordinal));
     }
 
     public static bool TryGetOrdinal(this SqlDataReader reader, string column, out int ordinal)
@@ -85,7 +124,8 @@ internal static class SqlReaderExtensions
                 continue;
             }
 
-            return Convert.ToDecimal(reader.GetValue(ordinal));
+            var value = Convert.ToDecimal(reader.GetValue(ordinal));
+            return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
         }
 
         return 0m;
@@ -100,7 +140,8 @@ internal static class SqlReaderExtensions
                 continue;
             }
 
-            return Convert.ToDecimal(reader.GetValue(ordinal));
+            var value = Convert.ToDecimal(reader.GetValue(ordinal));
+            return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
         }
 
         return null;
@@ -138,5 +179,31 @@ internal static class SqlReaderExtensions
         }
 
         return fields;
+    }
+
+    private static decimal RoundDecimal(decimal value) =>
+        Math.Round(value, RoundedDecimalPlaces, MidpointRounding.AwayFromZero);
+
+    private static bool ShouldRoundColumn(string column)
+    {
+        var lower = column.ToLowerInvariant();
+
+        if (lower.Contains("percent") || lower.Contains("yield") || lower.Contains("ltv"))
+        {
+            return false;
+        }
+
+        return lower.Contains("amount")
+            || lower.Contains("units")
+            || lower.Contains("commitment")
+            || lower.Contains("called")
+            || lower is "nav"
+            || lower.Contains("netinvested")
+            || lower.Contains("reserve")
+            || lower.Contains("_value")
+            || lower.Contains("fmv")
+            || lower.Contains("income")
+            || lower.Contains("committed")
+            || lower.Contains("invested");
     }
 }

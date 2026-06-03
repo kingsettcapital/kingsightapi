@@ -7,6 +7,8 @@ namespace kingsightapi.Services;
 
 internal static class DisplayFieldBuilder
 {
+    private const int RoundedDecimalPlaces = 4;
+
     public static TypedValueDto Text(string? value) =>
         new() { Value = value ?? string.Empty, FormatType = FieldDataTypes.Text };
 
@@ -17,10 +19,16 @@ internal static class DisplayFieldBuilder
         new() { Value = value ?? string.Empty, FormatType = FieldDataTypes.Phone };
 
     public static TypedValueDto Money(decimal value) =>
-        new() { Value = value, FormatType = FieldDataTypes.Money };
+        new() { Value = RoundDecimal(value), FormatType = FieldDataTypes.Money };
 
     public static TypedValueDto Money(decimal? value) =>
-        new() { Value = value, FormatType = FieldDataTypes.Money };
+        new() { Value = RoundDecimal(value), FormatType = FieldDataTypes.Money };
+
+    public static TypedValueDto Number(decimal value) =>
+        new() { Value = RoundDecimal(value), FormatType = FieldDataTypes.Number };
+
+    public static TypedValueDto Number(decimal? value) =>
+        new() { Value = RoundDecimal(value), FormatType = FieldDataTypes.Number };
 
     public static TypedValueDto Percent(decimal? value) =>
         new() { Value = value, FormatType = FieldDataTypes.Percent };
@@ -96,6 +104,11 @@ internal static class DisplayFieldBuilder
             return Percent(ToNullableDecimal(value));
         }
 
+        if (lower.Contains("units"))
+        {
+            return Number(ToNullableDecimal(value) ?? 0m);
+        }
+
         if (lower.Contains("amount") || lower.Contains("value") || lower.Contains("fmv") || lower.Contains("income"))
         {
             return Money(ToNullableDecimal(value) ?? 0m);
@@ -164,4 +177,10 @@ internal static class DisplayFieldBuilder
 
         return JsonNamingPolicy.CamelCase.ConvertName(columnName);
     }
+
+    private static decimal RoundDecimal(decimal value) =>
+        Math.Round(value, RoundedDecimalPlaces, MidpointRounding.AwayFromZero);
+
+    private static decimal? RoundDecimal(decimal? value) =>
+        value is null ? null : RoundDecimal(value.Value);
 }
