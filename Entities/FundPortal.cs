@@ -60,18 +60,51 @@ public sealed class FundInvestorDto
     public int? JoinYear { get; init; }
 }
 
-/// <summary>NAV rows for a fund ordered by date key.</summary>
-public sealed class FundNavDto
+/// <summary>Period dropdown option (quarter or day) scoped by fund, view, and metric.</summary>
+public sealed class FundPeriodDto
 {
-    [JsonPropertyName("fund_key")]
-    public int FundKey { get; init; }
-
-    [JsonPropertyName("fund_name")]
-    public string FundName { get; init; } = string.Empty;
-
     [JsonPropertyName("date_key")]
-    public int DateKey { get; init; }
+    public int? DateKey { get; init; }
 
-    [JsonPropertyName("nav")]
-    public decimal Nav { get; init; }
+    [JsonPropertyName("full_date")]
+    public DateTime? FullDate { get; init; }
+
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>When true, UI should show the option but keep the period control disabled (LTD).</summary>
+    public bool Disabled { get; init; }
+
+    [JsonPropertyName("quarter_year")]
+    public string? QuarterYear { get; init; }
+
+    [JsonPropertyName("calendar_year")]
+    public int CalendarYear { get; init; }
+
+    [JsonPropertyName("month_year")]
+    public string? MonthYear { get; init; }
+
+    [JsonPropertyName("period_start")]
+    public DateTime? PeriodStart { get; init; }
+
+    [JsonPropertyName("period_end")]
+    public DateTime? PeriodEnd { get; init; }
+}
+
+/// <summary>Fund table row for LTD, quarterly, or daily views (commitments, NAV, etc.).</summary>
+public sealed class FundGranularRowDto
+{
+    /// <summary>LTD / quarterly label (e.g. "Life To Date", "Q4 2022"). Null for daily.</summary>
+    public string? Period { get; init; }
+
+    /// <summary>Date for daily view (commitments: from posted date). Null for LTD / quarterly.</summary>
+    public DateTime? Date { get; init; }
+
+    [JsonPropertyName("posted_date_key")]
+    public int? PostedDateKey { get; init; }
+
+    public decimal Amount { get; init; }
+
+    public decimal Units { get; init; }
+
+    public string Description { get; init; } = string.Empty;
 }

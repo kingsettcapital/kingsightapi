@@ -10,7 +10,42 @@ public interface IFundPortalService
     Task<PagedResult<FundListItemDto>> GetFundsAsync(string? search, int page, int pageSize);
     Task<FundDetailDto?> GetFundByKeyAsync(int fundKey);
     Task<IReadOnlyList<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search);
-    Task<IReadOnlyList<FundNavDto>> GetFundNavAsync(int fundKey);
+    Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundMetricSource source,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundNavAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundDistributionsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
 }
 
 public sealed class FundPortalService : IFundPortalService
@@ -79,20 +114,213 @@ public sealed class FundPortalService : IFundPortalService
         }
     }
 
-    public async Task<IReadOnlyList<FundNavDto>> GetFundNavAsync(int fundKey)
+    public async Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundMetricSource source,
+        int page,
+        int pageSize)
     {
         try
         {
-            return await GetFundNavInternalAsync(fundKey);
+            return view switch
+            {
+                TimeGranularity.Ltd => CreateLtdAllPeriodsPage(page, pageSize),
+                TimeGranularity.Quarterly => await GetFundPeriodsQuarterlyInternalAsync(fundKey, source, page, pageSize),
+                TimeGranularity.Daily => await GetFundPeriodsDailyInternalAsync(fundKey, source, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get NAV for fund {FundKey} cancelled", fundKey);
+            _logger.LogInformation("Get {View} periods for fund {FundKey} cancelled", view, fundKey);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving NAV for fund {FundKey}", fundKey);
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} periods for fund {FundKey}. Source={Source}, Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                source,
+                page,
+                pageSize);
+            throw;
+        }
+    }
+
+    public async Task<PagedResult<FundGranularRowDto>> GetFundNavAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return view switch
+            {
+                TimeGranularity.Ltd => await GetFundNavLtdInternalAsync(fundKey, page, pageSize),
+                TimeGranularity.Quarterly => await GetFundNavQuarterlyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Daily => await GetFundNavDailyInternalAsync(fundKey, period, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} NAV for fund {FundKey} cancelled", view, fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} NAV for fund {FundKey}. Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                page,
+                pageSize);
+            throw;
+        }
+    }
+
+    public async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return view switch
+            {
+                TimeGranularity.Ltd => await GetFundCommitmentsLtdInternalAsync(fundKey, page, pageSize),
+                TimeGranularity.Quarterly => await GetFundCommitmentsQuarterlyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Daily => await GetFundCommitmentsDailyInternalAsync(fundKey, period, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} commitments for fund {FundKey} cancelled", view, fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} commitments for fund {FundKey}. Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                page,
+                pageSize);
+            throw;
+        }
+    }
+
+    public async Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return view switch
+            {
+                TimeGranularity.Ltd => await GetFundUnfundedCommitmentsLtdInternalAsync(fundKey, page, pageSize),
+                TimeGranularity.Quarterly => await GetFundUnfundedCommitmentsQuarterlyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Daily => await GetFundUnfundedCommitmentsDailyInternalAsync(fundKey, period, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} unfunded commitments for fund {FundKey} cancelled", view, fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} unfunded commitments for fund {FundKey}. Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                page,
+                pageSize);
+            throw;
+        }
+    }
+
+    public async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return view switch
+            {
+                TimeGranularity.Ltd => await GetFundInvestmentsLtdInternalAsync(fundKey, page, pageSize),
+                TimeGranularity.Quarterly => await GetFundInvestmentsQuarterlyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Daily => await GetFundInvestmentsDailyInternalAsync(fundKey, period, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} investments for fund {FundKey} cancelled", view, fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} investments for fund {FundKey}. Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                page,
+                pageSize);
+            throw;
+        }
+    }
+
+    public async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return view switch
+            {
+                TimeGranularity.Ltd => await GetFundDistributionsLtdInternalAsync(fundKey, page, pageSize),
+                TimeGranularity.Quarterly => await GetFundDistributionsQuarterlyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Daily => await GetFundDistributionsDailyInternalAsync(fundKey, period, page, pageSize),
+                _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} distributions for fund {FundKey} cancelled", view, fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Error retrieving {View} distributions for fund {FundKey}. Page={Page}, PageSize={PageSize}",
+                view,
+                fundKey,
+                page,
+                pageSize);
             throw;
         }
     }
@@ -329,7 +557,7 @@ public sealed class FundPortalService : IFundPortalService
             DisplayFieldBuilder.ToDynamicField("commitment", DisplayFieldBuilder.Money(summary.Commitment)),
             DisplayFieldBuilder.ToDynamicField("called", DisplayFieldBuilder.Money(summary.Called)),
             DisplayFieldBuilder.ToDynamicField("netInvestedAmount", DisplayFieldBuilder.Money(summary.Netinvestedamount)),
-            DisplayFieldBuilder.ToDynamicField("netInvestedUnits", DisplayFieldBuilder.Money(summary.Netinvestedunits)),
+            DisplayFieldBuilder.ToDynamicField("netInvestedUnits", DisplayFieldBuilder.Number(summary.Netinvestedunits)),
             DisplayFieldBuilder.ToDynamicField("reserveAmount", DisplayFieldBuilder.Money(summary.Reserveamount))
         };
 
@@ -527,41 +755,1150 @@ public sealed class FundPortalService : IFundPortalService
         return items;
     }
 
-    private async Task<IReadOnlyList<FundNavDto>> GetFundNavInternalAsync(int fundKey)
+    private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int pageSize)
     {
-        var sql = new StringBuilder();
-        sql.Append(" select ");
-        sql.Append(" a.fund_key, ");
-        sql.Append(" b.fund_name, ");
-        sql.Append(" a.date_key, ");
-        sql.Append(" a.nav ");
-        sql.Append($" from {WarehouseTables.FactFundNav} a ");
-        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
-        sql.Append(" where a.fund_key = @fundKey ");
-        sql.Append(" order by a.date_key ");
+        var (normalizedPage, normalizedPageSize, _) = Pagination.Normalize(page, pageSize);
+        return new PagedResult<FundPeriodDto>
+        {
+            Items = normalizedPage == 1
+                ?
+                [
+                    new FundPeriodDto
+                    {
+                        Label = "All Periods",
+                        Disabled = true
+                    }
+                ]
+                : [],
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = 1
+        };
+    }
 
+    private async Task<PagedResult<FundPeriodDto>> GetFundPeriodsQuarterlyInternalAsync(
+        int fundKey,
+        FundMetricSource source,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        AppendQuarterlyPeriodSelect(countSql, source);
+        countSql.Append(" ) quarterly_periods ");
+
+        var pageSql = new StringBuilder();
+        AppendQuarterlyPeriodSelect(pageSql, source);
+        pageSql.Append(" order by calendar_year, quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundPeriodPageQueryAsync(fundKey, normalizedPage, normalizedPageSize, offset, countSql, pageSql);
+    }
+
+    private async Task<PagedResult<FundPeriodDto>> GetFundPeriodsDailyInternalAsync(
+        int fundKey,
+        FundMetricSource source,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        AppendDailyPeriodSelect(countSql, source);
+        countSql.Append(" ) daily_periods ");
+
+        var pageSql = new StringBuilder();
+        AppendDailyPeriodSelect(pageSql, source);
+        pageSql.Append(source switch
+        {
+            FundMetricSource.Commitments or FundMetricSource.UnfundedCommitments => " order by fc.posted_date_key desc ",
+            FundMetricSource.Investments => " order by fi.calculation_date_key desc ",
+            FundMetricSource.Distributions => " order by fd.calculation_date_key desc ",
+            _ => " order by date_key desc "
+        });
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundPeriodPageQueryAsync(fundKey, normalizedPage, normalizedPageSize, offset, countSql, pageSql);
+    }
+
+    private void AppendQuarterlyPeriodSelect(StringBuilder sql, FundMetricSource source)
+    {
+        sql.Append(" select ");
+        sql.Append(" d.quarter_year, ");
+        sql.Append(" d.calendar_year, ");
+        sql.Append(" min(d.date_key) as min_date_key, ");
+        sql.Append(" max(d.date_key) as max_date_key, ");
+        sql.Append(" min(d.first_date_of_quater) as period_start, ");
+        sql.Append(" max(d.last_date_of_quater) as period_end, ");
+        sql.Append(" max(d.month_year) as month_year ");
+
+        if (source is FundMetricSource.Commitments
+            or FundMetricSource.UnfundedCommitments
+            or FundMetricSource.Investments)
+        {
+            sql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} q ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year ");
+            sql.Append(" where q.fund_key = @fundKey ");
+            sql.Append(" group by d.quarter_year, d.calendar_year ");
+        }
+        else if (source is FundMetricSource.Distributions)
+        {
+            sql.Append($" from {WarehouseTables.FactDistribution} fd ");
+            AppendDimFundJoinOnFundKey(sql, "fd");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+            sql.Append(" where fd.fund_key = @fundKey ");
+            sql.Append(" group by d.quarter_year, d.calendar_year ");
+            AppendDistributionMetricHaving(sql, "fd");
+        }
+        else
+        {
+            sql.Append($" from {WarehouseTables.FactFundNav} n ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+            sql.Append(" where n.fund_key = @fundKey ");
+            sql.Append(" and isnull(n.nav, 0) != 0 ");
+            sql.Append(" group by d.quarter_year, d.calendar_year ");
+        }
+    }
+
+    private void AppendDailyPeriodSelect(StringBuilder sql, FundMetricSource source)
+    {
+        sql.Append(" select ");
+        if (source is FundMetricSource.Commitments or FundMetricSource.UnfundedCommitments)
+        {
+            sql.Append(" fc.posted_date_key as date_key, ");
+            sql.Append(" d.full_date, ");
+        }
+        else if (source is FundMetricSource.Investments)
+        {
+            sql.Append(" fi.calculation_date_key as date_key, ");
+            sql.Append(" d.full_date, ");
+        }
+        else if (source is FundMetricSource.Distributions)
+        {
+            sql.Append(" fd.calculation_date_key as date_key, ");
+            sql.Append(" d.full_date, ");
+        }
+        else
+        {
+            sql.Append(" d.date_key, ");
+            sql.Append(" d.full_date, ");
+        }
+
+        sql.Append(" d.quarter_year, ");
+        sql.Append(" d.calendar_year, ");
+        sql.Append(" d.month_year, ");
+        sql.Append(" d.first_date_of_quater as period_start, ");
+        sql.Append(" d.last_date_of_quater as period_end ");
+
+        if (source == FundMetricSource.Commitments)
+        {
+            sql.Append($" from {WarehouseTables.FactCommitted} fc ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fc.posted_date_key ");
+            sql.Append(" where fc.fund_key = @fundKey ");
+            sql.Append(" group by ");
+            sql.Append(" fc.posted_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
+            sql.Append(" having sum(fc.committed_amount) != 0 ");
+        }
+        else if (source == FundMetricSource.UnfundedCommitments)
+        {
+            sql.Append($" from {WarehouseTables.FactCommitted} fc ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fc.posted_date_key ");
+            sql.Append(" where fc.fund_key = @fundKey ");
+            sql.Append(" group by ");
+            sql.Append(" fc.posted_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
+            sql.Append(" having sum(fc.committed_amount_fmv) != 0 ");
+        }
+        else if (source == FundMetricSource.Investments)
+        {
+            sql.Append($" from {WarehouseTables.FactInvestment} fi ");
+            AppendDimFundJoinOnFundKey(sql, "fi");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.calculation_date_key ");
+            sql.Append(" where fi.fund_key = @fundKey ");
+            sql.Append(" group by ");
+            sql.Append(" fi.calculation_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
+            AppendInvestmentMetricHaving(sql, "fi");
+        }
+        else if (source == FundMetricSource.Distributions)
+        {
+            sql.Append($" from {WarehouseTables.FactDistribution} fd ");
+            AppendDimFundJoinOnFundKey(sql, "fd");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+            sql.Append(" where fd.fund_key = @fundKey ");
+            sql.Append(" group by ");
+            sql.Append(" fd.calculation_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
+            AppendDistributionMetricHaving(sql, "fd");
+        }
+        else
+        {
+            sql.Append($" from {WarehouseTables.FactFundNav} n ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+            sql.Append(" where n.fund_key = @fundKey ");
+            sql.Append(" and isnull(n.nav, 0) != 0 ");
+        }
+    }
+
+    private async Task<PagedResult<FundPeriodDto>> ExecuteFundPeriodPageQueryAsync(
+        int fundKey,
+        int normalizedPage,
+        int normalizedPageSize,
+        int offset,
+        StringBuilder countSql,
+        StringBuilder pageSql)
+    {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        await using var command = new SqlCommand(sql.ToString(), connection)
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        command.Parameters.AddWithValue("@fundKey", fundKey);
+        countCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
-        var items = new List<FundNavDto>();
-        await using var reader = await command.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
         {
-            items.Add(new FundNavDto
+            CommandType = System.Data.CommandType.Text
+        };
+        pageCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        pageCommand.Parameters.AddWithValue("@offset", offset);
+        pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
+
+        var items = new List<FundPeriodDto>();
+        await using (var reader = await pageCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
             {
-                FundKey = reader.GetInt32OrDefault("fund_key"),
-                FundName = reader.GetStringOrEmpty("fund_name"),
-                DateKey = reader.GetInt32OrDefault("date_key"),
-                Nav = reader.GetDecimalOrDefault("nav")
-            });
+                items.Add(MapFundPeriod(reader));
+            }
         }
 
-        return items;
+        return new PagedResult<FundPeriodDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
     }
+
+    private static FundPeriodDto MapFundPeriod(SqlDataReader reader)
+    {
+        var quarterYear = reader.GetNullableStringIfPresent("quarter_year");
+        var fullDate = reader.GetNullableDateTimeIfPresent("full_date");
+        var dateKeyOrdinal = reader.TryGetOrdinal("date_key", out var dateKeyIndex) && !reader.IsDBNull(dateKeyIndex)
+            ? Convert.ToInt32(reader.GetValue(dateKeyIndex))
+            : (int?)null;
+
+        var minDateKey = reader.TryGetOrdinal("min_date_key", out var minKeyIndex) && !reader.IsDBNull(minKeyIndex)
+            ? Convert.ToInt32(reader.GetValue(minKeyIndex))
+            : dateKeyOrdinal;
+
+        string label;
+        if (fullDate.HasValue)
+        {
+            label = fullDate.Value.ToString("d");
+        }
+        else if (!string.IsNullOrEmpty(quarterYear))
+        {
+            label = quarterYear;
+        }
+        else
+        {
+            label = string.Empty;
+        }
+
+        return new FundPeriodDto
+        {
+            DateKey = dateKeyOrdinal ?? minDateKey,
+            FullDate = fullDate,
+            Label = label,
+            QuarterYear = quarterYear,
+            CalendarYear = reader.GetInt32OrDefaultIfPresent("calendar_year"),
+            MonthYear = reader.GetNullableStringIfPresent("month_year"),
+            PeriodStart = reader.GetNullableDateTimeIfPresent("period_start"),
+            PeriodEnd = reader.GetNullableDateTimeIfPresent("period_end")
+        };
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsLtdInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select case when exists ( ");
+        countSql.Append(" select 1 ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append(" ) then 1 else 0 end ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append(" commitment_amount = sum(commitment_amount), ");
+        pageSql.Append(" Description = 'Total Commitment as of Date' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        pageSql.Append(" order by Period ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            null,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("commitment_amount"),
+                Units = 0,
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsQuarterlyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by quarter_year ");
+        countSql.Append(" ) quarterly_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = quarter_year, ");
+        pageSql.Append(" commitment_amount = sum(commitment_amount), ");
+        pageSql.Append(" Description = 'Quarterly Commitment' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by quarter_year ");
+        pageSql.Append(" order by quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("commitment_amount"),
+                Units = 0,
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsDailyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select fc.fund_key, fc.posted_date_key ");
+        countSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        AppendCommitmentDailyPeriodJoinAndWhere(countSql, period);
+        countSql.Append(" group by fc.fund_key, fc.posted_date_key ");
+        countSql.Append(" having sum(fc.committed_amount) != 0 ");
+        countSql.Append(" ) daily_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" fc.fund_key, ");
+        pageSql.Append(" fc.posted_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fc.posted_date_key as varchar(8)), 112) as full_date, ");
+        pageSql.Append(" amount = sum(fc.committed_amount) ");
+        pageSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        AppendCommitmentDailyPeriodJoinAndWhere(pageSql, period);
+        pageSql.Append(" group by fc.fund_key, fc.posted_date_key ");
+        pageSql.Append(" having sum(fc.committed_amount) != 0 ");
+        pageSql.Append(" order by fc.posted_date_key ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var postedDateKey = reader.GetInt32OrDefault("posted_date_key");
+                return new FundGranularRowDto
+                {
+                    Date = reader.GetNullableDateTime("full_date"),
+                    PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = 0,
+                    Description = string.Empty
+                };
+            });
+    }
+
+    private static void AppendCommitmentDailyPeriodJoinAndWhere(StringBuilder sql, FundPeriodFilter? period)
+    {
+        sql.Append(" where fc.fund_key = @fundKey ");
+        if (period?.HasDateKey == true)
+        {
+            sql.Append(" and fc.posted_date_key = @dateKey ");
+        }
+    }
+
+    /// <summary>Filters portfolio quarterly rows by quarter resolved from period dropdown date_key.</summary>
+    private static void AppendPortfolioQuarterlyPeriodFilter(StringBuilder sql, FundPeriodFilter? period)
+    {
+        if (period?.HasDateKey == true)
+        {
+            sql.Append(" and quarter_year = ( ");
+            sql.Append($" select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey ");
+            sql.Append(" ) ");
+        }
+    }
+
+    /// <summary>Filters dim_date quarter when facts join on date_key (NAV, distributions).</summary>
+    private static void AppendDimDateQuarterlyPeriodFilter(StringBuilder sql, FundPeriodFilter? period, string dateAlias = "d")
+    {
+        if (period?.HasDateKey == true)
+        {
+            sql.Append($" and {dateAlias}.quarter_year = ( ");
+            sql.Append($" select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey ");
+            sql.Append(" ) ");
+        }
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsLtdInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select case when exists ( ");
+        countSql.Append(" select 1 ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append(" ) then 1 else 0 end ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append(" amount = sum(unfunded_amount), ");
+        pageSql.Append(" Description = 'Total Unfunded Commitment' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        pageSql.Append(" order by Period ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            null,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("amount"),
+                Units = 0,
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsQuarterlyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by quarter_year ");
+        countSql.Append(" ) quarterly_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = quarter_year, ");
+        pageSql.Append(" amount = sum(unfunded_amount), ");
+        pageSql.Append(" Description = 'Quarterly Unfunded' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by quarter_year ");
+        pageSql.Append(" order by quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var periodLabel = reader.GetStringOrEmpty("Period");
+                return new FundGranularRowDto
+                {
+                    Period = periodLabel,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = 0,
+                    Description = string.IsNullOrEmpty(periodLabel)
+                        ? reader.GetStringOrEmpty("Description")
+                        : $"{periodLabel} Unfunded Commitment"
+                };
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsDailyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select fc.fund_key, fc.posted_date_key ");
+        countSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        AppendCommitmentDailyPeriodJoinAndWhere(countSql, period);
+        countSql.Append(" group by fc.fund_key, fc.posted_date_key ");
+        countSql.Append(" having sum(fc.committed_amount_fmv) != 0 ");
+        countSql.Append(" ) daily_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" fc.fund_key, ");
+        pageSql.Append(" fc.posted_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fc.posted_date_key as varchar(8)), 112) as full_date, ");
+        pageSql.Append(" amount = sum(fc.committed_amount_fmv) ");
+        pageSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        AppendCommitmentDailyPeriodJoinAndWhere(pageSql, period);
+        pageSql.Append(" group by fc.fund_key, fc.posted_date_key ");
+        pageSql.Append(" having sum(fc.committed_amount_fmv) != 0 ");
+        pageSql.Append(" order by fc.posted_date_key ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var postedDateKey = reader.GetInt32OrDefault("posted_date_key");
+                return new FundGranularRowDto
+                {
+                    Date = reader.GetNullableDateTime("full_date"),
+                    PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = 0,
+                    Description = "Remaining commitment"
+                };
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundNavLtdInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select case when exists ( ");
+        countSql.Append(" select 1 ");
+        countSql.Append($" from {WarehouseTables.FactFundNav} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append(" ) then 1 else 0 end ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append(" amount = sum(nav), ");
+        pageSql.Append(" Description = 'Total NAV' ");
+        pageSql.Append($" from {WarehouseTables.FactFundNav} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        pageSql.Append(" order by Period ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            null,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("amount"),
+                Units = reader.GetDecimalFromColumns("units", "nav_units"),
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundNavQuarterlyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select d.quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+        countSql.Append(" where n.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by d.quarter_year ");
+        countSql.Append(" ) quarterly_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = d.quarter_year, ");
+        pageSql.Append(" amount = sum(n.nav), ");
+        pageSql.Append(" Description = 'Quarterly NAV' ");
+        pageSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+        pageSql.Append(" where n.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by d.quarter_year ");
+        pageSql.Append(" order by d.quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var periodLabel = reader.GetStringOrEmpty("Period");
+                return new FundGranularRowDto
+                {
+                    Period = periodLabel,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalFromColumns("units", "nav_units"),
+                    Description = string.IsNullOrEmpty(periodLabel) ? reader.GetStringOrEmpty("Description") : $"{periodLabel} NAV"
+                };
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundNavDailyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select n.fund_key, n.date_key ");
+        countSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        AppendNavDailyPeriodJoinAndWhere(countSql, period);
+        countSql.Append(" and isnull(n.nav, 0) != 0 ");
+        countSql.Append(" ) daily_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" n.date_key, ");
+        pageSql.Append(" try_convert(date, cast(n.date_key as varchar(8)), 112) as nav_date, ");
+        pageSql.Append(" amount = n.nav ");
+        pageSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        AppendNavDailyPeriodJoinAndWhere(pageSql, period);
+        pageSql.Append(" and isnull(n.nav, 0) != 0 ");
+        pageSql.Append(" order by n.date_key ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var dateKey = reader.GetInt32OrDefault("date_key");
+                return new FundGranularRowDto
+                {
+                    Date = reader.GetNullableDateTime("nav_date"),
+                    PostedDateKey = dateKey == 0 ? null : dateKey,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalFromColumns("units", "nav_units"),
+                    Description = string.Empty
+                };
+            });
+    }
+
+    private static void AppendNavDailyPeriodJoinAndWhere(StringBuilder sql, FundPeriodFilter? period)
+    {
+        sql.Append(" where n.fund_key = @fundKey ");
+        if (period?.HasDateKey == true)
+        {
+            sql.Append(" and n.date_key = @dateKey ");
+        }
+    }
+
+    private static void AppendDimFundJoinOnFundKey(StringBuilder sql, string factAlias)
+    {
+        sql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = {factAlias}.fund_key ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "df");
+    }
+
+    private static void AppendInvestmentAmountUnitsSelect(StringBuilder sql, string factAlias)
+    {
+        sql.Append(" amount = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
+        sql.Append(" then cast(0 as decimal(38, 10)) ");
+        sql.Append($" else sum(isnull({factAlias}.invested_amount, 0)) end, ");
+        sql.Append(" units = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
+        sql.Append($" then sum(isnull({factAlias}.invested_units, 0)) ");
+        sql.Append(" else cast(0 as decimal(38, 10)) end ");
+    }
+
+    private static void AppendInvestmentMetricHaving(StringBuilder sql, string factAlias)
+    {
+        sql.Append(" having sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' ");
+        sql.Append($" then isnull({factAlias}.invested_units, 0) ");
+        sql.Append($" else isnull({factAlias}.invested_amount, 0) end) != 0 ");
+    }
+
+    private static void AppendDistributionAmountUnitsSelect(StringBuilder sql, string factAlias)
+    {
+        sql.Append(" amount = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
+        sql.Append(" then cast(0 as decimal(38, 10)) ");
+        sql.Append($" else sum(isnull({factAlias}.distributed_amount, 0)) end, ");
+        sql.Append(" units = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
+        sql.Append($" then sum(isnull({factAlias}.distributed_units, 0)) ");
+        sql.Append(" else cast(0 as decimal(38, 10)) end ");
+    }
+
+    private static void AppendDistributionMetricHaving(StringBuilder sql, string factAlias)
+    {
+        sql.Append(" having sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' ");
+        sql.Append($" then isnull({factAlias}.distributed_units, 0) ");
+        sql.Append($" else isnull({factAlias}.distributed_amount, 0) end) != 0 ");
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsLtdInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select case when exists ( ");
+        countSql.Append(" select 1 ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append(" ) then 1 else 0 end ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append(" amount = sum(isnull(net_invested_capital_amount, 0)), ");
+        pageSql.Append(" units = sum(isnull(net_invested_capital_units, 0)), ");
+        pageSql.Append(" Description = 'Total Investment' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        pageSql.Append(" order by Period ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            null,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("amount"),
+                Units = reader.GetDecimalOrDefault("units"),
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsQuarterlyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by quarter_year ");
+        countSql.Append(" ) quarterly_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = quarter_year, ");
+        pageSql.Append(" amount = sum(isnull(net_invested_capital_amount, 0)), ");
+        pageSql.Append(" units = sum(isnull(net_invested_capital_units, 0)), ");
+        pageSql.Append(" Description = 'Quarterly Investment' ");
+        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        pageSql.Append(" where fund_key = @fundKey ");
+        AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by quarter_year ");
+        pageSql.Append(" order by quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var periodLabel = reader.GetStringOrEmpty("Period");
+                return new FundGranularRowDto
+                {
+                    Period = periodLabel,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalOrDefault("units"),
+                    Description = string.IsNullOrEmpty(periodLabel)
+                        ? reader.GetStringOrEmpty("Description")
+                        : $"{periodLabel} Investment"
+                };
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsDailyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select fi.fund_key, fi.calculation_date_key ");
+        countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        AppendDimFundJoinOnFundKey(countSql, "fi");
+        AppendInvestmentDailyPeriodJoinAndWhere(countSql, period);
+        countSql.Append(" group by fi.fund_key, fi.calculation_date_key ");
+        AppendInvestmentMetricHaving(countSql, "fi");
+        countSql.Append(" ) daily_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" fi.calculation_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fi.calculation_date_key as varchar(8)), 112) as full_date, ");
+        AppendInvestmentAmountUnitsSelect(pageSql, "fi");
+        pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        AppendDimFundJoinOnFundKey(pageSql, "fi");
+        AppendInvestmentDailyPeriodJoinAndWhere(pageSql, period);
+        pageSql.Append(" group by fi.fund_key, fi.calculation_date_key ");
+        AppendInvestmentMetricHaving(pageSql, "fi");
+        pageSql.Append(" order by fi.calculation_date_key ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var calculationDateKey = reader.GetInt32OrDefault("calculation_date_key");
+                return new FundGranularRowDto
+                {
+                    Date = reader.GetNullableDateTime("full_date"),
+                    PostedDateKey = calculationDateKey == 0 ? null : calculationDateKey,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalOrDefault("units"),
+                    Description = string.Empty
+                };
+            });
+    }
+
+    private static void AppendInvestmentDailyPeriodJoinAndWhere(StringBuilder sql, FundPeriodFilter? period)
+    {
+        sql.Append(" where fi.fund_key = @fundKey ");
+        if (period?.HasDateKey == true)
+        {
+            sql.Append(" and fi.calculation_date_key = @dateKey ");
+        }
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsLtdInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select case when exists ( ");
+        countSql.Append(" select 1 ");
+        countSql.Append($" from {WarehouseTables.FactDistribution} ");
+        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append(" ) then 1 else 0 end ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = 'Life To Date', ");
+        AppendDistributionAmountUnitsSelect(pageSql, "fd");
+        pageSql.Append(", Description = 'Total Distribution' ");
+        pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendDimFundJoinOnFundKey(pageSql, "fd");
+        pageSql.Append(" where fd.fund_key = @fundKey ");
+        pageSql.Append(" order by Period ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            null,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader => new FundGranularRowDto
+            {
+                Period = reader.GetStringOrEmpty("Period"),
+                Amount = reader.GetDecimalOrDefault("amount"),
+                Units = reader.GetDecimalOrDefault("units"),
+                Description = reader.GetStringOrEmpty("Description")
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsQuarterlyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select d.quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendDimFundJoinOnFundKey(countSql, "fd");
+        countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+        countSql.Append(" where fd.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by d.quarter_year ");
+        AppendDistributionMetricHaving(countSql, "fd");
+        countSql.Append(" ) quarterly_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" Period = d.quarter_year, ");
+        AppendDistributionAmountUnitsSelect(pageSql, "fd");
+        pageSql.Append(", Description = 'Quarterly Distribution' ");
+        pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendDimFundJoinOnFundKey(pageSql, "fd");
+        pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+        pageSql.Append(" where fd.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by d.quarter_year ");
+        pageSql.Append(" order by d.quarter_year ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var periodLabel = reader.GetStringOrEmpty("Period");
+                return new FundGranularRowDto
+                {
+                    Period = periodLabel,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalOrDefault("units"),
+                    Description = string.IsNullOrEmpty(periodLabel)
+                        ? reader.GetStringOrEmpty("Description")
+                        : $"{periodLabel} Distribution"
+                };
+            });
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsDailyInternalAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select fd.fund_key, fd.calculation_date_key ");
+        countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendDimFundJoinOnFundKey(countSql, "fd");
+        AppendDistributionDailyPeriodJoinAndWhere(countSql, period);
+        countSql.Append(" group by fd.fund_key, fd.calculation_date_key ");
+        AppendDistributionMetricHaving(countSql, "fd");
+        countSql.Append(" ) daily_rows ");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" fd.calculation_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fd.calculation_date_key as varchar(8)), 112) as full_date, ");
+        AppendDistributionAmountUnitsSelect(pageSql, "fd");
+        pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendDimFundJoinOnFundKey(pageSql, "fd");
+        AppendDistributionDailyPeriodJoinAndWhere(pageSql, period);
+        pageSql.Append(" group by fd.fund_key, fd.calculation_date_key ");
+        AppendDistributionMetricHaving(pageSql, "fd");
+        pageSql.Append(" order by fd.calculation_date_key ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundGranularPageQueryAsync(
+            fundKey,
+            period,
+            normalizedPage,
+            normalizedPageSize,
+            offset,
+            countSql,
+            pageSql,
+            static reader =>
+            {
+                var calculationDateKey = reader.GetInt32OrDefault("calculation_date_key");
+                return new FundGranularRowDto
+                {
+                    Date = reader.GetNullableDateTime("full_date"),
+                    PostedDateKey = calculationDateKey == 0 ? null : calculationDateKey,
+                    Amount = reader.GetDecimalOrDefault("amount"),
+                    Units = reader.GetDecimalOrDefault("units"),
+                    Description = string.Empty
+                };
+            });
+    }
+
+    private static void AppendDistributionDailyPeriodJoinAndWhere(StringBuilder sql, FundPeriodFilter? period)
+    {
+        sql.Append(" where fd.fund_key = @fundKey ");
+        if (period?.HasDateKey == true)
+        {
+            sql.Append(" and fd.calculation_date_key = @dateKey ");
+        }
+    }
+
+    private async Task<PagedResult<FundGranularRowDto>> ExecuteFundGranularPageQueryAsync(
+        int fundKey,
+        FundPeriodFilter? period,
+        int normalizedPage,
+        int normalizedPageSize,
+        int offset,
+        StringBuilder countSql,
+        StringBuilder pageSql,
+        Func<SqlDataReader, FundGranularRowDto> mapRow)
+    {
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        AddGranularPeriodParameters(countCommand, fundKey, period);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        AddGranularPeriodParameters(pageCommand, fundKey, period);
+        pageCommand.Parameters.AddWithValue("@offset", offset);
+        pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
+
+        var items = new List<FundGranularRowDto>();
+        await using (var reader = await pageCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                items.Add(mapRow(reader));
+            }
+        }
+
+        return new PagedResult<FundGranularRowDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private static void AddGranularPeriodParameters(SqlCommand command, int fundKey, FundPeriodFilter? period)
+    {
+        command.Parameters.AddWithValue("@fundKey", fundKey);
+        command.Parameters.AddWithValue("@dateKey", (object?)period?.DateKey ?? DBNull.Value);
+    }
+
 }
