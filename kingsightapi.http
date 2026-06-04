@@ -5,3 +5,41 @@ GET {{api_HostAddress}}/api/CmhcUpload/history
 Accept: application/json
 
 ###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/lookups
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/default-status-options
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/exit-plan-options
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/DefaultSubjectiveAnalytics
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanKey": 5037,
+      "defaultStatus": "Executing Plan",
+      "exitPlan": "Timing",
+      "exitDate": "2025-06-30",
+      "maturityAdditionalDetail": "Extension under review",
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
