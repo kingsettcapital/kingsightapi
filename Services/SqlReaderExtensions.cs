@@ -53,7 +53,48 @@ internal static class SqlReaderExtensions
     public static DateTime? GetNullableDateTime(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
-        return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return ConvertToNullableDateTime(reader.GetValue(ordinal));
+    }
+
+    /// <summary>Reads a date column that may be returned as DateTime, date string, or yyyyMMdd int (date_key).</summary>
+    public static DateTime? GetNullableDateTimeFlexible(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return ConvertToNullableDateTime(reader.GetValue(ordinal));
+    }
+
+    private static DateTime? ConvertToNullableDateTime(object value) =>
+        value switch
+        {
+            DateTime dt => dt,
+            DateTimeOffset dto => dto.DateTime,
+            string s when DateTime.TryParse(s, out var parsed) => parsed,
+            string s when int.TryParse(s, out var dateKey) => DateKeyToDate(dateKey),
+            int dateKey => DateKeyToDate(dateKey),
+            long dateKey => DateKeyToDate(Convert.ToInt32(dateKey)),
+            _ => null
+        };
+
+    private static DateTime? DateKeyToDate(int dateKey)
+    {
+        if (dateKey <= 0)
+        {
+            return null;
+        }
+
+        var text = dateKey.ToString();
+        return DateTime.TryParseExact(text, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var parsed)
+            ? parsed
+            : null;
     }
 
     public static string? GetNullableStringIfPresent(this SqlDataReader reader, string column)

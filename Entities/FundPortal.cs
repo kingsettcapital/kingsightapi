@@ -51,13 +51,59 @@ public sealed class FundSummaryDto
 public sealed class FundInvestorDto
 {
     public long InvestorKey { get; init; }
+
     public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("relationship_name")]
+    public string RelationshipName { get; init; } = string.Empty;
+
     public string InvestorType { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_first_name")]
+    public string ContactFirstName { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_last_name")]
+    public string ContactLastName { get; init; } = string.Empty;
+
     public decimal TotalInvested { get; init; }
+
     public decimal TotalInvestedFmv { get; init; }
+
     public string Status { get; init; } = string.Empty;
+
     public DateTime? MemberSince { get; init; }
+
     public int? JoinYear { get; init; }
+}
+
+/// <summary>Assets (dim_property) tab on fund detail.</summary>
+public sealed class FundAssetDto
+{
+    public long PropertyKey { get; init; }
+
+    [JsonPropertyName("property_name")]
+    public string PropertyName { get; init; } = string.Empty;
+
+    public string City { get; init; } = string.Empty;
+
+    public string Province { get; init; } = string.Empty;
+
+    public string Geography { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_type")]
+    public string AssetType { get; init; } = string.Empty;
+
+    [JsonPropertyName("investment_type")]
+    public string InvestmentType { get; init; } = string.Empty;
+
+    [JsonPropertyName("property_status")]
+    public string PropertyStatus { get; init; } = string.Empty;
+
+    [JsonPropertyName("property_acquisition")]
+    public string? PropertyAcquisition { get; init; }
+
+    [JsonPropertyName("property_disposition")]
+    public string? PropertyDisposition { get; init; }
 }
 
 /// <summary>Period dropdown option (quarter or day) scoped by fund, view, and metric.</summary>
@@ -93,18 +139,81 @@ public sealed class FundPeriodDto
 /// <summary>Fund table row for LTD, quarterly, or daily views (commitments, NAV, etc.).</summary>
 public sealed class FundGranularRowDto
 {
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvestorCode { get; init; }
+
     /// <summary>LTD / quarterly label (e.g. "Life To Date", "Q4 2022"). Null for daily.</summary>
     public string? Period { get; init; }
 
-    /// <summary>Date for daily view (commitments: from posted date). Null for LTD / quarterly.</summary>
+    /// <summary>Distribution rows: expandable group header from dim_transaction_type.</summary>
+    [JsonPropertyName("transaction_type")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TransactionType { get; init; }
+
+    /// <summary>Date for daily view. Null for LTD / quarterly.</summary>
     public DateTime? Date { get; init; }
 
     [JsonPropertyName("posted_date_key")]
     public int? PostedDateKey { get; init; }
 
-    public decimal Amount { get; init; }
+    [JsonPropertyName("commitment_amount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? CommitmentAmount { get; init; }
 
-    public decimal Units { get; init; }
+    [JsonPropertyName("invested_amount")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? InvestedAmount { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? Amount { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? Units { get; init; }
 
     public string Description { get; init; } = string.Empty;
+}
+
+/// <summary>One period (or day) line within a distribution transaction-type group.</summary>
+public sealed class FundDistributionPeriodRowDto
+{
+    public string? Period { get; init; }
+
+    public DateTime? Date { get; init; }
+
+    [JsonPropertyName("posted_date_key")]
+    public int? PostedDateKey { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? Amount { get; init; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? Units { get; init; }
+
+    public string Description { get; init; } = string.Empty;
+}
+
+/// <summary>Distributions tab: rows grouped by dim_transaction_type for expandable UI sections.</summary>
+public sealed class FundDistributionGroupDto
+{
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_code")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InvestorCode { get; init; }
+
+    [JsonPropertyName("transaction_type")]
+    public string TransactionType { get; init; } = string.Empty;
+
+    public IReadOnlyList<FundDistributionPeriodRowDto> Periods { get; init; } = [];
+
+    [JsonPropertyName("total_amount")]
+    public decimal TotalAmount { get; init; }
+
+    [JsonPropertyName("total_units")]
+    public decimal TotalUnits { get; init; }
 }

@@ -105,4 +105,10 @@ internal static class WarehouseSql
         sql.Append($" or isnull({propertyAlias}.fund, '') = isnull({fundAlias}.js_fund_name, '') ");
         sql.Append(" ) ");
     }
+
+    /// <summary>Property rows at fund level 000 Property (warehouse may use '000 - Property').</summary>
+    public static void AppendPropertyFundLevel000Filter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and isnull({propertyAlias}.fund_level, '') in ('000 Property', '000 - Property') ");
+    }
 }

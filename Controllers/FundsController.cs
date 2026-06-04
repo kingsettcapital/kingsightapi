@@ -107,15 +107,41 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/investors?search=
-    [HttpGet("{fundKey:int}/investors")]
-    public async Task<ActionResult<IReadOnlyList<FundInvestorDto>>> GetInvestors(
+    // GET: api/funds/{fundKey}/assets?page=1&pageSize=50
+    [HttpGet("{fundKey:int}/assets")]
+    public async Task<ActionResult<PagedResult<FundAssetDto>>> GetAssets(
         int fundKey,
-        [FromQuery] string? search)
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
     {
         try
         {
-            var result = await _service.GetFundInvestorsAsync(fundKey, search);
+            var result = await _service.GetFundAssetsAsync(fundKey, page, pageSize);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving assets for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund assets.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/investors?search=&page=1&pageSize=50
+    [HttpGet("{fundKey:int}/investors")]
+    public async Task<ActionResult<PagedResult<FundInvestorDto>>> GetInvestors(
+        int fundKey,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        try
+        {
+            var result = await _service.GetFundInvestorsAsync(fundKey, search, page, pageSize);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -246,7 +272,7 @@ public class FundsController : ControllerBase
 
     // GET: api/funds/{fundKey}/distributions?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
     [HttpGet("{fundKey:int}/distributions")]
-    public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetDistributions(
+    public async Task<ActionResult<PagedResult<FundDistributionGroupDto>>> GetDistributions(
         int fundKey,
         [FromQuery] TimeGranularity? view,
         [FromQuery] int? dateKey,

@@ -5,14 +5,7 @@ using Microsoft.Data.SqlClient;
 
 namespace kingsightapi.Services;
 
-public interface IInvestorPortalService
-{
-    Task<PagedResult<InvestorListItemDto>> GetInvestorsAsync(string? search, int page, int pageSize);
-    Task<InvestorDetailDto?> GetInvestorByKeyAsync(long investorKey);
-    Task<IReadOnlyList<InvestorInvestmentDto>> GetInvestorInvestmentsAsync(long investorKey);
-}
-
-public sealed class InvestorPortalService : IInvestorPortalService
+public sealed partial class InvestorPortalService : IInvestorPortalService
 {
     private readonly string _connectionString;
     private readonly ILogger<InvestorPortalService> _logger;
@@ -60,20 +53,20 @@ public sealed class InvestorPortalService : IInvestorPortalService
         }
     }
 
-    public async Task<IReadOnlyList<InvestorInvestmentDto>> GetInvestorInvestmentsAsync(long investorKey)
+    public async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize)
     {
         try
         {
-            return await GetInvestorInvestmentsInternalAsync(investorKey);
+            return await GetInvestorFundsInternalAsync(investorKey, page, pageSize);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get investments for investor {InvestorKey} cancelled", investorKey);
+            _logger.LogInformation("Get funds for investor {InvestorKey} cancelled", investorKey);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investments for investor {InvestorKey}", investorKey);
+            _logger.LogError(ex, "Error retrieving funds for investor {InvestorKey}", investorKey);
             throw;
         }
     }
@@ -385,31 +378,30 @@ public sealed class InvestorPortalService : IInvestorPortalService
         };
     }
 
-    private async Task<IReadOnlyList<InvestorInvestmentDto>> GetInvestorInvestmentsInternalAsync(long investorKey)
+    private async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsInternalAsync(long investorKey, int page, int pageSize)
     {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        AppendInvestorFundsBaseSelect(countSql);
+        countSql.Append(" ) fund_rows ");
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        countCommand.Parameters.AddWithValue("@investorKey", investorKey);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
         var fundsSql = new StringBuilder();
-        fundsSql.Append(" select ");
-        fundsSql.Append(" df.fund_key, ");
-        fundsSql.Append(" isnull(df.fund_name, '') as fund_name, ");
-        fundsSql.Append(" isnull(df.fund_type_name, '') as fund_type, ");
-        fundsSql.Append(" isnull(df.fund_strategy_name, isnull(df.fund_type_name, '')) as fund_category, ");
-        fundsSql.Append(" case ");
-        fundsSql.Append(" when df.dissolution_date is not null then 'Dissolved' ");
-        fundsSql.Append(" when isnull(df.is_current, 1) = 1 then 'Active' ");
-        fundsSql.Append(" else 'Inactive' ");
-        fundsSql.Append(" end as fund_status ");
-        fundsSql.Append(" from ( ");
-        fundsSql.Append($" select distinct fund_key from {WarehouseTables.FactCommitted} where investor_key = @investorKey ");
-        fundsSql.Append(" union ");
-        fundsSql.Append($" select distinct fund_key from {WarehouseTables.FactInvestment} where investor_key = @investorKey ");
-        fundsSql.Append(" ) fk ");
-        fundsSql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fk.fund_key ");
-        fundsSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(fundsSql, "df");
+        AppendInvestorFundsBaseSelect(fundsSql);
         fundsSql.Append(" order by df.fund_name ");
+        fundsSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         var funds = new List<(int FundKey, string FundName, string FundType, string FundCategory, string Status)>();
         await using (var fundsCommand = new SqlCommand(fundsSql.ToString(), connection)
@@ -418,6 +410,8 @@ public sealed class InvestorPortalService : IInvestorPortalService
         })
         {
             fundsCommand.Parameters.AddWithValue("@investorKey", investorKey);
+            fundsCommand.Parameters.AddWithValue("@offset", offset);
+            fundsCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
             await using var fundsReader = await fundsCommand.ExecuteReaderAsync();
             while (await fundsReader.ReadAsync())
@@ -434,7 +428,19 @@ public sealed class InvestorPortalService : IInvestorPortalService
 
         if (funds.Count == 0)
         {
-            return [];
+            return new PagedResult<InvestorInvestmentDto>
+            {
+                Items = [],
+                Page = normalizedPage,
+                PageSize = normalizedPageSize,
+                TotalCount = totalCount
+            };
+        }
+
+        var fundKeyParameters = new List<string>();
+        for (var i = 0; i < funds.Count; i++)
+        {
+            fundKeyParameters.Add($"@fundKey{i}");
         }
 
         var aggregateSql = new StringBuilder();
@@ -477,6 +483,7 @@ public sealed class InvestorPortalService : IInvestorPortalService
         aggregateSql.Append(" where fi.investor_key = @investorKey ");
         aggregateSql.Append(" group by fi.fund_key ");
         aggregateSql.Append(" ) inv on inv.fund_key = x.fund_key ");
+        aggregateSql.Append($" where x.fund_key in ({string.Join(", ", fundKeyParameters)}) ");
 
         var totalsByFundKey = new Dictionary<int, (decimal InvestedAmountTotal, decimal InvestedAmountFmvTotal, decimal? TotalReturnPercent)>();
         await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
@@ -485,6 +492,10 @@ public sealed class InvestorPortalService : IInvestorPortalService
         })
         {
             aggregateCommand.Parameters.AddWithValue("@investorKey", investorKey);
+            for (var i = 0; i < funds.Count; i++)
+            {
+                aggregateCommand.Parameters.AddWithValue(fundKeyParameters[i], funds[i].FundKey);
+            }
 
             await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
             while (await aggregateReader.ReadAsync())
@@ -516,6 +527,34 @@ public sealed class InvestorPortalService : IInvestorPortalService
             });
         }
 
-        return items;
+        return new PagedResult<InvestorInvestmentDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private static void AppendInvestorFundsBaseSelect(StringBuilder sql)
+    {
+        sql.Append(" select ");
+        sql.Append(" df.fund_key, ");
+        sql.Append(" isnull(df.fund_name, '') as fund_name, ");
+        sql.Append(" isnull(df.fund_type_name, '') as fund_type, ");
+        sql.Append(" isnull(df.fund_strategy_name, isnull(df.fund_type_name, '')) as fund_category, ");
+        sql.Append(" case ");
+        sql.Append(" when df.dissolution_date is not null then 'Dissolved' ");
+        sql.Append(" when isnull(df.is_current, 1) = 1 then 'Active' ");
+        sql.Append(" else 'Inactive' ");
+        sql.Append(" end as fund_status ");
+        sql.Append(" from ( ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactCommitted} where investor_key = @investorKey ");
+        sql.Append(" union ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactInvestment} where investor_key = @investorKey ");
+        sql.Append(" ) fk ");
+        sql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fk.fund_key ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "df");
     }
 }
