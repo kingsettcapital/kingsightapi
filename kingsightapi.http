@@ -1,6 +1,7 @@
-@idpapi_HostAddress = http://localhost:5181
+@api_HostAddress = https://localhost:7140
+@api_HostAddressHttp = http://localhost:5181
 
-GET {{idpapi_HostAddress}}/weatherforecast/
+GET {{api_HostAddress}}/api/CmhcUpload/history
 Accept: application/json
 
 ###

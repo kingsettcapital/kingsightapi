@@ -5,51 +5,11 @@ using Microsoft.Data.SqlClient;
 
 namespace kingsightapi.Services;
 
-public interface IFundPortalService
-{
-    Task<PagedResult<FundListItemDto>> GetFundsAsync(string? search, int page, int pageSize);
-    Task<FundDetailDto?> GetFundByKeyAsync(int fundKey);
-    Task<IReadOnlyList<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search);
-    Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundMetricSource source,
-        int page,
-        int pageSize);
-    Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-    Task<PagedResult<FundGranularRowDto>> GetFundNavAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-    Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-    Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-    Task<PagedResult<FundGranularRowDto>> GetFundDistributionsAsync(
-        int fundKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-}
-
 public sealed class FundPortalService : IFundPortalService
 {
+    /// <summary>Max flat distribution rows loaded before grouping (fund-level datasets are small).</summary>
+    private const int DistributionGroupingFetchCap = 10_000;
+
     private readonly string _connectionString;
     private readonly ILogger<FundPortalService> _logger;
 
@@ -96,11 +56,11 @@ public sealed class FundPortalService : IFundPortalService
         }
     }
 
-    public async Task<IReadOnlyList<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search)
+    public async Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize)
     {
         try
         {
-            return await GetFundInvestorsInternalAsync(fundKey, search);
+            return await GetFundInvestorsInternalAsync(fundKey, search, page, pageSize);
         }
         catch (OperationCanceledException)
         {
@@ -290,7 +250,7 @@ public sealed class FundPortalService : IFundPortalService
         }
     }
 
-    public async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsAsync(
+    public async Task<PagedResult<FundDistributionGroupDto>> GetFundDistributionsAsync(
         int fundKey,
         TimeGranularity view,
         FundPeriodFilter? period,
@@ -299,13 +259,25 @@ public sealed class FundPortalService : IFundPortalService
     {
         try
         {
-            return view switch
+            var flat = view switch
             {
-                TimeGranularity.Ltd => await GetFundDistributionsLtdInternalAsync(fundKey, page, pageSize),
-                TimeGranularity.Quarterly => await GetFundDistributionsQuarterlyInternalAsync(fundKey, period, page, pageSize),
-                TimeGranularity.Daily => await GetFundDistributionsDailyInternalAsync(fundKey, period, page, pageSize),
+                TimeGranularity.Ltd => await GetFundDistributionsLtdInternalAsync(fundKey, 1, DistributionGroupingFetchCap),
+                TimeGranularity.Quarterly => await GetFundDistributionsQuarterlyInternalAsync(fundKey, period, 1, DistributionGroupingFetchCap),
+                TimeGranularity.Daily => await GetFundDistributionsDailyInternalAsync(fundKey, period, 1, DistributionGroupingFetchCap),
                 _ => throw new ArgumentOutOfRangeException(nameof(view), view, "Unsupported time granularity.")
             };
+
+            if (flat.TotalCount > flat.Items.Count)
+            {
+                _logger.LogWarning(
+                    "Fund {FundKey} distributions ({View}) truncated at {Cap} rows before grouping; total flat rows {Total}.",
+                    fundKey,
+                    view,
+                    DistributionGroupingFetchCap,
+                    flat.TotalCount);
+            }
+
+            return BuildGroupedDistributionPage(flat.Items, page, pageSize);
         }
         catch (OperationCanceledException)
         {
@@ -505,6 +477,7 @@ public sealed class FundPortalService : IFundPortalService
         summarySql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(summarySql, "p");
         WarehouseSql.AppendPropertyBelongsToFundFilter(summarySql, "p", "f");
+        WarehouseSql.AppendPropertyFundLevel000Filter(summarySql, "p");
         summarySql.Append(" ) assets ");
         summarySql.Append(" outer apply ( ");
         summarySql.Append(" select count(*) as investors_count ");
@@ -620,34 +593,136 @@ public sealed class FundPortalService : IFundPortalService
         };
     }
 
-    private async Task<IReadOnlyList<FundInvestorDto>> GetFundInvestorsInternalAsync(int fundKey, string? search)
+    public async Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize)
     {
+        try
+        {
+            return await GetFundAssetsInternalAsync(fundKey, page, pageSize);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving assets for fund {FundKey}", fundKey);
+            throw;
+        }
+    }
+
+    private async Task<PagedResult<FundAssetDto>> GetFundAssetsInternalAsync(int fundKey, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append($" from {WarehouseTables.DimProperty} p ");
+        countSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
+        countSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(countSql, "f");
+        countSql.Append(" where ");
+        WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
+        WarehouseSql.AppendPropertyBelongsToFundFilter(countSql, "p", "f");
+        WarehouseSql.AppendPropertyFundLevel000Filter(countSql, "p");
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" p.property_key, ");
+        pageSql.Append(" isnull(p.property_name, '') as property_name, ");
+        pageSql.Append(" isnull(p.city, '') as city, ");
+        pageSql.Append(" isnull(p.province, '') as province, ");
+        pageSql.Append(" isnull(p.geography, '') as geography, ");
+        pageSql.Append(" isnull(p.asset_type, '') as asset_type, ");
+        pageSql.Append(" isnull(p.investment_type, '') as investment_type, ");
+        pageSql.Append(" isnull(p.property_status, '') as property_status, ");
+        pageSql.Append(" p.property_acquisition, ");
+        pageSql.Append(" p.property_disposition ");
+        pageSql.Append($" from {WarehouseTables.DimProperty} p ");
+        pageSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
+        pageSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(pageSql, "f");
+        pageSql.Append(" where ");
+        WarehouseSql.AppendCurrentPropertyFilter(pageSql, "p");
+        WarehouseSql.AppendPropertyBelongsToFundFilter(pageSql, "p", "f");
+        WarehouseSql.AppendPropertyFundLevel000Filter(pageSql, "p");
+        pageSql.Append(" order by p.property_name ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        countCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        pageCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        pageCommand.Parameters.AddWithValue("@offset", offset);
+        pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
+
+        var items = new List<FundAssetDto>();
+        await using (var reader = await pageCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                items.Add(new FundAssetDto
+                {
+                    PropertyKey = reader.GetInt64OrDefault("property_key"),
+                    PropertyName = reader.GetStringOrEmpty("property_name"),
+                    City = reader.GetStringOrEmpty("city"),
+                    Province = reader.GetStringOrEmpty("province"),
+                    Geography = reader.GetStringOrEmpty("geography"),
+                    AssetType = reader.GetStringOrEmpty("asset_type"),
+                    InvestmentType = reader.GetStringOrEmpty("investment_type"),
+                    PropertyStatus = reader.GetStringOrEmpty("property_status"),
+                    PropertyAcquisition = reader.GetNullableStringIfPresent("property_acquisition"),
+                    PropertyDisposition = reader.GetNullableStringIfPresent("property_disposition")
+                });
+            }
+        }
+
+        return new PagedResult<FundAssetDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private async Task<PagedResult<FundInvestorDto>> GetFundInvestorsInternalAsync(int fundKey, string? search, int page, int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        AppendFundInvestorsBaseSelect(countSql);
+        countSql.Append(" ) investor_rows ");
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        countCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
         var investorsSql = new StringBuilder();
-        investorsSql.Append(" select ");
-        investorsSql.Append(" i.investor_key, ");
-        investorsSql.Append(" i.investor_name, ");
-        investorsSql.Append(" isnull(i.investor_type_name, '') as investor_type_name, ");
-        investorsSql.Append(" case when isnull(i.is_current, 1) = 1 then 'Active' else 'Inactive' end as investor_status, ");
-        investorsSql.Append(" i.valid_from as member_since, ");
-        investorsSql.Append(" year(i.valid_from) as join_year ");
-        investorsSql.Append(" from ( ");
-        investorsSql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = @fundKey ");
-        investorsSql.Append(" union ");
-        investorsSql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = @fundKey ");
-        investorsSql.Append(" ) x ");
-        investorsSql.Append($" inner join {WarehouseTables.DimInvestor} i on i.investor_key = x.investor_key ");
-        investorsSql.Append(" and ");
-        WarehouseSql.AppendCurrentInvestorFilter(investorsSql, "i");
-        WarehouseSql.AppendInvestorSearchFilter(investorsSql, "i");
-        investorsSql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = @fundKey ");
-        investorsSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(investorsSql, "df");
+        AppendFundInvestorsBaseSelect(investorsSql);
         investorsSql.Append(" order by i.investor_name ");
+        investorsSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var investorsCommand = new SqlCommand(investorsSql.ToString(), connection)
         {
@@ -655,8 +730,10 @@ public sealed class FundPortalService : IFundPortalService
         };
         investorsCommand.Parameters.AddWithValue("@fundKey", fundKey);
         investorsCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        investorsCommand.Parameters.AddWithValue("@offset", offset);
+        investorsCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
-        var investors = new List<(long InvestorKey, string InvestorName, string InvestorType, string Status, DateTime? MemberSince, int? JoinYear)>();
+        var investors = new List<(long InvestorKey, string InvestorName, string RelationshipName, string InvestorType, string ContactFirstName, string ContactLastName, string Status, DateTime? MemberSince, int? JoinYear)>();
         await using (var investorsReader = await investorsCommand.ExecuteReaderAsync())
         {
             while (await investorsReader.ReadAsync())
@@ -668,7 +745,10 @@ public sealed class FundPortalService : IFundPortalService
                 investors.Add((
                     investorsReader.GetInt64OrDefault("investor_key"),
                     investorsReader.GetStringOrEmpty("investor_name"),
+                    investorsReader.GetStringOrEmpty("relationship_name"),
                     investorsReader.GetStringOrEmpty("investor_type_name"),
+                    investorsReader.GetStringOrEmpty("contact_first_name"),
+                    investorsReader.GetStringOrEmpty("contact_last_name"),
                     investorsReader.GetStringOrEmpty("investor_status"),
                     memberSince,
                     joinYear
@@ -678,7 +758,13 @@ public sealed class FundPortalService : IFundPortalService
 
         if (investors.Count == 0)
         {
-            return [];
+            return new PagedResult<FundInvestorDto>
+            {
+                Items = [],
+                Page = normalizedPage,
+                PageSize = normalizedPageSize,
+                TotalCount = totalCount
+            };
         }
 
         var aggregateSql = new StringBuilder();
@@ -686,6 +772,12 @@ public sealed class FundPortalService : IFundPortalService
         aggregateSql.Append(" x.investor_key, ");
         aggregateSql.Append(" isnull(comm.total_invested_amount, 0) as total_invested_amount, ");
         aggregateSql.Append(" isnull(inv.total_invested_fmv, 0) as total_invested_fmv ");
+        var investorKeyParameters = new List<string>();
+        for (var i = 0; i < investors.Count; i++)
+        {
+            investorKeyParameters.Add($"@investorKey{i}");
+        }
+
         aggregateSql.Append(" from ( ");
         aggregateSql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = @fundKey ");
         aggregateSql.Append(" union ");
@@ -714,6 +806,7 @@ public sealed class FundPortalService : IFundPortalService
         aggregateSql.Append(" where fi.fund_key = @fundKey ");
         aggregateSql.Append(" group by fi.investor_key ");
         aggregateSql.Append(" ) inv on inv.investor_key = x.investor_key ");
+        aggregateSql.Append($" where x.investor_key in ({string.Join(", ", investorKeyParameters)}) ");
 
         var totalsByInvestorKey = new Dictionary<long, (decimal TotalInvestedAmount, decimal TotalInvestedFmv)>();
         await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
@@ -722,6 +815,10 @@ public sealed class FundPortalService : IFundPortalService
         })
         {
             aggregateCommand.Parameters.AddWithValue("@fundKey", fundKey);
+            for (var i = 0; i < investors.Count; i++)
+            {
+                aggregateCommand.Parameters.AddWithValue(investorKeyParameters[i], investors[i].InvestorKey);
+            }
 
             await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
             while (await aggregateReader.ReadAsync())
@@ -743,7 +840,10 @@ public sealed class FundPortalService : IFundPortalService
             {
                 InvestorKey = investor.InvestorKey,
                 InvestorName = investor.InvestorName,
+                RelationshipName = investor.RelationshipName,
                 InvestorType = investor.InvestorType,
+                ContactFirstName = investor.ContactFirstName,
+                ContactLastName = investor.ContactLastName,
                 Status = investor.Status,
                 TotalInvested = totals.TotalInvestedAmount,
                 TotalInvestedFmv = totals.TotalInvestedFmv,
@@ -752,7 +852,39 @@ public sealed class FundPortalService : IFundPortalService
             });
         }
 
-        return items;
+        return new PagedResult<FundInvestorDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private static void AppendFundInvestorsBaseSelect(StringBuilder sql)
+    {
+        sql.Append(" select ");
+        sql.Append(" i.investor_key, ");
+        sql.Append(" i.investor_name, ");
+        sql.Append(" isnull(i.relationship_name, '') as relationship_name, ");
+        sql.Append(" isnull(i.investor_type_name, '') as investor_type_name, ");
+        sql.Append(" isnull(i.contact_first_name, '') as contact_first_name, ");
+        sql.Append(" isnull(i.contact_last_name, '') as contact_last_name, ");
+        sql.Append(" case when isnull(i.is_current, 1) = 1 then 'Active' else 'Inactive' end as investor_status, ");
+        sql.Append(" i.valid_from as member_since, ");
+        sql.Append(" year(i.valid_from) as join_year ");
+        sql.Append(" from ( ");
+        sql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = @fundKey ");
+        sql.Append(" union ");
+        sql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = @fundKey ");
+        sql.Append(" ) x ");
+        sql.Append($" inner join {WarehouseTables.DimInvestor} i on i.investor_key = x.investor_key ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentInvestorFilter(sql, "i");
+        WarehouseSql.AppendInvestorSearchFilter(sql, "i");
+        sql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = @fundKey ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "df");
     }
 
     private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int pageSize)
@@ -817,8 +949,8 @@ public sealed class FundPortalService : IFundPortalService
         pageSql.Append(source switch
         {
             FundMetricSource.Commitments or FundMetricSource.UnfundedCommitments => " order by fc.posted_date_key desc ",
-            FundMetricSource.Investments => " order by fi.calculation_date_key desc ",
-            FundMetricSource.Distributions => " order by fd.calculation_date_key desc ",
+            FundMetricSource.Investments => " order by fi.posted_date_key desc ",
+            FundMetricSource.Distributions => " order by fd.posted_date_key desc ",
             _ => " order by date_key desc "
         });
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -838,22 +970,29 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" max(d.month_year) as month_year ");
 
         if (source is FundMetricSource.Commitments
-            or FundMetricSource.UnfundedCommitments
-            or FundMetricSource.Investments)
+            or FundMetricSource.UnfundedCommitments)
         {
             sql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} q ");
             sql.Append($" inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year ");
             sql.Append(" where q.fund_key = @fundKey ");
             sql.Append(" group by d.quarter_year, d.calendar_year ");
         }
+        else if (source is FundMetricSource.Investments)
+        {
+            sql.Append($" from {WarehouseTables.FactInvestment} fi ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
+            sql.Append(" where fi.fund_key = @fundKey ");
+            sql.Append(" group by d.quarter_year, d.calendar_year ");
+            sql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
+        }
         else if (source is FundMetricSource.Distributions)
         {
             sql.Append($" from {WarehouseTables.FactDistribution} fd ");
             AppendDimFundJoinOnFundKey(sql, "fd");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
             sql.Append(" where fd.fund_key = @fundKey ");
             sql.Append(" group by d.quarter_year, d.calendar_year ");
-            AppendDistributionMetricHaving(sql, "fd");
+            AppendDistributionTotalsHaving(sql);
         }
         else
         {
@@ -875,12 +1014,12 @@ public sealed class FundPortalService : IFundPortalService
         }
         else if (source is FundMetricSource.Investments)
         {
-            sql.Append(" fi.calculation_date_key as date_key, ");
+            sql.Append(" fi.posted_date_key as date_key, ");
             sql.Append(" d.full_date, ");
         }
         else if (source is FundMetricSource.Distributions)
         {
-            sql.Append(" fd.calculation_date_key as date_key, ");
+            sql.Append(" fd.posted_date_key as date_key, ");
             sql.Append(" d.full_date, ");
         }
         else
@@ -919,23 +1058,23 @@ public sealed class FundPortalService : IFundPortalService
         {
             sql.Append($" from {WarehouseTables.FactInvestment} fi ");
             AppendDimFundJoinOnFundKey(sql, "fi");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.calculation_date_key ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
             sql.Append(" where fi.fund_key = @fundKey ");
             sql.Append(" group by ");
-            sql.Append(" fi.calculation_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" fi.posted_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
             sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
-            AppendInvestmentMetricHaving(sql, "fi");
+            sql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         }
         else if (source == FundMetricSource.Distributions)
         {
             sql.Append($" from {WarehouseTables.FactDistribution} fd ");
             AppendDimFundJoinOnFundKey(sql, "fd");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
             sql.Append(" where fd.fund_key = @fundKey ");
             sql.Append(" group by ");
-            sql.Append(" fd.calculation_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
+            sql.Append(" fd.posted_date_key, d.full_date, d.quarter_year, d.calendar_year, d.month_year, ");
             sql.Append(" d.first_date_of_quater, d.last_date_of_quater ");
-            AppendDistributionMetricHaving(sql, "fd");
+            AppendDistributionTotalsHaving(sql);
         }
         else
         {
@@ -1042,6 +1181,7 @@ public sealed class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" Period = 'Life To Date', ");
         pageSql.Append(" commitment_amount = sum(commitment_amount), ");
         pageSql.Append(" Description = 'Total Commitment as of Date' ");
@@ -1058,13 +1198,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader => new FundGranularRowDto
-            {
-                Period = reader.GetStringOrEmpty("Period"),
-                Amount = reader.GetDecimalOrDefault("commitment_amount"),
-                Units = 0,
-                Description = reader.GetStringOrEmpty("Description")
-            });
+            static reader => MapCommitmentRow(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsQuarterlyInternalAsync(
@@ -1087,9 +1221,9 @@ public sealed class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" Period = quarter_year, ");
-        pageSql.Append(" commitment_amount = sum(commitment_amount), ");
-        pageSql.Append(" Description = 'Quarterly Commitment' ");
+        pageSql.Append(" commitment_amount = sum(commitment_amount) ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
         pageSql.Append(" where fund_key = @fundKey ");
         AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
@@ -1105,13 +1239,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader => new FundGranularRowDto
-            {
-                Period = reader.GetStringOrEmpty("Period"),
-                Amount = reader.GetDecimalOrDefault("commitment_amount"),
-                Units = 0,
-                Description = reader.GetStringOrEmpty("Description")
-            });
+            static reader => MapCommitmentRow(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsDailyInternalAsync(
@@ -1134,10 +1262,10 @@ public sealed class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" fc.fund_key, ");
+        AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" fc.posted_date_key, ");
         pageSql.Append(" try_convert(date, cast(fc.posted_date_key as varchar(8)), 112) as full_date, ");
-        pageSql.Append(" amount = sum(fc.committed_amount) ");
+        pageSql.Append(" commitment_amount = sum(fc.committed_amount) ");
         pageSql.Append($" from {WarehouseTables.FactCommitted} fc ");
         AppendCommitmentDailyPeriodJoinAndWhere(pageSql, period);
         pageSql.Append(" group by fc.fund_key, fc.posted_date_key ");
@@ -1156,12 +1284,14 @@ public sealed class FundPortalService : IFundPortalService
             static reader =>
             {
                 var postedDateKey = reader.GetInt32OrDefault("posted_date_key");
+                var row = MapCommitmentRow(reader);
                 return new FundGranularRowDto
                 {
+                    FundCode = row.FundCode,
+                    Period = row.Period,
                     Date = reader.GetNullableDateTime("full_date"),
                     PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
-                    Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = 0,
+                    CommitmentAmount = row.CommitmentAmount,
                     Description = string.Empty
                 };
             });
@@ -1187,7 +1317,7 @@ public sealed class FundPortalService : IFundPortalService
         }
     }
 
-    /// <summary>Filters dim_date quarter when facts join on date_key (NAV, distributions).</summary>
+    /// <summary>Filters dim_date quarter when facts join on posted_date_key (distributions) or date_key (NAV).</summary>
     private static void AppendDimDateQuarterlyPeriodFilter(StringBuilder sql, FundPeriodFilter? period, string dateAlias = "d")
     {
         if (period?.HasDateKey == true)
@@ -1231,7 +1361,6 @@ public sealed class FundPortalService : IFundPortalService
             {
                 Period = reader.GetStringOrEmpty("Period"),
                 Amount = reader.GetDecimalOrDefault("amount"),
-                Units = 0,
                 Description = reader.GetStringOrEmpty("Description")
             });
     }
@@ -1281,7 +1410,6 @@ public sealed class FundPortalService : IFundPortalService
                 {
                     Period = periodLabel,
                     Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = 0,
                     Description = string.IsNullOrEmpty(periodLabel)
                         ? reader.GetStringOrEmpty("Description")
                         : $"{periodLabel} Unfunded Commitment"
@@ -1336,7 +1464,6 @@ public sealed class FundPortalService : IFundPortalService
                     Date = reader.GetNullableDateTime("full_date"),
                     PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
                     Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = 0,
                     Description = "Remaining commitment"
                 };
             });
@@ -1375,7 +1502,6 @@ public sealed class FundPortalService : IFundPortalService
             {
                 Period = reader.GetStringOrEmpty("Period"),
                 Amount = reader.GetDecimalOrDefault("amount"),
-                Units = reader.GetDecimalFromColumns("units", "nav_units"),
                 Description = reader.GetStringOrEmpty("Description")
             });
     }
@@ -1427,7 +1553,6 @@ public sealed class FundPortalService : IFundPortalService
                 {
                     Period = periodLabel,
                     Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalFromColumns("units", "nav_units"),
                     Description = string.IsNullOrEmpty(periodLabel) ? reader.GetStringOrEmpty("Description") : $"{periodLabel} NAV"
                 };
             });
@@ -1477,7 +1602,6 @@ public sealed class FundPortalService : IFundPortalService
                     Date = reader.GetNullableDateTime("nav_date"),
                     PostedDateKey = dateKey == 0 ? null : dateKey,
                     Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalFromColumns("units", "nav_units"),
                     Description = string.Empty
                 };
             });
@@ -1499,40 +1623,6 @@ public sealed class FundPortalService : IFundPortalService
         WarehouseSql.AppendCurrentFundFilter(sql, "df");
     }
 
-    private static void AppendInvestmentAmountUnitsSelect(StringBuilder sql, string factAlias)
-    {
-        sql.Append(" amount = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
-        sql.Append(" then cast(0 as decimal(38, 10)) ");
-        sql.Append($" else sum(isnull({factAlias}.invested_amount, 0)) end, ");
-        sql.Append(" units = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
-        sql.Append($" then sum(isnull({factAlias}.invested_units, 0)) ");
-        sql.Append(" else cast(0 as decimal(38, 10)) end ");
-    }
-
-    private static void AppendInvestmentMetricHaving(StringBuilder sql, string factAlias)
-    {
-        sql.Append(" having sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' ");
-        sql.Append($" then isnull({factAlias}.invested_units, 0) ");
-        sql.Append($" else isnull({factAlias}.invested_amount, 0) end) != 0 ");
-    }
-
-    private static void AppendDistributionAmountUnitsSelect(StringBuilder sql, string factAlias)
-    {
-        sql.Append(" amount = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
-        sql.Append(" then cast(0 as decimal(38, 10)) ");
-        sql.Append($" else sum(isnull({factAlias}.distributed_amount, 0)) end, ");
-        sql.Append(" units = case when lower(isnull(max(df.fund_type_name), '')) = 'unitized' ");
-        sql.Append($" then sum(isnull({factAlias}.distributed_units, 0)) ");
-        sql.Append(" else cast(0 as decimal(38, 10)) end ");
-    }
-
-    private static void AppendDistributionMetricHaving(StringBuilder sql, string factAlias)
-    {
-        sql.Append(" having sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' ");
-        sql.Append($" then isnull({factAlias}.distributed_units, 0) ");
-        sql.Append($" else isnull({factAlias}.distributed_amount, 0) end) != 0 ");
-    }
-
     private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsLtdInternalAsync(int fundKey, int page, int pageSize)
     {
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
@@ -1540,18 +1630,18 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select case when exists ( ");
         countSql.Append(" select 1 ");
-        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
-        countSql.Append(" where fund_key = @fundKey ");
+        countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        countSql.Append(" where fi.fund_key = @fundKey ");
         countSql.Append(" ) then 1 else 0 end ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" Period = 'Life To Date', ");
-        pageSql.Append(" amount = sum(isnull(net_invested_capital_amount, 0)), ");
-        pageSql.Append(" units = sum(isnull(net_invested_capital_units, 0)), ");
+        pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)), ");
         pageSql.Append(" Description = 'Total Investment' ");
-        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
-        pageSql.Append(" where fund_key = @fundKey ");
+        pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        pageSql.Append(" where fi.fund_key = @fundKey ");
         pageSql.Append(" order by Period ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -1563,13 +1653,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader => new FundGranularRowDto
-            {
-                Period = reader.GetStringOrEmpty("Period"),
-                Amount = reader.GetDecimalOrDefault("amount"),
-                Units = reader.GetDecimalOrDefault("units"),
-                Description = reader.GetStringOrEmpty("Description")
-            });
+            static reader => MapInvestmentRow(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsQuarterlyInternalAsync(
@@ -1583,24 +1667,27 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select quarter_year ");
-        countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
-        countSql.Append(" where fund_key = @fundKey ");
-        AppendPortfolioQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by quarter_year ");
+        countSql.Append(" select d.quarter_year ");
+        countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
+        countSql.Append(" where fi.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(countSql, period);
+        countSql.Append(" group by d.quarter_year ");
+        countSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         countSql.Append(" ) quarterly_rows ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = quarter_year, ");
-        pageSql.Append(" amount = sum(isnull(net_invested_capital_amount, 0)), ");
-        pageSql.Append(" units = sum(isnull(net_invested_capital_units, 0)), ");
-        pageSql.Append(" Description = 'Quarterly Investment' ");
-        pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
-        pageSql.Append(" where fund_key = @fundKey ");
-        AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by quarter_year ");
-        pageSql.Append(" order by quarter_year ");
+        AppendFundCodeScalarSelect(pageSql);
+        pageSql.Append(" Period = d.quarter_year, ");
+        pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)) ");
+        pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
+        pageSql.Append(" where fi.fund_key = @fundKey ");
+        AppendDimDateQuarterlyPeriodFilter(pageSql, period);
+        pageSql.Append(" group by d.quarter_year ");
+        pageSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
+        pageSql.Append(" order by d.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteFundGranularPageQueryAsync(
@@ -1611,19 +1698,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader =>
-            {
-                var periodLabel = reader.GetStringOrEmpty("Period");
-                return new FundGranularRowDto
-                {
-                    Period = periodLabel,
-                    Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalOrDefault("units"),
-                    Description = string.IsNullOrEmpty(periodLabel)
-                        ? reader.GetStringOrEmpty("Description")
-                        : $"{periodLabel} Investment"
-                };
-            });
+            static reader => MapInvestmentRow(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsDailyInternalAsync(
@@ -1637,25 +1712,24 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fi.fund_key, fi.calculation_date_key ");
+        countSql.Append(" select fi.fund_key, fi.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
-        AppendDimFundJoinOnFundKey(countSql, "fi");
         AppendInvestmentDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by fi.fund_key, fi.calculation_date_key ");
-        AppendInvestmentMetricHaving(countSql, "fi");
+        countSql.Append(" group by fi.fund_key, fi.posted_date_key ");
+        countSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         countSql.Append(" ) daily_rows ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" fi.calculation_date_key, ");
-        pageSql.Append(" try_convert(date, cast(fi.calculation_date_key as varchar(8)), 112) as full_date, ");
-        AppendInvestmentAmountUnitsSelect(pageSql, "fi");
+        AppendFundCodeScalarSelect(pageSql);
+        pageSql.Append(" fi.posted_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fi.posted_date_key as varchar(8)), 112) as full_date, ");
+        pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)) ");
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
-        AppendDimFundJoinOnFundKey(pageSql, "fi");
         AppendInvestmentDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by fi.fund_key, fi.calculation_date_key ");
-        AppendInvestmentMetricHaving(pageSql, "fi");
-        pageSql.Append(" order by fi.calculation_date_key ");
+        pageSql.Append(" group by fi.fund_key, fi.posted_date_key ");
+        pageSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
+        pageSql.Append(" order by fi.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteFundGranularPageQueryAsync(
@@ -1668,13 +1742,15 @@ public sealed class FundPortalService : IFundPortalService
             pageSql,
             static reader =>
             {
-                var calculationDateKey = reader.GetInt32OrDefault("calculation_date_key");
+                var postedDateKey = reader.GetInt32OrDefault("posted_date_key");
+                var row = MapInvestmentRow(reader);
                 return new FundGranularRowDto
                 {
+                    FundCode = row.FundCode,
+                    Period = row.Period,
                     Date = reader.GetNullableDateTime("full_date"),
-                    PostedDateKey = calculationDateKey == 0 ? null : calculationDateKey,
-                    Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalOrDefault("units"),
+                    PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
+                    InvestedAmount = row.InvestedAmount,
                     Description = string.Empty
                 };
             });
@@ -1685,7 +1761,7 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" where fi.fund_key = @fundKey ");
         if (period?.HasDateKey == true)
         {
-            sql.Append(" and fi.calculation_date_key = @dateKey ");
+            sql.Append(" and fi.posted_date_key = @dateKey ");
         }
     }
 
@@ -1694,21 +1770,29 @@ public sealed class FundPortalService : IFundPortalService
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
 
         var countSql = new StringBuilder();
-        countSql.Append(" select case when exists ( ");
-        countSql.Append(" select 1 ");
-        countSql.Append($" from {WarehouseTables.FactDistribution} ");
-        countSql.Append(" where fund_key = @fundKey ");
-        countSql.Append(" ) then 1 else 0 end ");
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type ");
+        countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
+        AppendCurrentTransactionTypeJoin(countSql, "fd");
+        countSql.Append(" where fd.fund_key = @fundKey ");
+        countSql.Append(" group by tt.transaction_type_name ");
+        AppendDistributionTotalsHaving(countSql);
+        countSql.Append(" ) ltd_rows ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = 'Life To Date', ");
-        AppendDistributionAmountUnitsSelect(pageSql, "fd");
-        pageSql.Append(", Description = 'Total Distribution' ");
+        AppendFundCodeScalarSelect(pageSql);
+        pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
+        pageSql.Append(" Period = 'LTD', ");
+        AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: false);
+        AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
-        AppendDimFundJoinOnFundKey(pageSql, "fd");
+        AppendCurrentTransactionTypeJoin(pageSql, "fd");
         pageSql.Append(" where fd.fund_key = @fundKey ");
-        pageSql.Append(" order by Period ");
+        pageSql.Append(" group by tt.transaction_type_name ");
+        AppendDistributionTotalsHaving(pageSql);
+        pageSql.Append(" order by tt.transaction_type_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteFundGranularPageQueryAsync(
@@ -1719,13 +1803,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader => new FundGranularRowDto
-            {
-                Period = reader.GetStringOrEmpty("Period"),
-                Amount = reader.GetDecimalOrDefault("amount"),
-                Units = reader.GetDecimalOrDefault("units"),
-                Description = reader.GetStringOrEmpty("Description")
-            });
+            static reader => MapDistributionRowWithDate(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsQuarterlyInternalAsync(
@@ -1739,28 +1817,31 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select d.quarter_year ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, d.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
-        AppendDimFundJoinOnFundKey(countSql, "fd");
-        countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+        AppendCurrentTransactionTypeJoin(countSql, "fd");
+        countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
         countSql.Append(" where fd.fund_key = @fundKey ");
         AppendDimDateQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by d.quarter_year ");
-        AppendDistributionMetricHaving(countSql, "fd");
+        countSql.Append(" group by tt.transaction_type_name, d.quarter_year ");
+        AppendDistributionTotalsHaving(countSql);
         countSql.Append(" ) quarterly_rows ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        AppendFundCodeScalarSelect(pageSql);
+        pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
         pageSql.Append(" Period = d.quarter_year, ");
-        AppendDistributionAmountUnitsSelect(pageSql, "fd");
-        pageSql.Append(", Description = 'Quarterly Distribution' ");
+        AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: true);
+        AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
-        AppendDimFundJoinOnFundKey(pageSql, "fd");
-        pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.calculation_date_key ");
+        AppendCurrentTransactionTypeJoin(pageSql, "fd");
+        pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
         pageSql.Append(" where fd.fund_key = @fundKey ");
         AppendDimDateQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by d.quarter_year ");
-        pageSql.Append(" order by d.quarter_year ");
+        pageSql.Append(" group by tt.transaction_type_name, d.quarter_year ");
+        AppendDistributionTotalsHaving(pageSql);
+        pageSql.Append(" order by tt.transaction_type_name, d.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteFundGranularPageQueryAsync(
@@ -1771,19 +1852,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader =>
-            {
-                var periodLabel = reader.GetStringOrEmpty("Period");
-                return new FundGranularRowDto
-                {
-                    Period = periodLabel,
-                    Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalOrDefault("units"),
-                    Description = string.IsNullOrEmpty(periodLabel)
-                        ? reader.GetStringOrEmpty("Description")
-                        : $"{periodLabel} Distribution"
-                };
-            });
+            static reader => MapDistributionRowWithDate(reader));
     }
 
     private async Task<PagedResult<FundGranularRowDto>> GetFundDistributionsDailyInternalAsync(
@@ -1797,25 +1866,27 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fd.fund_key, fd.calculation_date_key ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, fd.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
-        AppendDimFundJoinOnFundKey(countSql, "fd");
+        AppendCurrentTransactionTypeJoin(countSql, "fd");
         AppendDistributionDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by fd.fund_key, fd.calculation_date_key ");
-        AppendDistributionMetricHaving(countSql, "fd");
+        countSql.Append(" group by tt.transaction_type_name, fd.posted_date_key ");
+        AppendDistributionTotalsHaving(countSql);
         countSql.Append(" ) daily_rows ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" fd.calculation_date_key, ");
-        pageSql.Append(" try_convert(date, cast(fd.calculation_date_key as varchar(8)), 112) as full_date, ");
-        AppendDistributionAmountUnitsSelect(pageSql, "fd");
+        AppendFundCodeScalarSelect(pageSql);
+        pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
+        pageSql.Append(" fd.posted_date_key, ");
+        pageSql.Append(" try_convert(date, cast(fd.posted_date_key as varchar(8)), 112) as full_date, ");
+        AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
-        AppendDimFundJoinOnFundKey(pageSql, "fd");
+        AppendCurrentTransactionTypeJoin(pageSql, "fd");
         AppendDistributionDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by fd.fund_key, fd.calculation_date_key ");
-        AppendDistributionMetricHaving(pageSql, "fd");
-        pageSql.Append(" order by fd.calculation_date_key ");
+        pageSql.Append(" group by tt.transaction_type_name, fd.posted_date_key ");
+        AppendDistributionTotalsHaving(pageSql);
+        pageSql.Append(" order by tt.transaction_type_name, fd.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteFundGranularPageQueryAsync(
@@ -1826,18 +1897,7 @@ public sealed class FundPortalService : IFundPortalService
             offset,
             countSql,
             pageSql,
-            static reader =>
-            {
-                var calculationDateKey = reader.GetInt32OrDefault("calculation_date_key");
-                return new FundGranularRowDto
-                {
-                    Date = reader.GetNullableDateTime("full_date"),
-                    PostedDateKey = calculationDateKey == 0 ? null : calculationDateKey,
-                    Amount = reader.GetDecimalOrDefault("amount"),
-                    Units = reader.GetDecimalOrDefault("units"),
-                    Description = string.Empty
-                };
-            });
+            static reader => MapDistributionRowWithDate(reader));
     }
 
     private static void AppendDistributionDailyPeriodJoinAndWhere(StringBuilder sql, FundPeriodFilter? period)
@@ -1845,7 +1905,7 @@ public sealed class FundPortalService : IFundPortalService
         sql.Append(" where fd.fund_key = @fundKey ");
         if (period?.HasDateKey == true)
         {
-            sql.Append(" and fd.calculation_date_key = @dateKey ");
+            sql.Append(" and fd.posted_date_key = @dateKey ");
         }
     }
 
@@ -1899,6 +1959,188 @@ public sealed class FundPortalService : IFundPortalService
     {
         command.Parameters.AddWithValue("@fundKey", fundKey);
         command.Parameters.AddWithValue("@dateKey", (object?)period?.DateKey ?? DBNull.Value);
+    }
+
+    private static void AppendFundCodeScalarSelect(StringBuilder sql)
+    {
+        sql.Append(" fund_code = ( ");
+        sql.Append($" select top 1 isnull(fund_code, '') from {WarehouseTables.DimFund} f ");
+        sql.Append(" where f.fund_key = @fundKey and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "f");
+        sql.Append(" ), ");
+    }
+
+    private static void AppendCurrentTransactionTypeJoin(StringBuilder sql, string factAlias)
+    {
+        sql.Append($" inner join {WarehouseTables.DimTransactionType} tt on tt.transaction_type_key = {factAlias}.transaction_type_key ");
+        sql.Append(" and isnull(tt.is_current, 1) = 1 ");
+    }
+
+    private static void AppendDistributionAggregatedDateSelect(StringBuilder sql, bool hasDimDateJoin)
+    {
+        sql.Append(" max(fd.posted_date_key) as posted_date_key, ");
+        if (hasDimDateJoin)
+        {
+            sql.Append(" max(d.full_date) as full_date, ");
+        }
+        else
+        {
+            sql.Append(" try_convert(date, cast(max(fd.posted_date_key) as varchar(8)), 112) as full_date, ");
+        }
+    }
+
+    private static void AppendDistributionTotalsSelect(StringBuilder sql, string factAlias)
+    {
+        sql.Append($" units = sum(isnull({factAlias}.distributed_units, 0)), ");
+        sql.Append($" amount = sum(isnull({factAlias}.distributed_amount, 0)) ");
+    }
+
+    private static void AppendDistributionTotalsHaving(StringBuilder sql)
+    {
+        sql.Append(" having sum(isnull(fd.distributed_amount, 0)) != 0 ");
+        sql.Append(" or sum(isnull(fd.distributed_units, 0)) != 0 ");
+    }
+
+    private static FundGranularRowDto MapCommitmentRow(SqlDataReader reader)
+    {
+        var period = reader.GetNullableStringIfPresent("Period");
+        if (string.IsNullOrEmpty(period) && reader.TryGetOrdinal("Period", out var periodOrdinal) && !reader.IsDBNull(periodOrdinal))
+        {
+            period = reader.GetString(periodOrdinal);
+        }
+
+        var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        {
+            description = $"{period} Commitment";
+        }
+
+        return new FundGranularRowDto
+        {
+            FundCode = reader.GetStringOrEmpty("fund_code"),
+            Period = period,
+            CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
+            Description = description
+        };
+    }
+
+    private static FundGranularRowDto MapInvestmentRow(SqlDataReader reader)
+    {
+        var period = reader.GetNullableStringIfPresent("Period");
+        if (string.IsNullOrEmpty(period) && reader.TryGetOrdinal("Period", out var periodOrdinal) && !reader.IsDBNull(periodOrdinal))
+        {
+            period = reader.GetString(periodOrdinal);
+        }
+
+        var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        {
+            description = $"{period} Investment";
+        }
+
+        return new FundGranularRowDto
+        {
+            FundCode = reader.GetStringOrEmpty("fund_code"),
+            Period = period,
+            InvestedAmount = reader.GetDecimalOrDefault("invested_amount"),
+            Description = description
+        };
+    }
+
+    private static FundGranularRowDto MapDistributionRow(SqlDataReader reader)
+    {
+        var period = reader.GetNullableStringIfPresent("Period");
+        if (string.IsNullOrEmpty(period) && reader.TryGetOrdinal("Period", out var periodOrdinal) && !reader.IsDBNull(periodOrdinal))
+        {
+            period = reader.GetString(periodOrdinal);
+        }
+
+        var transactionType = reader.GetNullableStringIfPresent("transaction_type");
+
+        return new FundGranularRowDto
+        {
+            FundCode = reader.GetStringOrEmpty("fund_code"),
+            TransactionType = transactionType,
+            Period = period,
+            Units = reader.GetDecimalOrDefault("units"),
+            Amount = reader.GetDecimalOrDefault("amount")
+        };
+    }
+
+    private static FundGranularRowDto MapDistributionRowWithDate(SqlDataReader reader)
+    {
+        var row = MapDistributionRow(reader);
+        var postedDateKey = reader.GetInt32OrDefaultIfPresent("posted_date_key");
+        return new FundGranularRowDto
+        {
+            FundCode = row.FundCode,
+            TransactionType = row.TransactionType,
+            Period = row.Period,
+            Date = reader.GetNullableDateTimeIfPresent("full_date"),
+            PostedDateKey = postedDateKey is > 0 ? postedDateKey : null,
+            Amount = row.Amount,
+            Units = row.Units
+        };
+    }
+
+    private static string BuildDistributionPeriodDescription(FundGranularRowDto row)
+    {
+        if (!string.IsNullOrEmpty(row.Period))
+        {
+            return $"{row.Period} Distribution";
+        }
+
+        if (row.Date.HasValue)
+        {
+            return row.Date.Value.ToString("yyyy-MM-dd");
+        }
+
+        return string.Empty;
+    }
+
+    private static PagedResult<FundDistributionGroupDto> BuildGroupedDistributionPage(
+        IReadOnlyList<FundGranularRowDto> flatRows,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+
+        var groups = flatRows
+            .GroupBy(row => row.TransactionType ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var periods = group
+                    .Select(row => new FundDistributionPeriodRowDto
+                    {
+                        Period = row.Period,
+                        Date = row.Date,
+                        PostedDateKey = row.PostedDateKey,
+                        Amount = row.Amount,
+                        Units = row.Units,
+                        Description = BuildDistributionPeriodDescription(row)
+                    })
+                    .ToList();
+
+                return new FundDistributionGroupDto
+                {
+                    FundCode = group.First().FundCode,
+                    TransactionType = group.Key,
+                    Periods = periods,
+                    TotalAmount = periods.Sum(p => p.Amount ?? 0m),
+                    TotalUnits = periods.Sum(p => p.Units ?? 0m)
+                };
+            })
+            .ToList();
+
+        var pagedGroups = groups.Skip(offset).Take(normalizedPageSize).ToList();
+
+        return new PagedResult<FundDistributionGroupDto>
+        {
+            Items = pagedGroups,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = groups.Count
+        };
     }
 
 }

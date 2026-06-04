@@ -1,0 +1,47 @@
+using kingsightapi.Entities;
+
+namespace kingsightapi.Services;
+
+public interface IFundPortalService
+{
+    Task<PagedResult<FundListItemDto>> GetFundsAsync(string? search, int page, int pageSize);
+    Task<FundDetailDto?> GetFundByKeyAsync(int fundKey);
+    Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
+    Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize);
+    Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundMetricSource source,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundNavAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundUnfundedCommitmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundGranularRowDto>> GetFundInvestmentsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+    Task<PagedResult<FundDistributionGroupDto>> GetFundDistributionsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+}

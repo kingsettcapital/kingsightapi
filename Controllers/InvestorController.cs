@@ -14,10 +14,10 @@ namespace kingsightapi.Controllers
     [Route("api/[controller]")]
     public class InvestorController : ControllerBase
     {
-        private readonly IInvestorService _service;
+        private readonly ICapitalInvestorService _service;
         private readonly ILogger<InvestorController> _logger;
 
-        public InvestorController(IInvestorService service, ILogger<InvestorController> logger)
+        public InvestorController(ICapitalInvestorService service, ILogger<InvestorController> logger)
         {
             _service = service;
             _logger = logger;

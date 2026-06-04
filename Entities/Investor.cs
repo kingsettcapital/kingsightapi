@@ -1,60 +1,26 @@
 namespace kingsightapi.Entities
 {
-    using System.Text.Json.Serialization;
-
     /// <summary>
-    /// Row from mort.dim_investor for API responses.
+    /// Current row from mort.dim_investor for API responses (is_current = 1).
     /// </summary>
-    public sealed class DimInvestorDto
+    public sealed class InvestorDto
     {
-        public long investor_key { get; init; }
-        public string investor_code { get; init; } = string.Empty;
-        public string investor_name { get; init; } = string.Empty;
-        public string investor_alias_name { get; init; } = string.Empty;
-        public string? user_updated_by { get; init; } = string.Empty;
-        public DateTime? user_updated_date { get; init; } = DateTime.MinValue;
+        public long InvestorKey { get; init; }
+        public string InvestorCode { get; init; } = string.Empty;
+        public string InvestorName { get; init; } = string.Empty;
+        public long? InvestorAliasKey { get; init; }
+        public string InvestorAliasName { get; init; } = string.Empty;
+        public string UserUpdatedBy { get; init; } = string.Empty;
+        public DateTime? UserUpdatedDate { get; init; }
     }
 
     /// <summary>
-    /// One investor row for batch upsert via PUT /api/investor/aliases.
+    /// Body for updating investor_alias_name on a current row in mort.dim_investor.
     /// </summary>
-    public sealed class DimInvestorAliasUpdateItem
+    public sealed class InvestorUpdateRequest
     {
-        [JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]
-        public long investor_key { get; init; }
-        public string investor_code { get; init; } = string.Empty;
-        public string investor_name { get; init; } = string.Empty;
-        public string investor_alias_name { get; init; } = string.Empty;
-        public DateTime? user_updated_date { get; init; }
-        public string? user_updated_by { get; init; } = string.Empty;
-    }
-
-    /// <summary>
-    /// Body for batch-updating investor_alias_name on mort.dim_investor.
-    /// </summary>
-    public sealed class DimInvestorAliasBatchUpdateRequest
-    {
-        [JsonPropertyName("investors")]
-        public List<DimInvestorAliasUpdateItem> Investors { get; init; } = new();
-    }
-
-    /// <summary>
-    /// Outcome of a batch investor alias upsert.
-    /// </summary>
-    public sealed class DimInvestorAliasBatchUpdateResult
-    {
-        public int UpdatedCount { get; init; }
-        public int InsertedCount { get; init; }
-        public IReadOnlyList<long> FailedInvestorKeys { get; init; } = Array.Empty<long>();
-    }
-
-    /// <summary>
-    /// Investor name option for the filter multi-select (mort.dim_investor).
-    /// </summary>
-    public sealed class InvestorNameOptionDto
-    {
-        public long investor_key { get; init; }
-        public string investor_code { get; init; } = string.Empty;
-        public string investor_name { get; init; } = string.Empty;
+        public int InvestorKey { get; init; }
+        public string InvestorAliasName { get; init; } = string.Empty;
+        public string UserUpdatedBy { get; init; } = string.Empty;
     }
 }
