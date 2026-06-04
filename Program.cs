@@ -44,6 +44,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
             builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
             builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
+            builder.Services.AddSingleton<IDefaultDateCaptureService, DefaultDateCaptureService>();
 
             builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
             builder.Services.Configure<FormOptions>(options =>
