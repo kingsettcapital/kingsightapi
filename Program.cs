@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
@@ -34,6 +35,8 @@ namespace kingsightapi
                 {
                     options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
                     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+                    options.JsonSerializerOptions.Converters.Add(
+                        new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
                 });
 
             builder.Services.AddEntraAuthentication(configuration);
@@ -73,16 +76,7 @@ namespace kingsightapi
                 EntraAuthExtensions.ConfigureBearerSwagger(options);
             });
 
-            var corsOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-                ?? ["http://localhost:4200"];
-
-            builder.Services.AddCors(options =>
-            {
-                options.AddPolicy("AllowAngularDev", policy =>
-                    policy.WithOrigins(corsOrigins)
-                        .AllowAnyHeader()
-                        .AllowAnyMethod());
-            });
+            builder.Services.AddAngularCors(configuration, builder.Environment);
 
             var app = builder.Build();
 
@@ -99,9 +93,7 @@ namespace kingsightapi
             }
 
             app.UseHttpsRedirection();
-            
-            app.UseRouting();
-            app.UseCors("AllowAngularDev");
+            app.UseAngularCors();
 
             app.UseAuthentication();
             app.UseAuthorization();
