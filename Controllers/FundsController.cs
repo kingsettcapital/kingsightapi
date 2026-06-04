@@ -50,7 +50,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/periods?view=ltd|quarterly|daily&source=commitments|nav|unfunded-commitments|investments|distributions&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/periods")]
     public async Task<ActionResult<PagedResult<FundPeriodDto>>> GetFundPeriods(
         int fundKey,
@@ -132,7 +131,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/commitments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/commitments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetCommitments(
         int fundKey,
@@ -171,7 +169,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/unfunded-commitments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/unfunded-commitments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetUnfundedCommitments(
         int fundKey,
@@ -210,7 +207,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/investments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/investments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetInvestments(
         int fundKey,
@@ -249,7 +245,6 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}/distributions?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
-    [AllowAnonymous]
     [HttpGet("{fundKey:int}/distributions")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetDistributions(
         int fundKey,
