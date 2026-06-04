@@ -53,17 +53,7 @@ public sealed class SecurityValueBatchRequest
 
 #region Other Cost Capture
 
-public sealed class OtherCostCaptureDto
-{
-    public long LoanKey { get; init; }
-    public string LoanId { get; init; } = string.Empty;
-    public string Description { get; init; } = string.Empty;
-    public string LoanAlias { get; init; } = string.Empty;
-    public decimal? OutstandingInvoices { get; init; }
-    public decimal? EstRealizationCosts { get; init; }
-    public decimal? CostToComplete { get; init; }
-    public DateTime? DwhUpdateDate { get; init; }
-}
+// OtherCostCaptureDto is defined in Entities/OtherCostCapture.cs (main loan form API).
 
 public sealed class OtherCostCaptureUpdateItem
 {

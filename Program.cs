@@ -1,6 +1,6 @@
 using System.Text.Json;
 using kingsightapi.Configuration;
-using kingsightapi.Configuration;
+using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.OpenApi.Models;
 using Microsoft.AspNetCore.Http.Features;
@@ -42,6 +42,7 @@ namespace kingsightapi
             //builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<ILoanService, LoanService>();
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<ICapitalInvestorService, CapitalInvestorService>();
             builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<IInvestorPortalService, InvestorPortalService>();
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
@@ -50,6 +51,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
             builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
             builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
+            builder.Services.AddSingleton<ILoanFormService, LoanFormService>();
 
             builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
             builder.Services.Configure<FormOptions>(options =>
