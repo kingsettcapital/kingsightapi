@@ -1,7 +1,9 @@
 using System.Text.Json;
 using kingsightapi.Configuration;
+using kingsightapi.Configuration;
 using kingsightapi.Services;
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace kingsightapi
 {
@@ -10,6 +12,15 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+            if (builder.Environment.IsDevelopment())
+            {
+                // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
+                builder.WebHost.UseUrls("https://localhost:7140", "http://localhost:5181");
+            }
+            else
+            {
+                builder.WebHost.UseUrls("https://localhost:7140");
+            }
 
             var configuration = builder.Configuration;
             var apiUrl = configuration.GetSection("Api").GetValue<string>("Url");
@@ -28,13 +39,25 @@ namespace kingsightapi
             builder.Services.AddEntraAuthentication(configuration);
 
             builder.Services.AddSingleton<IDBService, DBService>();
-            builder.Services.AddSingleton<IFundService, FundService>();
+            //builder.Services.AddSingleton<IFundService, FundService>();
+            builder.Services.AddSingleton<ILoanService, LoanService>();
             builder.Services.AddSingleton<IInvestorService, InvestorService>();
+            builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<IInvestorPortalService, InvestorPortalService>();
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
             builder.Services.AddSingleton<IFundPortalService, FundPortalService>();
             builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
+            builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
+            builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
+
+            builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
+            builder.Services.Configure<FormOptions>(options =>
+            {
+                options.MultipartBodyLengthLimit = 52_428_800;
+            });
+            builder.Services.AddScoped<ICmhcFileStorage, LocalCmhcFileStorage>();
+            builder.Services.AddScoped<ICmhcUploadService, CmhcUploadService>();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
@@ -60,6 +83,11 @@ namespace kingsightapi
             });
 
             var app = builder.Build();
+
+            using (var scope = app.Services.CreateScope())
+            {
+                scope.ServiceProvider.GetRequiredService<ICmhcFileStorage>().EnsureStorageReady();
+            }
 
             if (app.Environment.IsDevelopment())
             {
