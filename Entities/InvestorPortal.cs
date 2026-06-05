@@ -1,5 +1,7 @@
 namespace kingsightapi.Entities;
 
+using System.Text.Json.Serialization;
+
 /// <summary>Investor sidebar row (profile list screen).</summary>
 public sealed class InvestorListItemDto
 {
@@ -33,6 +35,10 @@ public sealed class InvestorSummaryDto
 public sealed class InvestorInvestmentDto
 {
     public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
     public string FundName { get; init; } = string.Empty;
     public string FundType { get; init; } = string.Empty;
     public string FundCategory { get; init; } = string.Empty;

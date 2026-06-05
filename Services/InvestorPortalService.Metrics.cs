@@ -449,11 +449,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select p.fund_key ");
+        countSql.Append(" select df.fund_code ");
         countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
         AppendDimFundJoinOnPortfolio(countSql, "p");
         countSql.Append(" where p.investor_key = @investorKey ");
-        countSql.Append(" group by p.fund_key, df.fund_code ");
+        countSql.Append(" group by df.fund_code ");
         countSql.Append(" ) commitment_rows ");
 
         var pageSql = new StringBuilder();
@@ -465,7 +465,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
         AppendDimFundJoinOnPortfolio(pageSql, "p");
         pageSql.Append(" where p.investor_key = @investorKey ");
-        pageSql.Append(" group by p.fund_key, df.fund_code ");
+        pageSql.Append(" group by df.fund_code ");
         pageSql.Append(" order by df.fund_code ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -491,12 +491,12 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select p.fund_key, p.quarter_year ");
+        countSql.Append(" select df.fund_code, p.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} p ");
         AppendDimFundJoinOnPortfolio(countSql, "p");
         countSql.Append(" where p.investor_key = @investorKey ");
         AppendPortfolioQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by p.fund_key, df.fund_code, p.quarter_year ");
+        countSql.Append(" group by df.fund_code, p.quarter_year ");
         countSql.Append(" ) quarterly_rows ");
 
         var pageSql = new StringBuilder();
@@ -508,7 +508,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendDimFundJoinOnPortfolio(pageSql, "p");
         pageSql.Append(" where p.investor_key = @investorKey ");
         AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by p.fund_key, df.fund_code, p.quarter_year ");
+        pageSql.Append(" group by df.fund_code, p.quarter_year ");
         pageSql.Append(" order by df.fund_code, p.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -534,11 +534,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fc.fund_key, fc.posted_date_key ");
+        countSql.Append(" select df.fund_code, fc.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactCommitted} fc ");
         AppendDimFundJoinForInvestorFacts(countSql, "fc");
         AppendInvestorCommitmentDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by fc.fund_key, df.fund_code, fc.posted_date_key ");
+        countSql.Append(" group by df.fund_code, fc.posted_date_key ");
         countSql.Append(" having sum(fc.committed_amount) != 0 ");
         countSql.Append(" ) daily_rows ");
 
@@ -551,7 +551,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactCommitted} fc ");
         AppendDimFundJoinForInvestorFacts(pageSql, "fc");
         AppendInvestorCommitmentDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by fc.fund_key, df.fund_code, fc.posted_date_key ");
+        pageSql.Append(" group by df.fund_code, fc.posted_date_key ");
         pageSql.Append(" having sum(fc.committed_amount) != 0 ");
         pageSql.Append(" order by df.fund_code, fc.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -618,11 +618,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select p.fund_key ");
+        countSql.Append(" select df.fund_code ");
         countSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
         AppendDimFundJoinOnPortfolio(countSql, "p");
         countSql.Append(" where p.investor_key = @investorKey ");
-        countSql.Append(" group by p.fund_key, df.fund_code ");
+        countSql.Append(" group by df.fund_code ");
         countSql.Append(" ) unfunded_rows ");
 
         var pageSql = new StringBuilder();
@@ -634,7 +634,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
         AppendDimFundJoinOnPortfolio(pageSql, "p");
         pageSql.Append(" where p.investor_key = @investorKey ");
-        pageSql.Append(" group by p.fund_key, df.fund_code ");
+        pageSql.Append(" group by df.fund_code ");
         pageSql.Append(" order by df.fund_code ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -666,12 +666,12 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select p.fund_key, p.quarter_year ");
+        countSql.Append(" select df.fund_code, p.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} p ");
         AppendDimFundJoinOnPortfolio(countSql, "p");
         countSql.Append(" where p.investor_key = @investorKey ");
         AppendPortfolioQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by p.fund_key, df.fund_code, p.quarter_year ");
+        countSql.Append(" group by df.fund_code, p.quarter_year ");
         countSql.Append(" ) quarterly_rows ");
 
         var pageSql = new StringBuilder();
@@ -684,7 +684,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendDimFundJoinOnPortfolio(pageSql, "p");
         pageSql.Append(" where p.investor_key = @investorKey ");
         AppendPortfolioQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by p.fund_key, df.fund_code, p.quarter_year ");
+        pageSql.Append(" group by df.fund_code, p.quarter_year ");
         pageSql.Append(" order by df.fund_code, p.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -722,11 +722,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fc.fund_key, fc.posted_date_key ");
+        countSql.Append(" select df.fund_code, fc.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactCommitted} fc ");
         AppendDimFundJoinForInvestorFacts(countSql, "fc");
         AppendInvestorCommitmentDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by fc.fund_key, df.fund_code, fc.posted_date_key ");
+        countSql.Append(" group by df.fund_code, fc.posted_date_key ");
         countSql.Append(" having sum(fc.committed_amount_fmv) != 0 ");
         countSql.Append(" ) daily_rows ");
 
@@ -739,7 +739,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactCommitted} fc ");
         AppendDimFundJoinForInvestorFacts(pageSql, "fc");
         AppendInvestorCommitmentDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by fc.fund_key, df.fund_code, fc.posted_date_key ");
+        pageSql.Append(" group by df.fund_code, fc.posted_date_key ");
         pageSql.Append(" having sum(fc.committed_amount_fmv) != 0 ");
         pageSql.Append(" order by df.fund_code, fc.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -773,11 +773,12 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select n.fund_key ");
+        countSql.Append(" select df.fund_code ");
         countSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        AppendDimFundJoinForInvestorFacts(countSql, "n");
         AppendInvestorFundKeysNavWhere(countSql);
         countSql.Append(" and isnull(n.nav, 0) != 0 ");
-        countSql.Append(" group by n.fund_key ");
+        countSql.Append(" group by df.fund_code ");
         countSql.Append(" ) nav_rows ");
 
         var pageSql = new StringBuilder();
@@ -790,7 +791,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendDimFundJoinForInvestorFacts(pageSql, "n");
         AppendInvestorFundKeysNavWhere(pageSql);
         pageSql.Append(" and isnull(n.nav, 0) != 0 ");
-        pageSql.Append(" group by n.fund_key, df.fund_code ");
+        pageSql.Append(" group by df.fund_code ");
         pageSql.Append(" order by df.fund_code ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -822,13 +823,14 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select n.fund_key, d.quarter_year ");
+        countSql.Append(" select df.fund_code, d.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactFundNav} n ");
         countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+        AppendDimFundJoinForInvestorFacts(countSql, "n");
         AppendInvestorFundKeysNavWhere(countSql);
         AppendDimDateQuarterlyPeriodFilter(countSql, period);
         countSql.Append(" and isnull(n.nav, 0) != 0 ");
-        countSql.Append(" group by n.fund_key, d.quarter_year ");
+        countSql.Append(" group by df.fund_code, d.quarter_year ");
         countSql.Append(" ) quarterly_rows ");
 
         var pageSql = new StringBuilder();
@@ -843,7 +845,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendInvestorFundKeysNavWhere(pageSql);
         AppendDimDateQuarterlyPeriodFilter(pageSql, period);
         pageSql.Append(" and isnull(n.nav, 0) != 0 ");
-        pageSql.Append(" group by n.fund_key, df.fund_code, d.quarter_year ");
+        pageSql.Append(" group by df.fund_code, d.quarter_year ");
         pageSql.Append(" order by df.fund_code, d.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -879,10 +881,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select n.fund_key, n.date_key ");
+        countSql.Append(" select df.fund_code, n.date_key ");
         countSql.Append($" from {WarehouseTables.FactFundNav} n ");
+        AppendDimFundJoinForInvestorFacts(countSql, "n");
         AppendInvestorNavDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by n.fund_key, n.date_key ");
+        countSql.Append(" group by df.fund_code, n.date_key ");
         countSql.Append(" ) daily_rows ");
 
         var pageSql = new StringBuilder();
@@ -894,7 +897,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactFundNav} n ");
         AppendDimFundJoinForInvestorFacts(pageSql, "n");
         AppendInvestorNavDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by n.fund_key, df.fund_code, n.date_key ");
+        pageSql.Append(" group by df.fund_code, n.date_key ");
         pageSql.Append(" order by df.fund_code, n.date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -980,11 +983,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fi.fund_key ");
+        countSql.Append(" select df.fund_code ");
         countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
         AppendDimFundJoinForInvestorFacts(countSql, "fi");
         countSql.Append(" where fi.investor_key = @investorKey ");
-        countSql.Append(" group by fi.fund_key, df.fund_code ");
+        countSql.Append(" group by df.fund_code ");
         countSql.Append(" ) investment_rows ");
 
         var pageSql = new StringBuilder();
@@ -996,7 +999,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
         AppendDimFundJoinForInvestorFacts(pageSql, "fi");
         pageSql.Append(" where fi.investor_key = @investorKey ");
-        pageSql.Append(" group by fi.fund_key, df.fund_code ");
+        pageSql.Append(" group by df.fund_code ");
         pageSql.Append(" order by df.fund_code ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -1022,13 +1025,13 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fi.fund_key, d.quarter_year ");
+        countSql.Append(" select df.fund_code, d.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
         AppendDimFundJoinForInvestorFacts(countSql, "fi");
         countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
         countSql.Append(" where fi.investor_key = @investorKey ");
         AppendDimDateQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by fi.fund_key, df.fund_code, d.quarter_year ");
+        countSql.Append(" group by df.fund_code, d.quarter_year ");
         countSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         countSql.Append(" ) quarterly_rows ");
 
@@ -1042,7 +1045,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fi.posted_date_key ");
         pageSql.Append(" where fi.investor_key = @investorKey ");
         AppendDimDateQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by fi.fund_key, df.fund_code, d.quarter_year ");
+        pageSql.Append(" group by df.fund_code, d.quarter_year ");
         pageSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         pageSql.Append(" order by df.fund_code, d.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -1069,11 +1072,11 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select fi.fund_key, fi.posted_date_key ");
+        countSql.Append(" select df.fund_code, fi.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactInvestment} fi ");
         AppendDimFundJoinForInvestorFacts(countSql, "fi");
         AppendInvestorInvestmentDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by fi.fund_key, df.fund_code, fi.posted_date_key ");
+        countSql.Append(" group by df.fund_code, fi.posted_date_key ");
         countSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         countSql.Append(" ) daily_rows ");
 
@@ -1086,7 +1089,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
         AppendDimFundJoinForInvestorFacts(pageSql, "fi");
         AppendInvestorInvestmentDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by fi.fund_key, df.fund_code, fi.posted_date_key ");
+        pageSql.Append(" group by df.fund_code, fi.posted_date_key ");
         pageSql.Append(" having sum(isnull(fi.invested_amount, 0)) != 0 ");
         pageSql.Append(" order by df.fund_code, fi.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -1131,12 +1134,12 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, fd.fund_key ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, df.fund_code ");
         countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
         AppendDimFundJoinForInvestorFacts(countSql, "fd");
         AppendCurrentTransactionTypeJoin(countSql, "fd");
         countSql.Append(" where fd.investor_key = @investorKey ");
-        countSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code ");
+        countSql.Append(" group by tt.transaction_type_name, df.fund_code ");
         AppendDistributionTotalsHaving(countSql);
         countSql.Append(" ) ltd_rows ");
 
@@ -1151,7 +1154,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendDimFundJoinForInvestorFacts(pageSql, "fd");
         AppendCurrentTransactionTypeJoin(pageSql, "fd");
         pageSql.Append(" where fd.investor_key = @investorKey ");
-        pageSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code ");
+        pageSql.Append(" group by tt.transaction_type_name, df.fund_code ");
         AppendDistributionTotalsHaving(pageSql);
         pageSql.Append(" order by df.fund_code, tt.transaction_type_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -1178,14 +1181,14 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, fd.fund_key, d.quarter_year ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, df.fund_code, d.quarter_year ");
         countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
         AppendDimFundJoinForInvestorFacts(countSql, "fd");
         AppendCurrentTransactionTypeJoin(countSql, "fd");
         countSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
         countSql.Append(" where fd.investor_key = @investorKey ");
         AppendDimDateQuarterlyPeriodFilter(countSql, period);
-        countSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code, d.quarter_year ");
+        countSql.Append(" group by tt.transaction_type_name, df.fund_code, d.quarter_year ");
         AppendDistributionTotalsHaving(countSql);
         countSql.Append(" ) quarterly_rows ");
 
@@ -1202,7 +1205,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = fd.posted_date_key ");
         pageSql.Append(" where fd.investor_key = @investorKey ");
         AppendDimDateQuarterlyPeriodFilter(pageSql, period);
-        pageSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code, d.quarter_year ");
+        pageSql.Append(" group by tt.transaction_type_name, df.fund_code, d.quarter_year ");
         AppendDistributionTotalsHaving(pageSql);
         pageSql.Append(" order by df.fund_code, tt.transaction_type_name, d.quarter_year ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -1229,12 +1232,12 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append(" from ( ");
-        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, fd.fund_key, fd.posted_date_key ");
+        countSql.Append(" select isnull(tt.transaction_type_name, '') as transaction_type, df.fund_code, fd.posted_date_key ");
         countSql.Append($" from {WarehouseTables.FactDistribution} fd ");
         AppendDimFundJoinForInvestorFacts(countSql, "fd");
         AppendCurrentTransactionTypeJoin(countSql, "fd");
         AppendInvestorDistributionDailyPeriodJoinAndWhere(countSql, period);
-        countSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code, fd.posted_date_key ");
+        countSql.Append(" group by tt.transaction_type_name, df.fund_code, fd.posted_date_key ");
         AppendDistributionTotalsHaving(countSql);
         countSql.Append(" ) daily_rows ");
 
@@ -1249,7 +1252,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         AppendDimFundJoinForInvestorFacts(pageSql, "fd");
         AppendCurrentTransactionTypeJoin(pageSql, "fd");
         AppendInvestorDistributionDailyPeriodJoinAndWhere(pageSql, period);
-        pageSql.Append(" group by tt.transaction_type_name, fd.fund_key, df.fund_code, fd.posted_date_key ");
+        pageSql.Append(" group by tt.transaction_type_name, df.fund_code, fd.posted_date_key ");
         AppendDistributionTotalsHaving(pageSql);
         pageSql.Append(" order by df.fund_code, tt.transaction_type_name, fd.posted_date_key ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");

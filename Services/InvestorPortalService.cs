@@ -353,10 +353,10 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
 
         var fundsSql = new StringBuilder();
         AppendInvestorFundsBaseSelect(fundsSql);
-        fundsSql.Append(" order by df.fund_name ");
+        fundsSql.Append(" order by df.fund_code ");
         fundsSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
-        var funds = new List<(int FundKey, string FundName, string FundType, string FundCategory, string Status)>();
+        var funds = new List<(int FundKey, string FundCode, string FundName, string FundType, string FundCategory, string Status)>();
         await using (var fundsCommand = new SqlCommand(fundsSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
@@ -371,6 +371,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             {
                 funds.Add((
                     fundsReader.GetInt32OrDefault("fund_key"),
+                    fundsReader.GetStringOrEmpty("fund_code"),
                     fundsReader.GetStringOrEmpty("fund_name"),
                     fundsReader.GetStringOrEmpty("fund_type"),
                     fundsReader.GetStringOrEmpty("fund_category"),
@@ -390,37 +391,50 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             };
         }
 
-        var fundKeyParameters = new List<string>();
+        var fundCodeParameters = new List<string>();
         for (var i = 0; i < funds.Count; i++)
         {
-            fundKeyParameters.Add($"@fundKey{i}");
+            fundCodeParameters.Add($"@fundCode{i}");
         }
 
         var aggregateSql = new StringBuilder();
         aggregateSql.Append(" select ");
-        aggregateSql.Append(" x.fund_key, ");
+        aggregateSql.Append(" x.fund_code, ");
         aggregateSql.Append(" isnull(comm.invested_amount_total, 0) as invested_amount_total, ");
         aggregateSql.Append(" isnull(inv.invested_amount_fmv_total, 0) as invested_amount_fmv_total, ");
         aggregateSql.Append(" inv.total_return_percent as total_return_percent ");
         aggregateSql.Append(" from ( ");
-        aggregateSql.Append($" select distinct fund_key from {WarehouseTables.FactCommitted} where investor_key = @investorKey ");
+        aggregateSql.Append(" select distinct isnull(df2.fund_code, '') as fund_code ");
+        aggregateSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df2 on df2.fund_key = fc.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df2");
+        aggregateSql.Append(" where fc.investor_key = @investorKey ");
         aggregateSql.Append(" union ");
-        aggregateSql.Append($" select distinct fund_key from {WarehouseTables.FactInvestment} where investor_key = @investorKey ");
+        aggregateSql.Append(" select distinct isnull(df2.fund_code, '') as fund_code ");
+        aggregateSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df2 on df2.fund_key = fi.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df2");
+        aggregateSql.Append(" where fi.investor_key = @investorKey ");
         aggregateSql.Append(" ) x ");
         aggregateSql.Append(" left join ( ");
-        aggregateSql.Append(" select fc.fund_key, sum(isnull(fc.committed_amount, 0)) as invested_amount_total ");
+        aggregateSql.Append(" select isnull(df3.fund_code, '') as fund_code, sum(isnull(fc.committed_amount, 0)) as invested_amount_total ");
         aggregateSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df3 on df3.fund_key = fc.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df3");
         aggregateSql.Append(" where fc.investor_key = @investorKey ");
-        aggregateSql.Append(" group by fc.fund_key ");
-        aggregateSql.Append(" ) comm on comm.fund_key = x.fund_key ");
+        aggregateSql.Append(" group by df3.fund_code ");
+        aggregateSql.Append(" ) comm on comm.fund_code = x.fund_code ");
         aggregateSql.Append(" left join ( ");
         aggregateSql.Append(" select ");
-        aggregateSql.Append(" fi.fund_key, ");
+        aggregateSql.Append(" isnull(df4.fund_code, '') as fund_code, ");
         aggregateSql.Append(" ( ");
-        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df.fund_type_name, '')) = 'unitized' ");
+        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df4.fund_type_name, '')) = 'unitized' ");
         aggregateSql.Append("     THEN isnull(fi.invested_units, 0) ELSE 0 END) ");
         aggregateSql.Append(" + ");
-        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df.fund_type_name, '')) <> 'unitized' ");
+        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df4.fund_type_name, '')) <> 'unitized' ");
         aggregateSql.Append("     THEN isnull(fi.invested_amount, 0) ELSE 0 END) ");
         aggregateSql.Append(" ) as invested_amount_fmv_total, ");
         aggregateSql.Append(" case ");
@@ -430,15 +444,15 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         aggregateSql.Append(" else null ");
         aggregateSql.Append(" end as total_return_percent ");
         aggregateSql.Append($" from {WarehouseTables.FactInvestment} fi ");
-        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fi.fund_key ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df4 on df4.fund_key = fi.fund_key ");
         aggregateSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df4");
         aggregateSql.Append(" where fi.investor_key = @investorKey ");
-        aggregateSql.Append(" group by fi.fund_key ");
-        aggregateSql.Append(" ) inv on inv.fund_key = x.fund_key ");
-        aggregateSql.Append($" where x.fund_key in ({string.Join(", ", fundKeyParameters)}) ");
+        aggregateSql.Append(" group by df4.fund_code ");
+        aggregateSql.Append(" ) inv on inv.fund_code = x.fund_code ");
+        aggregateSql.Append($" where x.fund_code in ({string.Join(", ", fundCodeParameters)}) ");
 
-        var totalsByFundKey = new Dictionary<int, (decimal InvestedAmountTotal, decimal InvestedAmountFmvTotal, decimal? TotalReturnPercent)>();
+        var totalsByFundCode = new Dictionary<string, (decimal InvestedAmountTotal, decimal InvestedAmountFmvTotal, decimal? TotalReturnPercent)>(StringComparer.OrdinalIgnoreCase);
         await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
@@ -447,14 +461,14 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             aggregateCommand.Parameters.AddWithValue("@investorKey", investorKey);
             for (var i = 0; i < funds.Count; i++)
             {
-                aggregateCommand.Parameters.AddWithValue(fundKeyParameters[i], funds[i].FundKey);
+                aggregateCommand.Parameters.AddWithValue(fundCodeParameters[i], funds[i].FundCode);
             }
 
             await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
             while (await aggregateReader.ReadAsync())
             {
-                var fundKey = aggregateReader.GetInt32OrDefault("fund_key");
-                totalsByFundKey[fundKey] = (
+                var fundCode = aggregateReader.GetStringOrEmpty("fund_code");
+                totalsByFundCode[fundCode] = (
                     aggregateReader.GetDecimalOrDefault("invested_amount_total"),
                     aggregateReader.GetDecimalOrDefault("invested_amount_fmv_total"),
                     aggregateReader.GetNullableDecimal("total_return_percent")
@@ -465,11 +479,12 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         var items = new List<InvestorInvestmentDto>();
         foreach (var fund in funds)
         {
-            totalsByFundKey.TryGetValue(fund.FundKey, out var totals);
+            totalsByFundCode.TryGetValue(fund.FundCode, out var totals);
 
             items.Add(new InvestorInvestmentDto
             {
                 FundKey = fund.FundKey,
+                FundCode = fund.FundCode,
                 FundName = fund.FundName,
                 FundType = fund.FundType,
                 FundCategory = fund.FundCategory,
@@ -492,13 +507,14 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
     private static void AppendInvestorFundsBaseSelect(StringBuilder sql)
     {
         sql.Append(" select ");
-        sql.Append(" df.fund_key, ");
-        sql.Append(" isnull(df.fund_name, '') as fund_name, ");
-        sql.Append(" isnull(df.fund_type_name, '') as fund_type, ");
-        sql.Append(" isnull(df.fund_strategy_name, isnull(df.fund_type_name, '')) as fund_category, ");
+        sql.Append(" min(df.fund_key) as fund_key, ");
+        sql.Append(" isnull(df.fund_code, '') as fund_code, ");
+        sql.Append(" max(isnull(df.fund_name, '')) as fund_name, ");
+        sql.Append(" max(isnull(df.fund_type_name, '')) as fund_type, ");
+        sql.Append(" max(isnull(df.fund_strategy_name, isnull(df.fund_type_name, ''))) as fund_category, ");
         sql.Append(" case ");
-        sql.Append(" when df.dissolution_date is not null then 'Dissolved' ");
-        sql.Append(" when isnull(df.is_current, 1) = 1 then 'Active' ");
+        sql.Append(" when max(case when df.dissolution_date is not null then 1 else 0 end) = 1 then 'Dissolved' ");
+        sql.Append(" when max(case when isnull(df.is_current, 1) = 1 then 1 else 0 end) = 1 then 'Active' ");
         sql.Append(" else 'Inactive' ");
         sql.Append(" end as fund_status ");
         sql.Append(" from ( ");
@@ -509,5 +525,6 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         sql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fk.fund_key ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "df");
+        sql.Append(" group by df.fund_code ");
     }
 }
