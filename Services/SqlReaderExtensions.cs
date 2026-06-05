@@ -203,6 +203,36 @@ internal static class SqlReaderExtensions
         return 0L;
     }
 
+    public static bool GetBooleanFromColumns(this SqlDataReader reader, params string[] columns)
+    {
+        foreach (var column in columns)
+        {
+            if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+            {
+                continue;
+            }
+
+            return ConvertToBoolean(reader.GetValue(ordinal));
+        }
+
+        return false;
+    }
+
+    private static bool ConvertToBoolean(object value) =>
+        value switch
+        {
+            bool b => b,
+            byte or sbyte or short or ushort or int or uint or long or ulong =>
+                Convert.ToInt64(value) != 0,
+            decimal or double or float =>
+                Convert.ToDecimal(value) != 0m,
+            string s when bool.TryParse(s, out var parsed) => parsed,
+            string s => s.Equals("1", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("y", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
+
     public static string MapPropertyStatus(this SqlDataReader reader)
     {
         var raw = reader.GetStringFromColumns("property_status", "property_status_name", "status");

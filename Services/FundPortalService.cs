@@ -307,10 +307,11 @@ public sealed class FundPortalService : IFundPortalService
 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
-        countSql.Append($" from {WarehouseTables.DimFund} f ");
-        countSql.Append(" where ");
-        WarehouseSql.AppendCurrentFundFilter(countSql, "f");
-        WarehouseSql.AppendFundSearchFilter(countSql, "f");
+        countSql.Append(" from ( ");
+        countSql.Append(" select b.fund_name ");
+        AppendFundLtdListingFrom(countSql);
+        countSql.Append(" group by b.fund_name ");
+        countSql.Append(" ) fund_rows ");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
@@ -321,15 +322,13 @@ public sealed class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" f.fund_key, ");
-        pageSql.Append(" f.fund_name, ");
-        pageSql.Append(" isnull(f.fund_strategy_name, isnull(f.fund_type_name, '')) as category, ");
-        pageSql.Append(" lower(isnull(f.fund_type_name, '')) as fund_type_name_lower ");
-        pageSql.Append($" from {WarehouseTables.DimFund} f ");
-        pageSql.Append(" where ");
-        WarehouseSql.AppendCurrentFundFilter(pageSql, "f");
-        WarehouseSql.AppendFundSearchFilter(pageSql, "f");
-        pageSql.Append(" order by f.fund_name ");
+        pageSql.Append(" min(b.fund_key) as fund_key, ");
+        pageSql.Append(" b.fund_name, ");
+        pageSql.Append(" max(isnull(b.fund_strategy_name, isnull(b.fund_type_name, ''))) as category, ");
+        pageSql.Append(" sum(isnull(a.net_invested_capital_amount, 0)) as net_invested_capital_amount ");
+        AppendFundLtdListingFrom(pageSql);
+        pageSql.Append(" group by b.fund_name ");
+        pageSql.Append(" order by b.fund_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
@@ -340,94 +339,19 @@ public sealed class FundPortalService : IFundPortalService
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
-        var pageRows = new List<(int FundKey, string FundName, string Category, string FundTypeNameLower)>();
+        var items = new List<FundListItemDto>();
         await using (var pageReader = await pageCommand.ExecuteReaderAsync())
         {
             while (await pageReader.ReadAsync())
             {
-                pageRows.Add(
-                    (
-                        pageReader.GetInt32OrDefault("fund_key"),
-                        pageReader.GetStringOrEmpty("fund_name"),
-                        pageReader.GetStringOrEmpty("category"),
-                        pageReader.GetStringOrEmpty("fund_type_name_lower")
-                    )
-                );
+                items.Add(new FundListItemDto
+                {
+                    FundKey = pageReader.GetInt32OrDefault("fund_key"),
+                    FundName = pageReader.GetStringOrEmpty("fund_name"),
+                    Category = pageReader.GetStringOrEmpty("category"),
+                    CurrentValue = pageReader.GetDecimalOrDefault("net_invested_capital_amount")
+                });
             }
-        }
-
-        if (pageRows.Count == 0)
-        {
-            return new PagedResult<FundListItemDto>
-            {
-                Items = [],
-                Page = normalizedPage,
-                PageSize = normalizedPageSize,
-                TotalCount = totalCount
-            };
-        }
-
-        var aggregateSql = new StringBuilder();
-        aggregateSql.Append(" select ");
-        aggregateSql.Append(" fi.fund_key, ");
-        aggregateSql.Append(" sum(isnull(fi.invested_amount, 0)) as invested_amount_total, ");
-        aggregateSql.Append(" sum(isnull(fi.invested_amount_fmv, 0)) as invested_amount_fmv_total, ");
-        aggregateSql.Append(" sum(isnull(fi.invested_units, 0)) as invested_units_total ");
-        aggregateSql.Append($" from {WarehouseTables.FactInvestment} fi ");
-        aggregateSql.Append(" where fi.fund_key in (");
-
-        var aggregateParameters = new List<string>();
-        for (var i = 0; i < pageRows.Count; i++)
-        {
-            aggregateParameters.Add($"@fundKey{i}");
-        }
-
-        aggregateSql.Append(string.Join(", ", aggregateParameters));
-        aggregateSql.Append(") group by fi.fund_key ");
-
-        var aggregateByFundKey = new Dictionary<int, (decimal InvestedAmountTotal, decimal InvestedAmountFmvTotal, decimal InvestedUnitsTotal)>();
-        await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
-        {
-            CommandType = System.Data.CommandType.Text
-        })
-        {
-            for (var i = 0; i < pageRows.Count; i++)
-            {
-                aggregateCommand.Parameters.AddWithValue(aggregateParameters[i], pageRows[i].FundKey);
-            }
-
-            await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
-            while (await aggregateReader.ReadAsync())
-            {
-                var fundKey = aggregateReader.GetInt32OrDefault("fund_key");
-                aggregateByFundKey[fundKey] =
-                (
-                    aggregateReader.GetDecimalOrDefault("invested_amount_total"),
-                    aggregateReader.GetDecimalOrDefault("invested_amount_fmv_total"),
-                    aggregateReader.GetDecimalOrDefault("invested_units_total")
-                );
-            }
-        }
-
-        var items = new List<FundListItemDto>();
-        foreach (var row in pageRows)
-        {
-            aggregateByFundKey.TryGetValue(
-                row.FundKey,
-                out var aggregateTotals
-            );
-
-            var currentValue = row.FundTypeNameLower == "unitized"
-                ? aggregateTotals.InvestedUnitsTotal
-                : aggregateTotals.InvestedAmountTotal;
-
-            items.Add(new FundListItemDto
-            {
-                FundKey = row.FundKey,
-                FundName = row.FundName,
-                Category = row.Category,
-                CurrentValue = currentValue
-            });
         }
 
         _logger.LogInformation(
@@ -441,6 +365,14 @@ public sealed class FundPortalService : IFundPortalService
             PageSize = normalizedPageSize,
             TotalCount = totalCount
         };
+    }
+
+    private static void AppendFundLtdListingFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} a ");
+        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+        sql.Append(" where b.is_current = 1 ");
+        WarehouseSql.AppendFundSearchFilter(sql, "b");
     }
 
     private async Task<FundDetailDto?> GetFundByKeyInternalAsync(int fundKey)
@@ -468,7 +400,7 @@ public sealed class FundPortalService : IFundPortalService
         summarySql.Append(" netinvestedamount = sum(net_invested_capital_amount), ");
         summarySql.Append(" netinvestedunits = sum(net_invested_capital_units), ");
         summarySql.Append(" reserveamount = sum(reserved_amount) ");
-        summarySql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} ");
+        summarySql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
         summarySql.Append(" where fund_key = f.fund_key ");
         summarySql.Append(" ) port ");
         summarySql.Append(" outer apply ( ");

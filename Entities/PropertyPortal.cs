@@ -9,8 +9,14 @@ public sealed class PropertyListItemDto
     public string Province { get; init; } = string.Empty;
     public string AssetType { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
-    public decimal CurrentValue { get; init; }
-    public decimal? YieldPercent { get; init; }
+
+    /// <summary>TODO: Map from warehouse query when ownership column is available.</summary>
+    public bool Ownership { get; init; }
+
+    /// <summary>TODO: Map from warehouse query when asset size column is available.</summary>
+    public decimal AssetSize { get; init; }
+
+    public bool IsPortfolio { get; init; }
 }
 
 /// <summary>Property detail overview with dynamic cards.</summary>
@@ -27,8 +33,14 @@ public sealed class PropertySummaryDto
     public string Location { get; init; } = string.Empty;
     public string AssetType { get; init; } = string.Empty;
     public string Status { get; init; } = string.Empty;
-    public decimal CurrentValue { get; init; }
-    public decimal? Yield { get; init; }
+
+    /// <summary>TODO: Map from warehouse query when ownership column is available.</summary>
+    public bool Ownership { get; init; }
+
+    /// <summary>TODO: Map from warehouse query when asset size column is available.</summary>
+    public decimal AssetSize { get; init; }
+
+    public bool IsPortfolio { get; init; }
     public object? AcquisitionDate { get; init; }
     public int Investments { get; init; }
 }

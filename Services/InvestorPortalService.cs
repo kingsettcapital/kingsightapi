@@ -81,10 +81,11 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
-        countSql.Append($" from {WarehouseTables.DimInvestor} i ");
-        countSql.Append(" where ");
-        WarehouseSql.AppendCurrentInvestorFilter(countSql, "i");
-        WarehouseSql.AppendInvestorSearchFilter(countSql, "i");
+        countSql.Append(" from ( ");
+        countSql.Append(" select b.investor_name ");
+        AppendInvestorLtdListingFrom(countSql);
+        countSql.Append(" group by b.investor_name ");
+        countSql.Append(" ) investor_rows ");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
@@ -95,14 +96,13 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" i.investor_key, ");
-        pageSql.Append(" i.investor_name, ");
-        pageSql.Append(" isnull(i.investor_type_name, '') as investor_type_name ");
-        pageSql.Append($" from {WarehouseTables.DimInvestor} i ");
-        pageSql.Append(" where ");
-        WarehouseSql.AppendCurrentInvestorFilter(pageSql, "i");
-        WarehouseSql.AppendInvestorSearchFilter(pageSql, "i");
-        pageSql.Append(" order by i.investor_name ");
+        pageSql.Append(" min(b.investor_key) as investor_key, ");
+        pageSql.Append(" b.investor_name, ");
+        pageSql.Append(" max(isnull(b.investor_type_name, '')) as investor_type_name, ");
+        pageSql.Append(" sum(isnull(a.net_invested_capital_amount, 0)) as total_invested ");
+        AppendInvestorLtdListingFrom(pageSql);
+        pageSql.Append(" group by b.investor_name ");
+        pageSql.Append(" order by b.investor_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
@@ -113,81 +113,19 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
-        var pageRows = new List<(long InvestorKey, string InvestorName, string InvestorType)>();
+        var items = new List<InvestorListItemDto>();
         await using (var pageReader = await pageCommand.ExecuteReaderAsync())
         {
             while (await pageReader.ReadAsync())
             {
-                pageRows.Add((
-                    pageReader.GetInt64OrDefault("investor_key"),
-                    pageReader.GetStringOrEmpty("investor_name"),
-                    pageReader.GetStringOrEmpty("investor_type_name")
-                ));
+                items.Add(new InvestorListItemDto
+                {
+                    InvestorKey = pageReader.GetInt64OrDefault("investor_key"),
+                    InvestorName = pageReader.GetStringOrEmpty("investor_name"),
+                    InvestorType = pageReader.GetStringOrEmpty("investor_type_name"),
+                    TotalInvested = pageReader.GetDecimalOrDefault("total_invested")
+                });
             }
-        }
-
-        if (pageRows.Count == 0)
-        {
-            return new PagedResult<InvestorListItemDto>
-            {
-                Items = [],
-                Page = normalizedPage,
-                PageSize = normalizedPageSize,
-                TotalCount = totalCount
-            };
-        }
-
-        // Aggregate committed totals only for current page investors.
-        var aggregateSql = new StringBuilder();
-        aggregateSql.Append(" select ");
-        aggregateSql.Append(" fc.investor_key, ");
-        aggregateSql.Append(" sum(isnull(fc.committed_amount, 0)) as total_invested ");
-        aggregateSql.Append($" from {WarehouseTables.FactCommitted} fc ");
-        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fc.fund_key ");
-        aggregateSql.Append(" where ");
-        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df");
-        aggregateSql.Append(" and fc.investor_key in (");
-
-        var aggregateParameters = new List<string>();
-        for (var i = 0; i < pageRows.Count; i++)
-        {
-            aggregateParameters.Add($"@investorKey{i}");
-        }
-
-        aggregateSql.Append(string.Join(", ", aggregateParameters));
-        aggregateSql.Append(") group by fc.investor_key ");
-
-        var totalsByInvestorKey = new Dictionary<long, decimal>();
-        await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
-        {
-            CommandType = System.Data.CommandType.Text
-        })
-        {
-            for (var i = 0; i < pageRows.Count; i++)
-            {
-                aggregateCommand.Parameters.AddWithValue(aggregateParameters[i], pageRows[i].InvestorKey);
-            }
-
-            await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
-            while (await aggregateReader.ReadAsync())
-            {
-                totalsByInvestorKey[aggregateReader.GetInt64OrDefault("investor_key")] =
-                    aggregateReader.GetDecimalOrDefault("total_invested");
-            }
-        }
-
-        var items = new List<InvestorListItemDto>();
-        foreach (var row in pageRows)
-        {
-            totalsByInvestorKey.TryGetValue(row.InvestorKey, out var totalInvested);
-
-            items.Add(new InvestorListItemDto
-            {
-                InvestorKey = row.InvestorKey,
-                InvestorName = row.InvestorName,
-                InvestorType = row.InvestorType,
-                TotalInvested = totalInvested
-            });
         }
 
         _logger.LogInformation(
@@ -201,6 +139,14 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             PageSize = normalizedPageSize,
             TotalCount = totalCount
         };
+    }
+
+    private static void AppendInvestorLtdListingFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} a ");
+        sql.Append($" inner join {WarehouseTables.DimInvestor} b on a.investor_key = b.investor_key ");
+        sql.Append(" where b.is_current = 1 ");
+        WarehouseSql.AppendInvestorSearchFilter(sql, "b");
     }
 
     private async Task<InvestorDetailDto?> GetInvestorByKeyInternalAsync(long investorKey)
@@ -271,6 +217,12 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         aggSql.Append(" where fc.investor_key = @investorKey ");
         aggSql.Append(" ), 0) as total_committed_value, ");
         aggSql.Append(" isnull(( ");
+        aggSql.Append(" select sum(isnull(p.net_invested_capital_amount, 0)) ");
+        aggSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
+        aggSql.Append($" inner join {WarehouseTables.DimInvestor} i2 on i2.investor_key = p.investor_key ");
+        aggSql.Append(" where i2.investor_key = @investorKey and i2.is_current = 1 ");
+        aggSql.Append(" ), 0) as total_invested_value, ");
+        aggSql.Append(" isnull(( ");
         aggSql.Append(" select sum(case when lower(isnull(df.fund_type_name, '')) = 'unitized' ");
         aggSql.Append(" then isnull(fi.invested_units, 0) else isnull(fi.invested_amount, 0) end) ");
         aggSql.Append($" from {WarehouseTables.FactInvestment} fi ");
@@ -311,6 +263,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         }
 
         var totalCommittedValue = aggReader.GetDecimalOrDefault("total_committed_value");
+        var totalInvestedValue = aggReader.GetDecimalOrDefault("total_invested_value");
         var investmentsCount = aggReader.GetInt32OrDefault("investments_count");
         var activeInvestmentsCount = aggReader.GetInt32OrDefault("active_investments_count");
         var firstInvestmentDate = aggReader.GetNullableDateTime("first_investment_date");
@@ -329,7 +282,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             InvestorName = investorName,
             InvestorType = investorType,
             Status = status,
-            TotalInvested = totalCommittedValue,
+            TotalInvested = totalInvestedValue,
             InvestmentsCount = investmentsCount,
             DocumentsCount = 0,
             JoinYear = joinYear

@@ -92,6 +92,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         countSql.Append($" from {WarehouseTables.DimProperty} p ");
         countSql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
+        WarehouseSql.AppendPropertyFundLevel000Filter(countSql, "p");
         WarehouseSql.AppendPropertySearchFilter(countSql, "p");
         WarehouseSql.AppendFundCodeSearchFilter(countSql, "p");
 
@@ -108,6 +109,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append($" from {WarehouseTables.DimProperty} p ");
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
+        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         WarehouseSql.AppendPropertySearchFilter(sql, "p");
         WarehouseSql.AppendFundCodeSearchFilter(sql, "p");
         sql.Append(" order by p.property_name ");
@@ -177,6 +179,12 @@ public sealed class PropertyPortalService : IPropertyPortalService
 
         var location = DisplayFieldBuilder.Text(
             $"{GetOrDefault(fields, "city").Value}, {GetOrDefault(fields, "province").Value}".Trim(' ', ','));
+        // TODO: Map Ownership from warehouse query when column is available.
+        const bool ownership = false;
+        // TODO: Map AssetSize from warehouse query when column is available.
+        const decimal assetSize = 0m;
+        var isPortfolio = ToBoolean(GetOrDefault(fields, "portfolio").Value);
+
         var summary = new PropertySummaryDto
         {
             PropertyKey = ToInt64(GetOrDefault(fields, "propertyKey").Value),
@@ -184,8 +192,9 @@ public sealed class PropertyPortalService : IPropertyPortalService
             Location = Convert.ToString(location.Value) ?? string.Empty,
             AssetType = Convert.ToString(GetOrDefault(fields, "assetType").Value) ?? string.Empty,
             Status = Convert.ToString(GetOrDefault(fields, "status").Value) ?? string.Empty,
-            CurrentValue = ToDecimal(GetOrDefault(fields, "currentValue", "marketValue", "propertyValue").Value),
-            Yield = ToNullableDecimal(GetOrDefault(fields, "annualYieldPercent", "yieldPercent", "annualYield").Value),
+            Ownership = ownership,
+            AssetSize = assetSize,
+            IsPortfolio = isPortfolio,
             AcquisitionDate = GetOrDefault(fields, "propertyAcquisition").Value,
             Investments = ToInt32(GetOrDefault(fields, "investmentsCount").Value)
         };
@@ -195,16 +204,10 @@ public sealed class PropertyPortalService : IPropertyPortalService
             DisplayFieldBuilder.ToDynamicField("assetType", GetOrDefault(fields, "assetType")),
             DisplayFieldBuilder.ToDynamicField("status", GetOrDefault(fields, "status")),
             DisplayFieldBuilder.ToDynamicField("location", location),
-            DisplayFieldBuilder.ToDynamicField("acquisitionDate", GetOrDefault(fields, "propertyAcquisition"))
-        };
-
-        var financialInformation = new List<DynamicFieldDto>
-        {
-            DisplayFieldBuilder.ToDynamicField("currentValue", GetOrDefault(fields, "currentValue", "marketValue", "propertyValue")),
-            DisplayFieldBuilder.ToDynamicField("annualYield", GetOrDefault(fields, "annualYieldPercent", "yieldPercent", "annualYield")),
-            DisplayFieldBuilder.ToDynamicField("annualIncome", GetOrDefault(fields, "annualIncome")),
-            DisplayFieldBuilder.ToDynamicField("holdingPeriod", GetOrDefault(fields, "holdingPeriod")),
-            DisplayFieldBuilder.ToDynamicField("investments", GetOrDefault(fields, "investmentsCount"))
+            DisplayFieldBuilder.ToDynamicField("acquisitionDate", GetOrDefault(fields, "propertyAcquisition")),
+            DisplayFieldBuilder.ToDynamicField("ownership", DisplayFieldBuilder.Boolean(ownership)),
+            DisplayFieldBuilder.ToDynamicField("assetSize", DisplayFieldBuilder.Number(assetSize)),
+            DisplayFieldBuilder.ToDynamicField("isPortfolio", DisplayFieldBuilder.Boolean(isPortfolio))
         };
 
         return new PropertyDetailDto
@@ -219,11 +222,38 @@ public sealed class PropertyPortalService : IPropertyPortalService
                 },
                 new DynamicSectionDto
                 {
-                    Title = "Financial Information",
-                    Fields = financialInformation
+                    Title = "Acquisition",
+                    Fields = BuildPlaceholderLifecycleMetricFields()
+                },
+                new DynamicSectionDto
+                {
+                    Title = "Sale",
+                    Fields = BuildPlaceholderLifecycleMetricFields()
                 }
             ]
         };
+    }
+
+    /// <summary>TODO: Map Acquisition/Sale metrics from warehouse when columns are available.</summary>
+    private static List<DynamicFieldDto> BuildPlaceholderLifecycleMetricFields()
+    {
+        return
+        [
+            DisplayFieldBuilder.ToDynamicField("debt", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("equity", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("totalAssetValue", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("assetLevelDebtPercent", DisplayFieldBuilder.Percent(0m)),
+            DisplayFieldBuilder.ToDynamicField("purchaseCosts", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("ltv", DisplayFieldBuilder.Percent(0m)),
+            DisplayFieldBuilder.ToDynamicField("capRate", DisplayFieldBuilder.Percent(0m)),
+            DisplayFieldBuilder.ToDynamicField("noi", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("gla", DisplayFieldBuilder.Number(0m)),
+            DisplayFieldBuilder.ToDynamicField("propertyManager", DisplayFieldBuilder.Number(0m)),
+            DisplayFieldBuilder.ToDynamicField("occupancy", DisplayFieldBuilder.Percent(0m)),
+            DisplayFieldBuilder.ToDynamicField("weightedAverageLeaseTerm", DisplayFieldBuilder.Number(0m)),
+            DisplayFieldBuilder.ToDynamicField("averageInPlaceRentPerSf", DisplayFieldBuilder.Money(0m)),
+            DisplayFieldBuilder.ToDynamicField("salesPerSfRetail", DisplayFieldBuilder.Money(0m))
+        ];
     }
 
     private async Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsInternalAsync(long propertyKey)
@@ -321,8 +351,11 @@ public sealed class PropertyPortalService : IPropertyPortalService
         var province = reader.GetStringFromColumns("province");
         var assetType = reader.GetStringFromColumns("asset_type");
         var status = reader.MapPropertyStatus();
-        var currentValue = reader.GetDecimalFromColumns("current_value", "market_value", "property_value");
-        var yieldPercent = reader.GetNullableDecimalFromColumns("annual_yield_percent", "yield_percent", "annual_yield");
+        // TODO: Map Ownership from warehouse query when column is available.
+        const bool ownership = false;
+        // TODO: Map AssetSize from warehouse query when column is available.
+        const decimal assetSize = 0m;
+        var isPortfolio = reader.GetBooleanFromColumns("portfolio");
 
         return new PropertyListItemDto
         {
@@ -332,8 +365,9 @@ public sealed class PropertyPortalService : IPropertyPortalService
             Province = province,
             AssetType = assetType,
             Status = status,
-            CurrentValue = currentValue,
-            YieldPercent = yieldPercent
+            Ownership = ownership,
+            AssetSize = assetSize,
+            IsPortfolio = isPortfolio
         };
     }
 
@@ -394,5 +428,27 @@ public sealed class PropertyPortalService : IPropertyPortalService
 
         var raw = Convert.ToString(value)?.Trim();
         return decimal.TryParse(raw, out var parsed) ? parsed : null;
+    }
+
+    private static bool ToBoolean(object? value)
+    {
+        if (value is null or DBNull)
+        {
+            return false;
+        }
+
+        return value switch
+        {
+            bool b => b,
+            byte or sbyte or short or ushort or int or uint or long or ulong =>
+                Convert.ToInt64(value) != 0,
+            decimal or double or float =>
+                Convert.ToDecimal(value) != 0m,
+            string s when bool.TryParse(s, out var parsed) => parsed,
+            string s => s.Equals("1", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("y", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
     }
 }
