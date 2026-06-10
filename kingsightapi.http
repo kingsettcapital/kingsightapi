@@ -6,6 +6,26 @@ Accept: application/json
 
 ###
 
+GET {{api_HostAddress}}/api/TaxArrears?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/TaxArrears/lookups
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultDateCapture?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/OtherCostCapture?loanAliasId=1&statuses=2
+Accept: application/json
+
+###
+
 GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics?loanAliasIds=1&statuses=2
 Accept: application/json
 

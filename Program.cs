@@ -46,6 +46,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
             builder.Services.AddSingleton<IDefaultDateCaptureService, DefaultDateCaptureService>();
             builder.Services.AddSingleton<IDefaultSubjectiveAnalyticsService, DefaultSubjectiveAnalyticsService>();
+            builder.Services.AddSingleton<ITaxArrearsService, TaxArrearsService>();
 
             builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
             builder.Services.Configure<FormOptions>(options =>
