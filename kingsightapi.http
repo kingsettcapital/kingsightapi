@@ -6,6 +6,79 @@ Accept: application/json
 
 ###
 
+GET {{api_HostAddress}}/api/NonKsServicedLoans
+Accept: application/json
+
+###
+
+POST {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanName": "External Servicer Loan A",
+      "asAtDate": "2026-03-31",
+      "loanId": "NKS-EXT-001",
+      "servicerId": "SVC-100",
+      "description": "Quarterly capture test",
+      "investor": "Investor A",
+      "interestRate": 15.75,
+      "principalBalance": 1000000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+PUT {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "nonKsServicedLoanKey": 1,
+      "loanName": "External Servicer Loan A",
+      "loanId": "NKS-EXT-001",
+      "principalBalance": 1050000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+GET {{api_HostAddress}}/api/LtvValidation?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/LtvValidation
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanKey": 417,
+      "ltv": 57,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+POST {{api_HostAddress}}/api/LtvValidation/confirm
+Content-Type: application/json
+
+{
+  "loanKeys": [417],
+  "userUpdatedBy": "system"
+}
+
+###
+
 GET {{api_HostAddress}}/api/TaxArrears?loanAliasIds=1&statuses=2
 Accept: application/json
 

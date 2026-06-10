@@ -1,5 +1,6 @@
 -- Tax Arrears Capture — quarter tax memo records at leaf loan level.
--- Microsoft Fabric Warehouse: tax_arrear_key assigned by API (max + 1), not IDENTITY.
+-- Microsoft Fabric Warehouse: tax_arrear_key assigned by API (max + 1).
+-- Fabric: no DEFAULT / IDENTITY on CREATE TABLE — keys and flags set by API.
 
 IF OBJECT_ID('mort.tax_arrears', 'U') IS NULL
 BEGIN
