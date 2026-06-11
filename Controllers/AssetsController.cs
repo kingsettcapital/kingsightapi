@@ -19,6 +19,7 @@ public class AssetsController : ControllerBase
     }
 
     // GET: api/assets?search=&fundCode=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<PagedResult<PropertyListItemDto>>> GetAll(
         [FromQuery] string? search,
@@ -44,6 +45,7 @@ public class AssetsController : ControllerBase
     }
 
     // GET: api/assets/{propertyKey}
+    [AllowAnonymous]
     [HttpGet("{propertyKey:long}")]
     public async Task<ActionResult<PropertyDetailDto>> GetByKey(long propertyKey)
     {
@@ -65,6 +67,7 @@ public class AssetsController : ControllerBase
     }
 
     // GET: api/assets/{propertyKey}/investments
+    [AllowAnonymous]
     [HttpGet("{propertyKey:long}/investments")]
     public async Task<ActionResult<IReadOnlyList<PropertyInvestmentDto>>> GetInvestments(long propertyKey)
     {

@@ -22,6 +22,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors?search=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet]
     public async Task<ActionResult<PagedResult<InvestorListItemDto>>> GetAll(
         [FromQuery] string? search,
@@ -46,6 +47,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/periods?view=ltd|quarterly|daily&source=commitments|nav|unfunded-commitments|investments|distributions&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/periods")]
     public async Task<ActionResult<PagedResult<FundPeriodDto>>> GetPeriods(
         long investorKey,
@@ -83,6 +85,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}")]
     public async Task<ActionResult<InvestorDetailDto>> GetByKey(long investorKey)
     {
@@ -104,6 +107,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/funds?page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/funds")]
     public async Task<ActionResult<PagedResult<InvestorInvestmentDto>>> GetFunds(
         long investorKey,
@@ -128,6 +132,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/commitments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/commitments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetCommitments(
         long investorKey,
@@ -166,6 +171,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/unfunded-commitments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/unfunded-commitments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetUnfundedCommitments(
         long investorKey,
@@ -204,6 +210,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/investments?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/investments")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetInvestments(
         long investorKey,
@@ -242,6 +249,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/distributions?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/distributions")]
     public async Task<ActionResult<PagedResult<FundDistributionGroupDto>>> GetDistributions(
         long investorKey,
@@ -280,6 +288,7 @@ public class CapitalInvestorsController : ControllerBase
     }
 
     // GET: api/CapitalInvestors/{investorKey}/nav?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [AllowAnonymous]
     [HttpGet("{investorKey:long}/nav")]
     public async Task<ActionResult<PagedResult<FundGranularRowDto>>> GetNav(
         long investorKey,
