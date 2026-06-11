@@ -1,20 +1,44 @@
 namespace kingsightapi.Entities;
 
-/// <summary>Asset sidebar row (property list screen).</summary>
+using System.Text.Json.Serialization;
+
+/// <summary>Property row on the module list page (Assets tab).</summary>
 public sealed class PropertyListItemDto
 {
     public long PropertyKey { get; init; }
+
+    [JsonPropertyName("property_code")]
+    public string PropertyCode { get; init; } = string.Empty;
+
     public string PropertyName { get; init; } = string.Empty;
+    public string Geography { get; init; } = string.Empty;
     public string City { get; init; } = string.Empty;
     public string Province { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_type")]
     public string AssetType { get; init; } = string.Empty;
-    public string Status { get; init; } = string.Empty;
 
-    /// <summary>TODO: Map from warehouse query when ownership column is available.</summary>
-    public bool Ownership { get; init; }
+    [JsonPropertyName("investment_type")]
+    public string InvestmentType { get; init; } = string.Empty;
 
-    /// <summary>TODO: Map from warehouse query when asset size column is available.</summary>
-    public decimal AssetSize { get; init; }
+    [JsonPropertyName("development_type")]
+    public string DevelopmentType { get; init; } = string.Empty;
+
+    [JsonPropertyName("property_status")]
+    public string PropertyStatus { get; init; } = string.Empty;
+
+    /// <summary>Gross leasable area (sf) when available on dim_property.</summary>
+    [JsonPropertyName("gla_sf")]
+    public decimal? GlaSf { get; init; }
+
+    [JsonPropertyName("committed_sf")]
+    public decimal? CommittedSf { get; init; }
+
+    [JsonPropertyName("vacant_sf")]
+    public decimal? VacantSf { get; init; }
+
+    /// <summary>Legacy alias for <see cref="PropertyStatus"/>.</summary>
+    public string Status => PropertyStatus;
 
     public bool IsPortfolio { get; init; }
 }

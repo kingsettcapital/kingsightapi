@@ -2,13 +2,42 @@ namespace kingsightapi.Entities;
 
 using System.Text.Json.Serialization;
 
-/// <summary>Investor sidebar row (profile list screen).</summary>
+/// <summary>Investor row on the module list page (Investors tab).</summary>
 public sealed class InvestorListItemDto
 {
     public long InvestorKey { get; init; }
     public string InvestorName { get; init; } = string.Empty;
     public string InvestorType { get; init; } = string.Empty;
-    public decimal TotalInvested { get; init; }
+
+    [JsonPropertyName("relationship_name")]
+    public string RelationshipName { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_first_name")]
+    public string ContactFirstName { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_last_name")]
+    public string ContactLastName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_count")]
+    public int FundCount { get; init; }
+
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount { get; init; }
+
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal ReleasedCapitalAmount { get; init; }
+
+    /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
+    public decimal TotalInvested => NetInvestedCapitalAmount;
 }
 
 /// <summary>Investor profile header + overview tab.</summary>

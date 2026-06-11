@@ -13,25 +13,69 @@ namespace kingsightapi.Controllers;
 public class CapitalInvestorsController : ControllerBase
 {
     private readonly IInvestorPortalService _service;
+    private readonly IPortalFilterService _filterService;
     private readonly ILogger<CapitalInvestorsController> _logger;
 
-    public CapitalInvestorsController(IInvestorPortalService service, ILogger<CapitalInvestorsController> logger)
+    public CapitalInvestorsController(
+        IInvestorPortalService service,
+        IPortalFilterService filterService,
+        ILogger<CapitalInvestorsController> logger)
     {
         _service = service;
+        _filterService = filterService;
         _logger = logger;
     }
 
-    // GET: api/CapitalInvestors?search=&page=1&pageSize=50
-    [HttpGet]
-    public async Task<ActionResult<PagedResult<InvestorListItemDto>>> GetAll(
-        [FromQuery] string? search,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
+    // GET: api/CapitalInvestors/filter-options
+    [HttpGet("filter-options")]
+    public async Task<ActionResult<InvestorListFilterOptionsDto>> GetFilterOptions()
     {
         try
         {
-            var result = await _service.GetInvestorsAsync(search, page, pageSize);
+            return Ok(await _filterService.GetInvestorListFilterOptionsAsync());
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get investor filter options cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving investor filter options");
+            return StatusCode(500, "An error occurred while retrieving investor filter options.");
+        }
+    }
+
+    // GET: api/CapitalInvestors?search=&view=ltd|quarterly&dateKey=&investorType=&relationship=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
+    [HttpGet]
+    public async Task<ActionResult<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>>> GetAll(
+        [FromQuery] string? search,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] string? investorType,
+        [FromQuery] string? relationship,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
+        try
+        {
+            var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+            var result = await _service.GetInvestorsAsync(
+                search, resolvedView, period, investorType, relationship, sortBy, sortDir, page, pageSize);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (OperationCanceledException)
         {

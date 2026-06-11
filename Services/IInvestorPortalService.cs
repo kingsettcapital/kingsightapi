@@ -4,7 +4,16 @@ namespace kingsightapi.Services;
 
 public interface IInvestorPortalService
 {
-    Task<PagedResult<InvestorListItemDto>> GetInvestorsAsync(string? search, int page, int pageSize);
+    Task<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>> GetInvestorsAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? investorType,
+        string? relationship,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
     Task<InvestorDetailDto?> GetInvestorByKeyAsync(long investorKey);
     Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize);
     Task<PagedResult<FundPeriodDto>> GetInvestorPeriodsAsync(

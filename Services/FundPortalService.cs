@@ -20,11 +20,21 @@ public sealed class FundPortalService : IFundPortalService
         _logger = logger;
     }
 
-    public async Task<PagedResult<FundListItemDto>> GetFundsAsync(string? search, int page, int pageSize)
+    public async Task<PortalListPageResult<FundListItemDto, FundListSummaryDto>> GetFundsAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? fundType,
+        string? strategy,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize)
     {
         try
         {
-            return await GetFundsInternalAsync(search, page, pageSize);
+            return await GetFundsInternalAsync(
+                search, view, period, fundType, strategy, sortBy, sortDir, page, pageSize);
         }
         catch (OperationCanceledException)
         {
@@ -33,7 +43,13 @@ public sealed class FundPortalService : IFundPortalService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving funds. Search={Search}, Page={Page}, PageSize={PageSize}", search, page, pageSize);
+            _logger.LogError(
+                ex,
+                "Error retrieving funds. Search={Search}, View={View}, Page={Page}, PageSize={PageSize}",
+                search,
+                view,
+                page,
+                pageSize);
             throw;
         }
     }
@@ -297,45 +313,64 @@ public sealed class FundPortalService : IFundPortalService
         }
     }
 
-    private async Task<PagedResult<FundListItemDto>> GetFundsInternalAsync(string? search, int page, int pageSize)
+    private async Task<PortalListPageResult<FundListItemDto, FundListSummaryDto>> GetFundsInternalAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? fundType,
+        string? strategy,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize)
     {
+        if (!PortalListSort.TryParseFund(sortBy, sortDir, out var orderBy, out var sortError))
+        {
+            throw new ArgumentException(sortError);
+        }
+
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var fundTypeTerm = string.IsNullOrWhiteSpace(fundType) ? null : fundType.Trim();
+        var strategyTerm = string.IsNullOrWhiteSpace(strategy) ? null : strategy.Trim();
+        var portfolioTable = PortalPortfolioListSql.PortfolioTable(view);
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
         var countSql = new StringBuilder();
-        countSql.Append(" select count(*) ");
-        countSql.Append(" from ( ");
-        countSql.Append(" select b.fund_name ");
-        AppendFundLtdListingFrom(countSql);
-        countSql.Append(" group by b.fund_name ");
+        countSql.Append(" select count(*) from ( ");
+        countSql.Append(" select b.fund_key ");
+        AppendFundListingFrom(countSql, portfolioTable, view, period);
+        countSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
         countSql.Append(" ) fund_rows ");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        AddFundListingParameters(countCommand, searchTerm, fundTypeTerm, strategyTerm, period);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+        var summary = await GetFundListSummaryAsync(
+            connection, portfolioTable, view, period, searchTerm, fundTypeTerm, strategyTerm);
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" min(b.fund_key) as fund_key, ");
+        pageSql.Append(" b.fund_key, ");
         pageSql.Append(" b.fund_name, ");
-        pageSql.Append(" max(isnull(b.fund_strategy_name, isnull(b.fund_type_name, ''))) as category, ");
-        pageSql.Append(" sum(isnull(a.net_invested_capital_amount, 0)) as net_invested_capital_amount ");
-        AppendFundLtdListingFrom(pageSql);
-        pageSql.Append(" group by b.fund_name ");
-        pageSql.Append(" order by b.fund_name ");
+        pageSql.Append(" isnull(b.fund_type_name, '') as fund_type_name, ");
+        pageSql.Append(" isnull(b.fund_strategy_name, '') as fund_strategy_name, ");
+        PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
+        AppendFundListingFrom(pageSql, portfolioTable, view, period);
+        pageSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
+        orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        pageCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        AddFundListingParameters(pageCommand, searchTerm, fundTypeTerm, strategyTerm, period);
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -344,36 +379,109 @@ public sealed class FundPortalService : IFundPortalService
         {
             while (await pageReader.ReadAsync())
             {
-                items.Add(new FundListItemDto
-                {
-                    FundKey = pageReader.GetInt32OrDefault("fund_key"),
-                    FundName = pageReader.GetStringOrEmpty("fund_name"),
-                    Category = pageReader.GetStringOrEmpty("category"),
-                    CurrentValue = pageReader.GetDecimalOrDefault("net_invested_capital_amount")
-                });
+                items.Add(MapFundListItem(pageReader));
             }
         }
 
         _logger.LogInformation(
-            "Retrieved {Count} funds (page {Page}, total {Total}).",
-            items.Count, normalizedPage, totalCount);
+            "Retrieved {Count} funds ({View}, page {Page}, total {Total}).",
+            items.Count,
+            view,
+            normalizedPage,
+            totalCount);
 
-        return new PagedResult<FundListItemDto>
+        return new PortalListPageResult<FundListItemDto, FundListSummaryDto>
         {
+            Summary = new FundListSummaryDto
+            {
+                TotalFunds = totalCount,
+                TotalCommitment = summary.TotalCommitment,
+                NetInvestedCapital = summary.NetInvestedCapital,
+                NetDistributed = summary.NetDistributed,
+                ReservedUncalled = summary.ReservedUncalled
+            },
             Items = items,
             Page = normalizedPage,
             PageSize = normalizedPageSize,
-            TotalCount = totalCount
+            TotalCount = totalCount,
         };
     }
 
-    private static void AppendFundLtdListingFrom(StringBuilder sql)
+    private static async Task<FundListSummaryDto> GetFundListSummaryAsync(
+        SqlConnection connection,
+        string portfolioTable,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? fundType,
+        string? strategy)
     {
-        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} a ");
-        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
-        sql.Append(" where b.is_current = 1 ");
-        WarehouseSql.AppendFundSearchFilter(sql, "b");
+        var summarySql = new StringBuilder();
+        summarySql.Append(" select ");
+        summarySql.Append(" count(distinct b.fund_key) as fund_count, ");
+        PortalPortfolioListSql.AppendPortfolioSummaryMetricSums(summarySql);
+        AppendFundListingFrom(summarySql, portfolioTable, view, period);
+
+        await using var command = new SqlCommand(summarySql.ToString(), connection);
+        AddFundListingParameters(command, search, fundType, strategy, period);
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return new FundListSummaryDto();
+        }
+
+        return new FundListSummaryDto
+        {
+            TotalFunds = reader.GetInt32OrDefault("fund_count"),
+            TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
+            NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
+            NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
+            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled")
+        };
     }
+
+    private static void AppendFundListingFrom(
+        StringBuilder sql,
+        string portfolioTable,
+        TimeGranularity view,
+        FundPeriodFilter? period)
+    {
+        sql.Append($" from {portfolioTable} a ");
+        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "b");
+        PortalPortfolioListSql.AppendQuarterlyPeriodFilter(sql, view, period);
+        WarehouseSql.AppendFundSearchFilter(sql, "b");
+        WarehouseSql.AppendFundTypeFilter(sql, "b");
+        WarehouseSql.AppendFundStrategyFilter(sql, "b");
+    }
+
+    private static void AddFundListingParameters(
+        SqlCommand command,
+        string? search,
+        string? fundType,
+        string? strategy,
+        FundPeriodFilter? period)
+    {
+        command.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
+        command.Parameters.AddWithValue("@fundType", (object?)fundType ?? DBNull.Value);
+        command.Parameters.AddWithValue("@strategy", (object?)strategy ?? DBNull.Value);
+        PortalPortfolioListSql.AddPeriodParameter(command, period);
+    }
+
+    private static FundListItemDto MapFundListItem(SqlDataReader reader) =>
+        new()
+        {
+            FundKey = reader.GetInt32OrDefault("fund_key"),
+            FundName = reader.GetStringOrEmpty("fund_name"),
+            FundTypeName = reader.GetStringOrEmpty("fund_type_name"),
+            FundStrategyName = reader.GetStringOrEmpty("fund_strategy_name"),
+            CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
+            NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+            NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+            ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
+            ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
+        };
 
     private async Task<FundDetailDto?> GetFundByKeyInternalAsync(int fundKey)
     {

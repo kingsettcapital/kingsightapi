@@ -52,6 +52,9 @@ namespace kingsightapi
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
             builder.Services.AddSingleton<IFundPortalService, FundPortalService>();
             builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
+            builder.Services.AddSingleton<IPortalFilterService, PortalFilterService>();
+            builder.Services.AddSingleton<IGlobalSearchService, GlobalSearchService>();
+            //builder.Services.AddSingleton<IDashboardService, DashboardService>();
             builder.Services.AddSingleton<ILoanSecurityValueService, LoanSecurityValueService>();
             builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
             builder.Services.AddSingleton<ILoanFormService, LoanFormService>();

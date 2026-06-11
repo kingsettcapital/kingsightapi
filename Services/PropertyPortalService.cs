@@ -7,7 +7,17 @@ namespace kingsightapi.Services;
 
 public interface IPropertyPortalService
 {
-    Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize, string? fundCode);
+    Task<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>> GetPropertiesAsync(
+        string? search,
+        string? assetType,
+        string? investmentType,
+        string? geography,
+        string? status,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize,
+        string? fundCode);
     Task<PropertyDetailDto?> GetPropertyByKeyAsync(long propertyKey);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
 }
@@ -24,11 +34,22 @@ public sealed class PropertyPortalService : IPropertyPortalService
         _logger = logger;
     }
 
-    public async Task<PagedResult<PropertyListItemDto>> GetPropertiesAsync(string? search, int page, int pageSize, string? fundCode)
+    public async Task<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>> GetPropertiesAsync(
+        string? search,
+        string? assetType,
+        string? investmentType,
+        string? geography,
+        string? status,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize,
+        string? fundCode)
     {
         try
         {
-            return await GetPropertiesInternalAsync(search, page, pageSize, fundCode);
+            return await GetPropertiesInternalAsync(
+                search, assetType, investmentType, geography, status, sortBy, sortDir, page, pageSize, fundCode);
         }
         catch (OperationCanceledException)
         {
@@ -78,10 +99,29 @@ public sealed class PropertyPortalService : IPropertyPortalService
         }
     }
 
-    private async Task<PagedResult<PropertyListItemDto>> GetPropertiesInternalAsync(string? search, int page, int pageSize, string? fundCode)
+    private async Task<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>> GetPropertiesInternalAsync(
+        string? search,
+        string? assetType,
+        string? investmentType,
+        string? geography,
+        string? status,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize,
+        string? fundCode)
     {
+        if (!PortalListSort.TryParseProperty(sortBy, sortDir, out var orderBy, out var sortError))
+        {
+            throw new ArgumentException(sortError);
+        }
+
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var assetTypeTerm = string.IsNullOrWhiteSpace(assetType) ? null : assetType.Trim();
+        var investmentTypeTerm = string.IsNullOrWhiteSpace(investmentType) ? null : investmentType.Trim();
+        var geographyTerm = string.IsNullOrWhiteSpace(geography) ? null : geography.Trim();
+        var statusTerm = string.IsNullOrWhiteSpace(status) ? null : status.Trim();
         var fundCodeTerm = string.IsNullOrWhiteSpace(fundCode) ? null : fundCode.Trim();
 
         await using var connection = new SqlConnection(_connectionString);
@@ -90,37 +130,48 @@ public sealed class PropertyPortalService : IPropertyPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append($" from {WarehouseTables.DimProperty} p ");
-        countSql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
-        WarehouseSql.AppendPropertyFundLevel000Filter(countSql, "p");
-        WarehouseSql.AppendPropertySearchFilter(countSql, "p");
-        WarehouseSql.AppendFundCodeSearchFilter(countSql, "p");
+        AppendPropertyListingWhere(countSql);
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
-        countCommand.Parameters.AddWithValue("@fund_code", (object?)fundCodeTerm ?? DBNull.Value);
+        AddPropertyListingParameters(
+            countCommand, searchTerm, assetTypeTerm, investmentTypeTerm, geographyTerm, statusTerm, fundCodeTerm);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+        var summary = await GetAssetListSummaryAsync(
+            connection,
+            searchTerm,
+            assetTypeTerm,
+            investmentTypeTerm,
+            geographyTerm,
+            statusTerm,
+            fundCodeTerm);
 
         var sql = new StringBuilder();
-        sql.Append(" select p.* ");
+        sql.Append(" select ");
+        sql.Append(" p.property_key, ");
+        sql.Append(" isnull(p.property_code, '') as property_code, ");
+        sql.Append(" isnull(p.property_name, '') as property_name, ");
+        sql.Append(" isnull(p.geography, '') as geography, ");
+        sql.Append(" isnull(p.city, '') as city, ");
+        sql.Append(" isnull(p.province, '') as province, ");
+        sql.Append(" isnull(p.asset_type, '') as asset_type, ");
+        sql.Append(" isnull(p.investment_type, '') as investment_type, ");
+        sql.Append(" isnull(p.development_type, '') as development_type, ");
+        sql.Append(" isnull(p.property_status, '') as property_status, ");
+        sql.Append(" isnull(p.portfolio, 0) as portfolio ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
-        WarehouseSql.AppendPropertySearchFilter(sql, "p");
-        WarehouseSql.AppendFundCodeSearchFilter(sql, "p");
-        sql.Append(" order by p.property_name ");
+        AppendPropertyListingWhere(sql);
+        orderBy.AppendOrderBy(sql);
         sql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var command = new SqlCommand(sql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        command.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
-        command.Parameters.AddWithValue("@fund_code", (object?)fundCodeTerm ?? DBNull.Value);
+        AddPropertyListingParameters(
+            command, searchTerm, assetTypeTerm, investmentTypeTerm, geographyTerm, statusTerm, fundCodeTerm);
         command.Parameters.AddWithValue("@offset", offset);
         command.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -135,12 +186,54 @@ public sealed class PropertyPortalService : IPropertyPortalService
             "Retrieved {Count} properties (page {Page}, total {Total}).",
             items.Count, normalizedPage, totalCount);
 
-        return new PagedResult<PropertyListItemDto>
+        return new PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>
         {
+            Summary = new AssetListSummaryDto
+            {
+                TotalProperties = totalCount,
+                ActiveProperties = summary.ActiveProperties,
+                TotalGlaSf = 0,
+                TotalCommittedSf = 0,
+                TotalVacantSf = 0
+            },
             Items = items,
             Page = normalizedPage,
             PageSize = normalizedPageSize,
-            TotalCount = totalCount
+            TotalCount = totalCount,
+        };
+    }
+
+    private static async Task<AssetListSummaryDto> GetAssetListSummaryAsync(
+        SqlConnection connection,
+        string? search,
+        string? assetType,
+        string? investmentType,
+        string? geography,
+        string? status,
+        string? fundCode)
+    {
+        var summarySql = new StringBuilder();
+        summarySql.Append(" select ");
+        summarySql.Append(" count(*) as property_count, ");
+        summarySql.Append(" sum(case when lower(isnull(p.property_status, '')) = 'active' then 1 else 0 end) as active_property_count ");
+        summarySql.Append($" from {WarehouseTables.DimProperty} p ");
+        AppendPropertyListingWhere(summarySql);
+
+        await using var command = new SqlCommand(summarySql.ToString(), connection);
+        AddPropertyListingParameters(command, search, assetType, investmentType, geography, status, fundCode);
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return new AssetListSummaryDto();
+        }
+
+        return new AssetListSummaryDto
+        {
+            TotalProperties = reader.GetInt32OrDefault("property_count"),
+            ActiveProperties = reader.GetInt32OrDefault("active_property_count"),
+            TotalGlaSf = 0,
+            TotalCommittedSf = 0,
+            TotalVacantSf = 0
         };
     }
 
@@ -344,30 +437,62 @@ public sealed class PropertyPortalService : IPropertyPortalService
         return items;
     }
 
+    private static void AppendPropertyListingWhere(StringBuilder sql)
+    {
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
+        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        WarehouseSql.AppendPropertySearchFilter(sql, "p");
+        WarehouseSql.AppendPropertyAssetTypeFilter(sql, "p");
+        WarehouseSql.AppendPropertyInvestmentTypeFilter(sql, "p");
+        WarehouseSql.AppendPropertyGeographyFilter(sql, "p");
+        WarehouseSql.AppendPropertyStatusFilter(sql, "p");
+        WarehouseSql.AppendFundCodeSearchFilter(sql, "p");
+    }
+
+    private static void AddPropertyListingParameters(
+        SqlCommand command,
+        string? search,
+        string? assetType,
+        string? investmentType,
+        string? geography,
+        string? status,
+        string? fundCode)
+    {
+        command.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
+        command.Parameters.AddWithValue("@assetType", (object?)assetType ?? DBNull.Value);
+        command.Parameters.AddWithValue("@investmentType", (object?)investmentType ?? DBNull.Value);
+        command.Parameters.AddWithValue("@geography", (object?)geography ?? DBNull.Value);
+        command.Parameters.AddWithValue("@status", (object?)status ?? DBNull.Value);
+        command.Parameters.AddWithValue("@fund_code", (object?)fundCode ?? DBNull.Value);
+    }
+
     private static PropertyListItemDto MapPropertyListItem(SqlDataReader reader)
     {
-        var propertyName = reader.GetStringFromColumns("property_name");
-        var city = reader.GetStringFromColumns("city");
-        var province = reader.GetStringFromColumns("province");
-        var assetType = reader.GetStringFromColumns("asset_type");
-        var status = reader.MapPropertyStatus();
-        // TODO: Map Ownership from warehouse query when column is available.
-        const bool ownership = false;
-        // TODO: Map AssetSize from warehouse query when column is available.
-        const decimal assetSize = 0m;
-        var isPortfolio = reader.GetBooleanFromColumns("portfolio");
+        var geography = reader.GetStringOrEmpty("geography");
+        if (string.IsNullOrWhiteSpace(geography))
+        {
+            var city = reader.GetStringOrEmpty("city");
+            var province = reader.GetStringOrEmpty("province");
+            geography = string.Join(", ", new[] { city, province }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        }
 
         return new PropertyListItemDto
         {
-            PropertyKey = reader.GetInt64FromColumns("property_key"),
-            PropertyName = propertyName,
-            City = city,
-            Province = province,
-            AssetType = assetType,
-            Status = status,
-            Ownership = ownership,
-            AssetSize = assetSize,
-            IsPortfolio = isPortfolio
+            PropertyKey = reader.GetInt64OrDefault("property_key"),
+            PropertyCode = reader.GetStringOrEmpty("property_code"),
+            PropertyName = reader.GetStringOrEmpty("property_name"),
+            Geography = geography,
+            City = reader.GetStringOrEmpty("city"),
+            Province = reader.GetStringOrEmpty("province"),
+            AssetType = reader.GetStringOrEmpty("asset_type"),
+            InvestmentType = reader.GetStringOrEmpty("investment_type"),
+            DevelopmentType = reader.GetStringOrEmpty("development_type"),
+            PropertyStatus = reader.GetStringOrEmpty("property_status"),
+            GlaSf = 0,
+            CommittedSf = 0,
+            VacantSf = 0,
+            IsPortfolio = reader.GetBooleanFromColumns("portfolio")
         };
     }
 

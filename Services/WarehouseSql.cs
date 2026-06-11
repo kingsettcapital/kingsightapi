@@ -52,6 +52,23 @@ internal static class WarehouseSql
     {
         sql.Append(" and (@search is null ");
         sql.Append($" or lower(isnull({investorAlias}.investor_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({investorAlias}.relationship_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({investorAlias}.contact_first_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({investorAlias}.contact_last_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendInvestorTypeFilter(StringBuilder sql, string investorAlias = "i")
+    {
+        sql.Append(" and (@investorType is null ");
+        sql.Append($" or lower(isnull({investorAlias}.investor_type_name, '')) = lower(@investorType) ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendInvestorRelationshipFilter(StringBuilder sql, string investorAlias = "i")
+    {
+        sql.Append(" and (@relationship is null ");
+        sql.Append($" or lower(isnull({investorAlias}.relationship_name, '')) = lower(@relationship) ");
         sql.Append(" ) ");
     }
 
@@ -59,6 +76,21 @@ internal static class WarehouseSql
     {
         sql.Append(" and (@search is null ");
         sql.Append($" or lower(isnull({fundAlias}.fund_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_strategy_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendFundTypeFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append(" and (@fundType is null ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_type_name, '')) = lower(@fundType) ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendFundStrategyFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append(" and (@strategy is null ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_strategy_name, '')) = lower(@strategy) ");
         sql.Append(" ) ");
     }
 
@@ -71,6 +103,36 @@ internal static class WarehouseSql
     {
         sql.Append(" and (@search is null ");
         sql.Append($" or lower(isnull({propertyAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.city, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyAssetTypeFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@assetType is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_type, '')) = lower(@assetType) ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyInvestmentTypeFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@investmentType is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.investment_type, '')) = lower(@investmentType) ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyGeographyFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@geography is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.geography, '')) = lower(@geography) ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyStatusFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@status is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.property_status, '')) = lower(@status) ");
         sql.Append(" ) ");
     }
 

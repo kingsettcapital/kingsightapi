@@ -13,29 +13,72 @@ namespace kingsightapi.Controllers;
 
 
 [ApiController]
-
 [Route("api/[controller]")]
-
 public class FundsController : ControllerBase
 {
     private readonly IFundPortalService _service;
+    private readonly IPortalFilterService _filterService;
     private readonly ILogger<FundsController> _logger;
-    public FundsController(IFundPortalService service, ILogger<FundsController> logger)
+
+    public FundsController(
+        IFundPortalService service,
+        IPortalFilterService filterService,
+        ILogger<FundsController> logger)
     {
         _service = service;
+        _filterService = filterService;
         _logger = logger;
     }
-    // GET: api/funds?search=&page=1&pageSize=50
-    [HttpGet]
-    public async Task<ActionResult<PagedResult<FundListItemDto>>> GetAll(
-        [FromQuery] string? search,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
+
+    // GET: api/funds/filter-options
+    [HttpGet("filter-options")]
+    public async Task<ActionResult<FundListFilterOptionsDto>> GetFilterOptions()
     {
         try
         {
-            var result = await _service.GetFundsAsync(search, page, pageSize);
+            return Ok(await _filterService.GetFundListFilterOptionsAsync());
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get fund filter options cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving fund filter options");
+            return StatusCode(500, "An error occurred while retrieving fund filter options.");
+        }
+    }
+    // GET: api/funds?search=&view=ltd|quarterly&dateKey=&fundType=&strategy=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
+    [HttpGet]
+    public async Task<ActionResult<PortalListPageResult<FundListItemDto, FundListSummaryDto>>> GetAll(
+        [FromQuery] string? search,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] string? fundType,
+        [FromQuery] string? strategy,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
+        try
+        {
+            var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+            var result = await _service.GetFundsAsync(
+                search, resolvedView, period, fundType, strategy, sortBy, sortDir, page, pageSize);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (OperationCanceledException)
         {

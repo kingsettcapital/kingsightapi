@@ -2,13 +2,38 @@ namespace kingsightapi.Entities;
 
 using System.Text.Json.Serialization;
 
-/// <summary>Fund sidebar row (investments list screen).</summary>
+/// <summary>Fund row on the module list page (Investments tab).</summary>
 public sealed class FundListItemDto
 {
     public int FundKey { get; init; }
     public string FundName { get; init; } = string.Empty;
-    public string Category { get; init; } = string.Empty;
-    public decimal CurrentValue { get; init; }
+
+    [JsonPropertyName("fund_type_name")]
+    public string FundTypeName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_strategy_name")]
+    public string FundStrategyName { get; init; } = string.Empty;
+
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount { get; init; }
+
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal ReleasedCapitalAmount { get; init; }
+
+    /// <summary>Legacy alias for <see cref="FundStrategyName"/>.</summary>
+    public string Category => FundStrategyName;
+
+    /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
+    public decimal CurrentValue => NetInvestedCapitalAmount;
 }
 
 /// <summary>Fund aggregates for a single fund key.</summary>

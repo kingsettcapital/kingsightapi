@@ -4,7 +4,16 @@ namespace kingsightapi.Services;
 
 public interface IFundPortalService
 {
-    Task<PagedResult<FundListItemDto>> GetFundsAsync(string? search, int page, int pageSize);
+    Task<PortalListPageResult<FundListItemDto, FundListSummaryDto>> GetFundsAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? fundType,
+        string? strategy,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
     Task<FundDetailDto?> GetFundByKeyAsync(int fundKey);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
     Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize);

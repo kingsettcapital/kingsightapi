@@ -17,11 +17,21 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         _logger = logger;
     }
 
-    public async Task<PagedResult<InvestorListItemDto>> GetInvestorsAsync(string? search, int page, int pageSize)
+    public async Task<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>> GetInvestorsAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? investorType,
+        string? relationship,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize)
     {
         try
         {
-            return await GetInvestorsInternalAsync(search, page, pageSize);
+            return await GetInvestorsInternalAsync(
+                search, view, period, investorType, relationship, sortBy, sortDir, page, pageSize);
         }
         catch (OperationCanceledException)
         {
@@ -30,7 +40,13 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investors. Search={Search}, Page={Page}, PageSize={PageSize}", search, page, pageSize);
+            _logger.LogError(
+                ex,
+                "Error retrieving investors. Search={Search}, View={View}, Page={Page}, PageSize={PageSize}",
+                search,
+                view,
+                page,
+                pageSize);
             throw;
         }
     }
@@ -71,45 +87,69 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         }
     }
 
-    private async Task<PagedResult<InvestorListItemDto>> GetInvestorsInternalAsync(string? search, int page, int pageSize)
+    private async Task<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>> GetInvestorsInternalAsync(
+        string? search,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? investorType,
+        string? relationship,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize)
     {
+        if (!PortalListSort.TryParseInvestor(sortBy, sortDir, out var orderBy, out var sortError))
+        {
+            throw new ArgumentException(sortError);
+        }
+
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var investorTypeTerm = string.IsNullOrWhiteSpace(investorType) ? null : investorType.Trim();
+        var relationshipTerm = string.IsNullOrWhiteSpace(relationship) ? null : relationship.Trim();
+        var portfolioTable = PortalPortfolioListSql.PortfolioTable(view);
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
         var countSql = new StringBuilder();
-        countSql.Append(" select count(*) ");
-        countSql.Append(" from ( ");
-        countSql.Append(" select b.investor_name ");
-        AppendInvestorLtdListingFrom(countSql);
-        countSql.Append(" group by b.investor_name ");
+        countSql.Append(" select count(*) from ( ");
+        countSql.Append(" select b.investor_key ");
+        AppendInvestorListingFrom(countSql, portfolioTable, view, period);
+        countSql.Append(" group by b.investor_key, b.investor_name, b.investor_type_name, ");
+        countSql.Append(" b.relationship_name, b.contact_first_name, b.contact_last_name ");
         countSql.Append(" ) investor_rows ");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        AddInvestorListingParameters(countCommand, searchTerm, investorTypeTerm, relationshipTerm, period);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+        var summary = await GetInvestorListSummaryAsync(
+            connection, portfolioTable, view, period, searchTerm, investorTypeTerm, relationshipTerm);
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" min(b.investor_key) as investor_key, ");
+        pageSql.Append(" b.investor_key, ");
         pageSql.Append(" b.investor_name, ");
-        pageSql.Append(" max(isnull(b.investor_type_name, '')) as investor_type_name, ");
-        pageSql.Append(" sum(isnull(a.net_invested_capital_amount, 0)) as total_invested ");
-        AppendInvestorLtdListingFrom(pageSql);
-        pageSql.Append(" group by b.investor_name ");
-        pageSql.Append(" order by b.investor_name ");
+        pageSql.Append(" isnull(b.investor_type_name, '') as investor_type_name, ");
+        pageSql.Append(" isnull(b.relationship_name, '') as relationship_name, ");
+        pageSql.Append(" isnull(b.contact_first_name, '') as contact_first_name, ");
+        pageSql.Append(" isnull(b.contact_last_name, '') as contact_last_name, ");
+        pageSql.Append(" count(distinct a.fund_key) as fund_count, ");
+        PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
+        AppendInvestorListingFrom(pageSql, portfolioTable, view, period);
+        pageSql.Append(" group by b.investor_key, b.investor_name, b.investor_type_name, ");
+        pageSql.Append(" b.relationship_name, b.contact_first_name, b.contact_last_name ");
+        orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        pageCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        AddInvestorListingParameters(pageCommand, searchTerm, investorTypeTerm, relationshipTerm, period);
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -118,36 +158,112 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         {
             while (await pageReader.ReadAsync())
             {
-                items.Add(new InvestorListItemDto
-                {
-                    InvestorKey = pageReader.GetInt64OrDefault("investor_key"),
-                    InvestorName = pageReader.GetStringOrEmpty("investor_name"),
-                    InvestorType = pageReader.GetStringOrEmpty("investor_type_name"),
-                    TotalInvested = pageReader.GetDecimalOrDefault("total_invested")
-                });
+                items.Add(MapInvestorListItem(pageReader));
             }
         }
 
         _logger.LogInformation(
-            "Retrieved {Count} investors (page {Page}, total {Total}).",
-            items.Count, normalizedPage, totalCount);
+            "Retrieved {Count} investors ({View}, page {Page}, total {Total}).",
+            items.Count,
+            view,
+            normalizedPage,
+            totalCount);
 
-        return new PagedResult<InvestorListItemDto>
+        return new PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>
         {
+            Summary = new InvestorListSummaryDto
+            {
+                TotalInvestors = totalCount,
+                TotalCommitment = summary.TotalCommitment,
+                NetInvestedCapital = summary.NetInvestedCapital,
+                NetDistributed = summary.NetDistributed,
+                ReservedUncalled = summary.ReservedUncalled
+            },
             Items = items,
             Page = normalizedPage,
             PageSize = normalizedPageSize,
-            TotalCount = totalCount
+            TotalCount = totalCount,
         };
     }
 
-    private static void AppendInvestorLtdListingFrom(StringBuilder sql)
+    private static async Task<InvestorListSummaryDto> GetInvestorListSummaryAsync(
+        SqlConnection connection,
+        string portfolioTable,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? investorType,
+        string? relationship)
     {
-        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} a ");
-        sql.Append($" inner join {WarehouseTables.DimInvestor} b on a.investor_key = b.investor_key ");
-        sql.Append(" where b.is_current = 1 ");
-        WarehouseSql.AppendInvestorSearchFilter(sql, "b");
+        var summarySql = new StringBuilder();
+        summarySql.Append(" select ");
+        summarySql.Append(" count(distinct b.investor_key) as investor_count, ");
+        PortalPortfolioListSql.AppendPortfolioSummaryMetricSums(summarySql);
+        AppendInvestorListingFrom(summarySql, portfolioTable, view, period);
+
+        await using var command = new SqlCommand(summarySql.ToString(), connection);
+        AddInvestorListingParameters(command, search, investorType, relationship, period);
+        await using var reader = await command.ExecuteReaderAsync();
+        if (!await reader.ReadAsync())
+        {
+            return new InvestorListSummaryDto();
+        }
+
+        return new InvestorListSummaryDto
+        {
+            TotalInvestors = reader.GetInt32OrDefault("investor_count"),
+            TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
+            NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
+            NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
+            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled")
+        };
     }
+
+    private static void AppendInvestorListingFrom(
+        StringBuilder sql,
+        string portfolioTable,
+        TimeGranularity view,
+        FundPeriodFilter? period)
+    {
+        sql.Append($" from {portfolioTable} a ");
+        sql.Append($" inner join {WarehouseTables.DimInvestor} b on a.investor_key = b.investor_key ");
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentInvestorFilter(sql, "b");
+        PortalPortfolioListSql.AppendQuarterlyPeriodFilter(sql, view, period);
+        WarehouseSql.AppendInvestorSearchFilter(sql, "b");
+        WarehouseSql.AppendInvestorTypeFilter(sql, "b");
+        WarehouseSql.AppendInvestorRelationshipFilter(sql, "b");
+    }
+
+    private static void AddInvestorListingParameters(
+        SqlCommand command,
+        string? search,
+        string? investorType,
+        string? relationship,
+        FundPeriodFilter? period)
+    {
+        command.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
+        command.Parameters.AddWithValue("@investorType", (object?)investorType ?? DBNull.Value);
+        command.Parameters.AddWithValue("@relationship", (object?)relationship ?? DBNull.Value);
+        PortalPortfolioListSql.AddPeriodParameter(command, period);
+    }
+
+    private static InvestorListItemDto MapInvestorListItem(SqlDataReader reader) =>
+        new()
+        {
+            InvestorKey = reader.GetInt64OrDefault("investor_key"),
+            InvestorName = reader.GetStringOrEmpty("investor_name"),
+            InvestorType = reader.GetStringOrEmpty("investor_type_name"),
+            RelationshipName = reader.GetStringOrEmpty("relationship_name"),
+            ContactFirstName = reader.GetStringOrEmpty("contact_first_name"),
+            ContactLastName = reader.GetStringOrEmpty("contact_last_name"),
+            FundCount = reader.GetInt32OrDefault("fund_count"),
+            CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
+            NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+            NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+            ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
+            ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
+        };
 
     private async Task<InvestorDetailDto?> GetInvestorByKeyInternalAsync(long investorKey)
     {
