@@ -80,6 +80,17 @@ internal static class PortalListSort
         ["status"] = "p.property_status"
     };
 
+    /// <summary>Area SF columns are 0 in API until dim_property columns are confirmed; accept sortBy but order in SQL by name.</summary>
+    private static readonly HashSet<string> PropertyPlaceholderAreaSortKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "glaSf",
+        "gla_sf",
+        "committedSf",
+        "committed_sf",
+        "vacantSf",
+        "vacant_sf"
+    };
+
     public static bool TryParseInvestor(
         string? sortBy,
         string? sortDir,
@@ -112,15 +123,31 @@ internal static class PortalListSort
         string? sortBy,
         string? sortDir,
         out PortalListOrderBy sort,
-        out string? error) =>
-        TryParse(
+        out string? error)
+    {
+        var columnKey = string.IsNullOrWhiteSpace(sortBy) ? null : sortBy.Trim();
+        if (columnKey is not null && PropertyPlaceholderAreaSortKeys.Contains(columnKey))
+        {
+            if (!TryParseDirection(sortDir, out var descending, out error))
+            {
+                sort = default;
+                return false;
+            }
+
+            // Response values are 0 until warehouse columns exist; use a real column for ORDER BY.
+            sort = new PortalListOrderBy("p.property_name", descending);
+            return true;
+        }
+
+        return TryParse(
             sortBy,
             sortDir,
             PropertyColumns,
-            "propertyName, propertyCode, geography, assetType, investmentType, developmentType, propertyStatus",
+            "propertyName, propertyCode, geography, assetType, investmentType, developmentType, propertyStatus, glaSf, committedSf, vacantSf",
             "p.property_name",
             out sort,
             out error);
+    }
 
     private static bool TryParse(
         string? sortBy,
