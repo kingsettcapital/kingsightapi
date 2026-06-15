@@ -2,7 +2,6 @@ using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
 namespace kingsightapi.Controllers;
 
 [ApiController]
