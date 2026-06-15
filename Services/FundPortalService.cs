@@ -344,7 +344,8 @@ public sealed class FundPortalService : IFundPortalService
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) from ( ");
         countSql.Append(" select b.fund_key ");
-        AppendFundListingFrom(countSql, portfolioTable, view, period);
+        AppendFundListingFrom(countSql, portfolioTable);
+        AppendFundListingWhere(countSql, view, period);
         countSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
         countSql.Append(" ) fund_rows ");
 
@@ -363,8 +364,12 @@ public sealed class FundPortalService : IFundPortalService
         pageSql.Append(" b.fund_name, ");
         pageSql.Append(" isnull(b.fund_type_name, '') as fund_type_name, ");
         pageSql.Append(" isnull(b.fund_strategy_name, '') as fund_strategy_name, ");
+        pageSql.Append(" isnull(max(assets.assets_count), 0) as assets_count, ");
+        pageSql.Append(" isnull(max(inv.investors_count), 0) as investors_count, ");
         PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
-        AppendFundListingFrom(pageSql, portfolioTable, view, period);
+        AppendFundListingFrom(pageSql, portfolioTable);
+        AppendFundListingInvestorAssetApplies(pageSql);
+        AppendFundListingWhere(pageSql, view, period);
         pageSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
         orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -423,7 +428,8 @@ public sealed class FundPortalService : IFundPortalService
         summarySql.Append(" select ");
         summarySql.Append(" count(distinct b.fund_key) as fund_count, ");
         PortalPortfolioListSql.AppendPortfolioSummaryMetricSums(summarySql);
-        AppendFundListingFrom(summarySql, portfolioTable, view, period);
+        AppendFundListingFrom(summarySql, portfolioTable);
+        AppendFundListingWhere(summarySql, view, period);
 
         await using var command = new SqlCommand(summarySql.ToString(), connection);
         AddFundListingParameters(command, search, fundType, strategy, period);
@@ -443,20 +449,44 @@ public sealed class FundPortalService : IFundPortalService
         };
     }
 
-    private static void AppendFundListingFrom(
-        StringBuilder sql,
-        string portfolioTable,
-        TimeGranularity view,
-        FundPeriodFilter? period)
+    private static void AppendFundListingFrom(StringBuilder sql, string portfolioTable)
     {
         sql.Append($" from {portfolioTable} a ");
         sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+    }
+
+    private static void AppendFundListingWhere(
+        StringBuilder sql,
+        TimeGranularity view,
+        FundPeriodFilter? period)
+    {
         sql.Append(" where ");
         WarehouseSql.AppendCurrentFundFilter(sql, "b");
         PortalPortfolioListSql.AppendQuarterlyPeriodFilter(sql, view, period);
         WarehouseSql.AppendFundSearchFilter(sql, "b");
         WarehouseSql.AppendFundTypeFilter(sql, "b");
         WarehouseSql.AppendFundStrategyFilter(sql, "b");
+    }
+
+    /// <summary>Per-fund asset and investor counts (same logic as fund detail summary).</summary>
+    private static void AppendFundListingInvestorAssetApplies(StringBuilder sql, string fundAlias = "b")
+    {
+        sql.Append(" outer apply ( ");
+        sql.Append(" select count(*) as assets_count ");
+        sql.Append($" from {WarehouseTables.DimProperty} p ");
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
+        WarehouseSql.AppendPropertyBelongsToFundFilter(sql, "p", fundAlias);
+        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        sql.Append(" ) assets ");
+        sql.Append(" outer apply ( ");
+        sql.Append(" select count(*) as investors_count ");
+        sql.Append(" from ( ");
+        sql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = {fundAlias}.fund_key ");
+        sql.Append(" union ");
+        sql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = {fundAlias}.fund_key ");
+        sql.Append(" ) invkeys ");
+        sql.Append(" ) inv ");
     }
 
     private static void AddFundListingParameters(
@@ -479,6 +509,8 @@ public sealed class FundPortalService : IFundPortalService
             FundName = reader.GetStringOrEmpty("fund_name"),
             FundTypeName = reader.GetStringOrEmpty("fund_type_name"),
             FundStrategyName = reader.GetStringOrEmpty("fund_strategy_name"),
+            Investors = reader.GetInt32OrDefault("investors_count"),
+            Assets = reader.GetInt32OrDefault("assets_count"),
             CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
             NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
             NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),

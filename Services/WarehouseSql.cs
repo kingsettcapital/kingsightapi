@@ -105,6 +105,7 @@ internal static class WarehouseSql
         sql.Append($" or lower(isnull({propertyAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
         sql.Append($" or lower(isnull({propertyAlias}.city, '')) like '%' + lower(@search) + '%' ");
         sql.Append($" or lower(isnull({propertyAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_type, '')) like '%' + lower(@search) + '%' ");
         sql.Append(" ) ");
     }
 
@@ -172,5 +173,28 @@ internal static class WarehouseSql
     public static void AppendPropertyFundLevel000Filter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append($" and isnull({propertyAlias}.fund_level, '') in ('000 Property', '000 - Property') ");
+    }
+
+    /// <summary>Latest <c>fact_asset_metrics</c> row per property (max <c>date_key</c>).</summary>
+    public static void AppendLatestAssetMetricsApply(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string applyAlias = "metrics")
+    {
+        sql.Append($" outer apply ( ");
+        sql.Append(" select top 1 ");
+        sql.Append(" gross_leasable_area_sqft, ");
+        sql.Append(" occupied_area_sqft, ");
+        sql.Append(" committed_area_sqft, ");
+        sql.Append(" vacant_area_sqft, ");
+        sql.Append(" total_units, ");
+        sql.Append(" occupied_units, ");
+        sql.Append(" vacant_units, ");
+        sql.Append(" weighted_avg_lease_term_months, ");
+        sql.Append(" weighted_avg_lease_term_rent_months ");
+        sql.Append($" from {WarehouseTables.FactAssetMetrics} m ");
+        sql.Append($" where m.property_key = {propertyAlias}.property_key ");
+        sql.Append(" order by m.date_key desc ");
+        sql.Append($" ) {applyAlias} ");
     }
 }

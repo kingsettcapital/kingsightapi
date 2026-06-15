@@ -163,8 +163,13 @@ public sealed class PropertyPortalService : IPropertyPortalService
         sql.Append(" isnull(p.investment_type, '') as investment_type, ");
         sql.Append(" isnull(p.development_type, '') as development_type, ");
         sql.Append(" isnull(p.property_status, '') as property_status, ");
-        sql.Append(" isnull(p.portfolio, 0) as portfolio ");
+        sql.Append(" isnull(p.portfolio, 0) as portfolio, ");
+        sql.Append(" metrics.gross_leasable_area_sqft as gla_sf, ");
+        sql.Append(" metrics.occupied_area_sqft as occupied_sf, ");
+        sql.Append(" metrics.committed_area_sqft as committed_sf, ");
+        sql.Append(" metrics.vacant_area_sqft as vacant_sf ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
+        WarehouseSql.AppendLatestAssetMetricsApply(sql);
         AppendPropertyListingWhere(sql);
         orderBy.AppendOrderBy(sql);
         sql.Append(" offset @offset rows fetch next @pageSize rows only ");
@@ -191,14 +196,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
 
         return new PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>
         {
-            Summary = new AssetListSummaryDto
-            {
-                TotalProperties = totalCount,
-                ActiveProperties = summary.ActiveProperties,
-                TotalGlaSf = 0,
-                TotalCommittedSf = 0,
-                TotalVacantSf = 0
-            },
+            Summary = summary,
             Items = items,
             Page = normalizedPage,
             PageSize = normalizedPageSize,
@@ -218,8 +216,12 @@ public sealed class PropertyPortalService : IPropertyPortalService
         var summarySql = new StringBuilder();
         summarySql.Append(" select ");
         summarySql.Append(" count(*) as property_count, ");
-        summarySql.Append(" sum(case when lower(isnull(p.property_status, '')) = 'active' then 1 else 0 end) as active_property_count ");
+        summarySql.Append(" sum(case when lower(isnull(p.property_status, '')) = 'active' then 1 else 0 end) as active_property_count, ");
+        summarySql.Append(" sum(isnull(metrics.gross_leasable_area_sqft, 0)) as total_gla_sf, ");
+        summarySql.Append(" sum(isnull(metrics.committed_area_sqft, 0)) as total_committed_sf, ");
+        summarySql.Append(" sum(isnull(metrics.vacant_area_sqft, 0)) as total_vacant_sf ");
         summarySql.Append($" from {WarehouseTables.DimProperty} p ");
+        WarehouseSql.AppendLatestAssetMetricsApply(summarySql);
         AppendPropertyListingWhere(summarySql);
 
         await using var command = new SqlCommand(summarySql.ToString(), connection);
@@ -234,17 +236,23 @@ public sealed class PropertyPortalService : IPropertyPortalService
         {
             TotalProperties = reader.GetInt32OrDefault("property_count"),
             ActiveProperties = reader.GetInt32OrDefault("active_property_count"),
-            TotalGlaSf = 0,
-            TotalCommittedSf = 0,
-            TotalVacantSf = 0
+            TotalGlaSf = reader.GetDecimalOrDefault("total_gla_sf"),
+            TotalCommittedSf = reader.GetDecimalOrDefault("total_committed_sf"),
+            TotalVacantSf = reader.GetDecimalOrDefault("total_vacant_sf")
         };
     }
 
     private async Task<PropertyDetailDto?> GetPropertyByKeyInternalAsync(long propertyKey)
     {
         var sql = new StringBuilder();
-        sql.Append(" select p.* ");
+        sql.Append(" select p.*, ");
+        sql.Append(" metrics.gross_leasable_area_sqft, ");
+        sql.Append(" metrics.occupied_area_sqft, ");
+        sql.Append(" metrics.committed_area_sqft, ");
+        sql.Append(" metrics.vacant_area_sqft, ");
+        sql.Append(" metrics.weighted_avg_lease_term_months ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
+        WarehouseSql.AppendLatestAssetMetricsApply(sql);
         sql.Append(" where p.property_key = @propertyKey ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
@@ -264,6 +272,10 @@ public sealed class PropertyPortalService : IPropertyPortalService
             return null;
         }
 
+        var glaSf = reader.GetNullableDecimal("gross_leasable_area_sqft");
+        var occupiedSf = reader.GetNullableDecimal("occupied_area_sqft");
+        var weightedAvgLeaseTermMonths = reader.GetNullableDecimal("weighted_avg_lease_term_months");
+
         var fields = DisplayFieldBuilder.DictionaryFromSqlReader(reader);
         await reader.CloseAsync();
 
@@ -277,8 +289,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
             $"{GetOrDefault(fields, "city").Value}, {GetOrDefault(fields, "province").Value}".Trim(' ', ','));
         // TODO: Map Ownership from warehouse query when column is available.
         const bool ownership = false;
-        // TODO: Map AssetSize from warehouse query when column is available.
-        const decimal assetSize = 0m;
+        var assetSize = glaSf ?? 0m;
         var isPortfolio = ToBoolean(GetOrDefault(fields, "portfolio").Value);
 
         var summary = new PropertySummaryDto
@@ -319,20 +330,27 @@ public sealed class PropertyPortalService : IPropertyPortalService
                 new DynamicSectionDto
                 {
                     Title = "Acquisition",
-                    Fields = BuildPlaceholderLifecycleMetricFields()
+                    Fields = BuildLifecycleMetricFields(glaSf, occupiedSf, weightedAvgLeaseTermMonths)
                 },
                 new DynamicSectionDto
                 {
                     Title = "Sale",
-                    Fields = BuildPlaceholderLifecycleMetricFields()
+                    Fields = BuildLifecycleMetricFields(glaSf, occupiedSf, weightedAvgLeaseTermMonths)
                 }
             ]
         };
     }
 
-    /// <summary>TODO: Map Acquisition/Sale metrics from warehouse when columns are available.</summary>
-    private static List<DynamicFieldDto> BuildPlaceholderLifecycleMetricFields()
+    /// <summary>Acquisition/Sale metrics; GLA, occupancy, and WALT from <c>fact_asset_metrics</c> when present.</summary>
+    private static List<DynamicFieldDto> BuildLifecycleMetricFields(
+        decimal? glaSf,
+        decimal? occupiedSf,
+        decimal? weightedAvgLeaseTermMonths)
     {
+        decimal? occupancy = glaSf > 0 && occupiedSf.HasValue
+            ? occupiedSf.Value / glaSf.Value * 100m
+            : null;
+
         return
         [
             DisplayFieldBuilder.ToDynamicField("debt", DisplayFieldBuilder.Money(0m)),
@@ -343,10 +361,16 @@ public sealed class PropertyPortalService : IPropertyPortalService
             DisplayFieldBuilder.ToDynamicField("ltv", DisplayFieldBuilder.Percent(0m)),
             DisplayFieldBuilder.ToDynamicField("capRate", DisplayFieldBuilder.Percent(0m)),
             DisplayFieldBuilder.ToDynamicField("noi", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("gla", DisplayFieldBuilder.Number(0m)),
+            DisplayFieldBuilder.ToDynamicField("gla", glaSf.HasValue ? DisplayFieldBuilder.Number(glaSf.Value) : DisplayFieldBuilder.Number(0m)),
             DisplayFieldBuilder.ToDynamicField("propertyManager", DisplayFieldBuilder.Number(0m)),
-            DisplayFieldBuilder.ToDynamicField("occupancy", DisplayFieldBuilder.Percent(0m)),
-            DisplayFieldBuilder.ToDynamicField("weightedAverageLeaseTerm", DisplayFieldBuilder.Number(0m)),
+            DisplayFieldBuilder.ToDynamicField(
+                "occupancy",
+                occupancy.HasValue ? DisplayFieldBuilder.Percent(occupancy.Value) : DisplayFieldBuilder.Percent(0m)),
+            DisplayFieldBuilder.ToDynamicField(
+                "weightedAverageLeaseTerm",
+                weightedAvgLeaseTermMonths.HasValue
+                    ? DisplayFieldBuilder.Number(weightedAvgLeaseTermMonths.Value)
+                    : DisplayFieldBuilder.Number(0m)),
             DisplayFieldBuilder.ToDynamicField("averageInPlaceRentPerSf", DisplayFieldBuilder.Money(0m)),
             DisplayFieldBuilder.ToDynamicField("salesPerSfRetail", DisplayFieldBuilder.Money(0m))
         ];
@@ -492,9 +516,10 @@ public sealed class PropertyPortalService : IPropertyPortalService
             InvestmentType = reader.GetStringOrEmpty("investment_type"),
             DevelopmentType = reader.GetStringOrEmpty("development_type"),
             PropertyStatus = reader.GetStringOrEmpty("property_status"),
-            GlaSf = 0,
-            CommittedSf = 0,
-            VacantSf = 0,
+            GlaSf = reader.GetNullableDecimal("gla_sf"),
+            OccupiedSf = reader.GetNullableDecimal("occupied_sf"),
+            CommittedSf = reader.GetNullableDecimal("committed_sf"),
+            VacantSf = reader.GetNullableDecimal("vacant_sf"),
             IsPortfolio = reader.GetBooleanFromColumns("portfolio")
         };
     }

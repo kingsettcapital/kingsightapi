@@ -14,6 +14,9 @@ public sealed class FundListItemDto
     [JsonPropertyName("fund_strategy_name")]
     public string FundStrategyName { get; init; } = string.Empty;
 
+    public int Investors { get; init; }
+    public int Assets { get; init; }
+
     [JsonPropertyName("commitment_amount")]
     public decimal CommitmentAmount { get; init; }
 

@@ -14,4 +14,5 @@ internal static class WarehouseTables
     public const string FactInvestorPortfolioLtd = "dbo.fact_investor_portfolio_ltd";
     public const string FactInvestorPortfolioQuarterly = "dbo.fact_investor_portfolio_quarterly";
     public const string FactFundNav = "dbo.fact_fund_nav";
+    public const string FactAssetMetrics = "dbo.fact_asset_metrics";
 }
