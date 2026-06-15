@@ -107,10 +107,8 @@ namespace kingsightapi
 
             app.UseHttpsRedirection();
             app.UseAngularCors();
-
             app.UseAuthentication();
             app.UseAuthorization();
-
             app.MapControllers();
             app.Run();
         }
