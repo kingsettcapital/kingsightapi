@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 
@@ -18,6 +19,9 @@ public sealed class PortalFilterService : IPortalFilterService
         _connectionString = configuration.GetConnectionString("FabricConnectionString")
             ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
         _logger = logger;
+        _logger.LogInformation(
+            "PortalFilterService ready. {ConnectionInfo}",
+            ConnectionLogging.Sanitize(_connectionString));
     }
 
     public async Task<InvestorListFilterOptionsDto> GetInvestorListFilterOptionsAsync()
@@ -59,7 +63,8 @@ public sealed class PortalFilterService : IPortalFilterService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investor list filter options");
+            ConnectionLogging.LogConnectionError(
+                _logger, ex, nameof(GetInvestorListFilterOptionsAsync), _connectionString);
             throw;
         }
     }
@@ -91,7 +96,8 @@ public sealed class PortalFilterService : IPortalFilterService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving fund list filter options");
+            ConnectionLogging.LogConnectionError(
+                _logger, ex, nameof(GetFundListFilterOptionsAsync), _connectionString);
             throw;
         }
     }
@@ -129,7 +135,8 @@ public sealed class PortalFilterService : IPortalFilterService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving asset list filter options");
+            ConnectionLogging.LogConnectionError(
+                _logger, ex, nameof(GetAssetListFilterOptionsAsync), _connectionString);
             throw;
         }
     }

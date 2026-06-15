@@ -1,5 +1,6 @@
 ﻿using kingsightapi.Entities;
 using kingsightapi.Services;
+using kingsightapi.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -41,7 +42,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investor filter options");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investor filter options");
             return StatusCode(500, "An error occurred while retrieving investor filter options.");
         }
     }
@@ -84,7 +85,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investors");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investors");
             return StatusCode(500, "An error occurred while retrieving investors.");
         }
     }
@@ -121,7 +122,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} periods for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} periods for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving investor periods.");
         }
     }
@@ -142,7 +143,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investor {InvestorKey}", investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investor {InvestorKey}", investorKey);
             return StatusCode(500, "An error occurred while retrieving the investor.");
         }
     }
@@ -166,7 +167,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving funds for investor {InvestorKey}", investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving funds for investor {InvestorKey}", investorKey);
             return StatusCode(500, "An error occurred while retrieving investor funds.");
         }
     }
@@ -204,7 +205,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} commitments for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} commitments for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving investor commitments.");
         }
     }
@@ -242,7 +243,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} unfunded commitments for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} unfunded commitments for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving unfunded commitments.");
         }
     }
@@ -280,7 +281,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} investments for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} investments for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving investor investments.");
         }
     }
@@ -318,7 +319,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} distributions for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} distributions for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving investor distributions.");
         }
     }
@@ -356,7 +357,7 @@ public class CapitalInvestorsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} NAV for investor {InvestorKey}", view, investorKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} NAV for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving investor NAV.");
         }
     }

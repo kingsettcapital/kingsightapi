@@ -1,5 +1,6 @@
 using kingsightapi.Entities;
 using kingsightapi.Services;
+using kingsightapi.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 namespace kingsightapi.Controllers;
@@ -37,7 +38,7 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving asset filter options");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset filter options");
             return StatusCode(500, "An error occurred while retrieving asset filter options.");
         }
     }
@@ -73,7 +74,7 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets");
             return StatusCode(500, "An error occurred while retrieving assets.");
         }
     }
@@ -94,7 +95,7 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving asset {PropertyKey}", propertyKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving the asset.");
         }
     }
@@ -115,7 +116,7 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investments for asset {PropertyKey}", propertyKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investments for asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving asset investments.");
         }
     }

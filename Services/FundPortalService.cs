@@ -18,6 +18,9 @@ public sealed class FundPortalService : IFundPortalService
         _connectionString = configuration.GetConnectionString("FabricConnectionString")
             ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
         _logger = logger;
+        _logger.LogInformation(
+            "FundPortalService ready. {ConnectionInfo}",
+            ConnectionLogging.Sanitize(_connectionString));
     }
 
     public async Task<PortalListPageResult<FundListItemDto, FundListSummaryDto>> GetFundsAsync(

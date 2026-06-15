@@ -32,6 +32,9 @@ public sealed class PropertyPortalService : IPropertyPortalService
         _connectionString = configuration.GetConnectionString("FabricConnectionString")
             ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
         _logger = logger;
+        _logger.LogInformation(
+            "PropertyPortalService ready. {ConnectionInfo}",
+            ConnectionLogging.Sanitize(_connectionString));
     }
 
     public async Task<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>> GetPropertiesAsync(

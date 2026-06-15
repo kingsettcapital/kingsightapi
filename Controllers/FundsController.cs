@@ -1,6 +1,7 @@
 using kingsightapi.Entities;
 
 using kingsightapi.Services;
+using kingsightapi.Configuration;
 
 using Microsoft.AspNetCore.Authorization;
 
@@ -45,7 +46,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving fund filter options");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving fund filter options");
             return StatusCode(500, "An error occurred while retrieving fund filter options.");
         }
     }
@@ -87,7 +88,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving funds");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving funds");
             return StatusCode(500, "An error occurred while retrieving funds.");
         }
     }
@@ -124,7 +125,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} periods for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} periods for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund periods.");
         }
     }
@@ -145,7 +146,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving fund {FundKey}", fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving fund {FundKey}", fundKey);
             return StatusCode(500, "An error occurred while retrieving the fund.");
         }
     }
@@ -169,7 +170,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets for fund {FundKey}", fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets for fund {FundKey}", fundKey);
             return StatusCode(500, "An error occurred while retrieving fund assets.");
         }
     }
@@ -194,7 +195,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investors for fund {FundKey}", fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investors for fund {FundKey}", fundKey);
             return StatusCode(500, "An error occurred while retrieving fund investors.");
         }
     }
@@ -232,7 +233,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} commitments for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} commitments for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund commitments.");
         }
     }
@@ -270,7 +271,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} unfunded commitments for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} unfunded commitments for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving unfunded commitments.");
         }
     }
@@ -308,7 +309,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} investments for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} investments for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund investments.");
         }
     }
@@ -346,7 +347,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} distributions for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} distributions for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund distributions.");
         }
     }
@@ -384,7 +385,7 @@ public class FundsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving {View} NAV for fund {FundKey}", view, fundKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} NAV for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund NAV.");
         }
     }

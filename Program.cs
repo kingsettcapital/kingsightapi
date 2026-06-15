@@ -13,6 +13,10 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            // log4net — logs folder is created under bin/.../logs (or publish folder/logs on server).
+            var logDirectory = Log4NetBootstrap.Configure(builder);
+
             if (builder.Environment.IsDevelopment())
             {
                 // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
@@ -76,7 +80,18 @@ namespace kingsightapi
 
             builder.Services.AddAngularCors(configuration, builder.Environment);
 
+            var fabricConnectionString = configuration.GetConnectionString("FabricConnectionString");
+
             var app = builder.Build();
+
+            var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+            startupLogger.LogInformation("Kingsight API started. Log file directory: {LogDirectory}", logDirectory);
+
+            if (string.IsNullOrWhiteSpace(fabricConnectionString))
+            {
+                startupLogger.LogError(
+                    "FabricConnectionString is missing. Portal endpoints will fail at runtime.");
+            }
 
             using (var scope = app.Services.CreateScope())
             {

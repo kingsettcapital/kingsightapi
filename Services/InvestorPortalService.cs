@@ -15,6 +15,9 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         _connectionString = configuration.GetConnectionString("FabricConnectionString")
             ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
         _logger = logger;
+        _logger.LogInformation(
+            "InvestorPortalService ready. {ConnectionInfo}",
+            ConnectionLogging.Sanitize(_connectionString));
     }
 
     public async Task<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>> GetInvestorsAsync(
