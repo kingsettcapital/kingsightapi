@@ -13,13 +13,8 @@ namespace kingsightapi
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
-            var app = builder.Build();
 
-            var log = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
-
-            log.LogInformation("Starting Kingsight API...");
             // log4net — logs folder is created under bin/.../logs (or publish folder/logs on server).
-
             var logDirectory = Log4NetBootstrap.Configure(builder);
 
             //if (builder.Environment.IsDevelopment())
@@ -44,7 +39,7 @@ namespace kingsightapi
                 });
 
             builder.Services.AddEntraAuthentication(configuration);
-            log.LogInformation("Step 1...");
+
             builder.Services.AddSingleton<IDBService, DBService>();
             //builder.Services.AddSingleton<IFundService, FundService>();
             builder.Services.AddSingleton<ILoanService, LoanService>();
@@ -70,7 +65,7 @@ namespace kingsightapi
             });
             builder.Services.AddScoped<ICmhcFileStorage, LocalCmhcFileStorage>();
             builder.Services.AddScoped<ICmhcUploadService, CmhcUploadService>();
-            log.LogInformation("Step 2...");
+
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
             {
@@ -82,16 +77,19 @@ namespace kingsightapi
 
                 EntraAuthExtensions.ConfigureBearerSwagger(options);
             });
-            log.LogInformation("Step 3...");
+
             builder.Services.AddAngularCors(configuration, builder.Environment);
 
             var fabricConnectionString = configuration.GetConnectionString("FabricConnectionString");
 
-            log.LogInformation("Kingsight API started. Log file directory: {LogDirectory}", logDirectory);
+            var app = builder.Build();
+
+            var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
+            startupLogger.LogInformation("Kingsight API started. Log file directory: {LogDirectory}", logDirectory);
 
             if (string.IsNullOrWhiteSpace(fabricConnectionString))
             {
-                log.LogError(
+                startupLogger.LogError(
                     "FabricConnectionString is missing. Portal endpoints will fail at runtime.");
             }
 
@@ -99,20 +97,20 @@ namespace kingsightapi
             {
                 scope.ServiceProvider.GetRequiredService<ICmhcFileStorage>().EnsureStorageReady();
             }
-            log.LogInformation("Step 4...");
+
             if (app.Environment.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();
                 app.UseSwagger();
                 app.UseSwaggerUI();
             }
-            log.LogInformation("Step 5...");
+
             app.UseHttpsRedirection();
             app.UseAngularCors();
-            log.LogInformation("Step 6...");
+
             app.UseAuthentication();
             app.UseAuthorization();
-            log.LogInformation("Step 7...");
+
             app.MapControllers();
             app.Run();
         }

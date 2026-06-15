@@ -23,8 +23,8 @@ public static class Log4NetBootstrap
             log4NetConfigPath = Path.Combine(builder.Environment.ContentRootPath, "log4net.config");
         }
 
-        builder.Logging.ClearProviders();
-        builder.Logging.AddLog4Net(log4NetConfigPath);
+        //builder.Logging.ClearProviders();
+        //builder.Logging.AddLog4Net(log4NetConfigPath);
 
         return logDirectory;
     }
