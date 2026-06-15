@@ -18,11 +18,6 @@ namespace kingsightapi
                 // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
                 builder.WebHost.UseUrls("https://localhost:7140", "http://localhost:5181");
             }
-            else
-            {
-                builder.WebHost.UseUrls("https://localhost:7140");
-            }
-
             var configuration = builder.Configuration;
             var apiUrl = configuration.GetSection("Api").GetValue<string>("Url");
             if (!string.IsNullOrWhiteSpace(apiUrl))
