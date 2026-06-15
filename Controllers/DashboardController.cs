@@ -8,7 +8,6 @@ namespace kingsightapi.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[AllowAnonymous]
 public class DashboardController : ControllerBase
 {
     private readonly IDashboardService _service;
