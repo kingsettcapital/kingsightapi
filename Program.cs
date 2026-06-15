@@ -15,13 +15,14 @@ namespace kingsightapi
             var builder = WebApplication.CreateBuilder(args);
 
             // log4net — logs folder is created under bin/.../logs (or publish folder/logs on server).
+
             var logDirectory = Log4NetBootstrap.Configure(builder);
 
-            if (builder.Environment.IsDevelopment())
-            {
-                // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
-                builder.WebHost.UseUrls("https://localhost:7140", "http://localhost:5181");
-            }
+            //if (builder.Environment.IsDevelopment())
+            //{
+            //    // HTTPS for SPA default; HTTP avoids local dev-cert issues in the browser.
+            //    builder.WebHost.UseUrls("https://localhost:7140", "http://localhost:5181");
+            //}
             var configuration = builder.Configuration;
             var apiUrl = configuration.GetSection("Api").GetValue<string>("Url");
             if (!string.IsNullOrWhiteSpace(apiUrl))
