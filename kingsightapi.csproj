@@ -11,7 +11,7 @@
     <InternalsVisibleTo Include="kingsightapi.Tests" />
   </ItemGroup>
 
-  <!-- Test project lives at ../kingsightapi.Tests — exclude nested folder from web SDK glob -->
+  <!-- Exclude test project sources from web SDK default glob -->
   <ItemGroup>
     <Compile Remove="kingsightapi.Tests/**" />
     <Content Remove="kingsightapi.Tests/**" />
