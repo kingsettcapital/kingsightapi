@@ -14,7 +14,10 @@ public interface IInvestorPortalService
         string? sortDir,
         int page,
         int pageSize);
-    Task<InvestorDetailDto?> GetInvestorByKeyAsync(long investorKey);
+    Task<InvestorDetailDto?> GetInvestorByKeyAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
     Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize);
     Task<PagedResult<FundPeriodDto>> GetInvestorPeriodsAsync(
         long investorKey,
@@ -83,6 +86,20 @@ public interface IInvestorPortalService
         string? search,
         string? sortBy,
         string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<PagedResult<InvestorFundExposureDto>> GetInvestorFundExposureAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+
+    Task<PagedResult<InvestorUnderlyingAssetDto>> GetInvestorAssetsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
         int page,
         int pageSize);
 }

@@ -167,6 +167,10 @@ public sealed class FundPeriodDto
 /// <summary>Fund table row for LTD, quarterly, or daily views (commitments, NAV, etc.).</summary>
 public sealed class FundGranularRowDto
 {
+    [JsonPropertyName("fund_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int FundKey { get; init; }
+
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 
@@ -227,6 +231,10 @@ public sealed class FundDistributionPeriodRowDto
 /// <summary>Distributions tab: rows grouped by dim_transaction_type for expandable UI sections.</summary>
 public sealed class FundDistributionGroupDto
 {
+    [JsonPropertyName("fund_key")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int FundKey { get; init; }
+
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 

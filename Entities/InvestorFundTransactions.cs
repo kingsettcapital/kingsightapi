@@ -5,6 +5,9 @@ using System.Text.Json.Serialization;
 /// <summary>Capital Activities row — investor detail, one row per fund.</summary>
 public sealed class InvestorFundCapitalActivitiesDto
 {
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 
@@ -27,6 +30,9 @@ public sealed class InvestorFundCapitalActivitiesDto
 /// <summary>Distributions row — investor detail, one row per fund.</summary>
 public sealed class InvestorFundDistributionsDto
 {
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 
@@ -53,11 +59,23 @@ public sealed class InvestorFundDistributionsDto
 
     [JsonPropertyName("released")]
     public decimal Released { get; init; }
+
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
 }
 
 /// <summary>IRR row — investor detail, one row per fund.</summary>
 public sealed class InvestorFundIrrDto
 {
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 

@@ -127,13 +127,24 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors/{investorKey}
+    // GET: api/CapitalInvestors/{investorKey}?view=ltd|quarterly|daily&dateKey=
     [HttpGet("{investorKey:long}")]
-    public async Task<ActionResult<InvestorDetailDto>> GetByKey(long investorKey)
+    public async Task<ActionResult<InvestorDetailDto>> GetByKey(
+        long investorKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
         try
         {
-            var result = await _service.GetInvestorByKeyAsync(investorKey);
+            var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+            var result = await _service.GetInvestorByKeyAsync(investorKey, resolvedView, period);
             return result is null ? NotFound() : Ok(result);
         }
         catch (OperationCanceledException)
@@ -482,6 +493,73 @@ public class CapitalInvestorsController : ControllerBase
         {
             ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} IRR for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving IRR.");
+        }
+    }
+
+    // GET: api/CapitalInvestors/{investorKey}/fund-exposure?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [HttpGet("{investorKey:long}/fund-exposure")]
+    public async Task<ActionResult<PagedResult<InvestorFundExposureDto>>> GetFundExposure(
+        long investorKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey);
+            var result = await _service.GetInvestorFundExposureAsync(investorKey, view.Value, period, page, pageSize);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} fund exposure for investor {InvestorKey} cancelled", view, investorKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} fund exposure for investor {InvestorKey}", view, investorKey);
+            return StatusCode(500, "An error occurred while retrieving fund exposure.");
+        }
+    }
+
+    // GET: api/CapitalInvestors/{investorKey}/assets?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
+    [HttpGet("{investorKey:long}/assets")]
+    public async Task<ActionResult<PagedResult<InvestorUnderlyingAssetDto>>> GetAssets(
+        long investorKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey);
+            var result = await _service.GetInvestorAssetsAsync(investorKey, resolvedView, period, page, pageSize);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get assets for investor {InvestorKey} cancelled", investorKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets for investor {InvestorKey}", investorKey);
+            return StatusCode(500, "An error occurred while retrieving investor assets.");
         }
     }
 

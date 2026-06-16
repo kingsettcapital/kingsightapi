@@ -27,6 +27,7 @@ public sealed partial class InvestorPortalService
         // Aggregate columns are the same for the count and page queries; only the projection differs.
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        pageSql.Append(" f.fund_key, ");
         pageSql.Append(" isnull(f.fund_code, '') as fund_code, ");
         pageSql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
         pageSql.Append(" sum(isnull(p.capital_called_amount, 0)) as called, ");
@@ -49,6 +50,7 @@ public sealed partial class InvestorPortalService
             pageSize,
             static reader => new InvestorFundCapitalActivitiesDto
             {
+                FundKey = reader.GetInt32OrDefault("fund_key"),
                 FundCode = reader.GetStringOrEmpty("fund_code"),
                 FundName = reader.GetStringOrEmpty("fund_name"),
                 Called = reader.GetDecimalOrDefault("called"),
@@ -77,16 +79,23 @@ public sealed partial class InvestorPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        pageSql.Append(" f.fund_key, ");
         pageSql.Append(" isnull(f.fund_code, '') as fund_code, ");
         pageSql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
         pageSql.Append(" sum(isnull(p.commitment_amount, 0)) as committed, ");
-        // Unfunded commitment = committed minus capital called to date.
-        pageSql.Append(" sum(isnull(p.commitment_amount, 0)) - sum(isnull(p.capital_called_amount, 0)) as unfunded, ");
+        PortalPortfolioListSql.AppendUnfundedAmountExpression(pageSql, "p");
+        pageSql.Append(" as unfunded, ");
         pageSql.Append(" sum(isnull(p.excess_cash_amount, 0)) as cash_dist, ");
         pageSql.Append(" sum(isnull(p.sales_gain_amount, 0)) as gain_dist, ");
         pageSql.Append(" sum(isnull(p.preferred_return_amount, 0)) as preferred_return, ");
         pageSql.Append(" sum(isnull(p.return_of_capital_amount, 0)) as return_of_capital, ");
-        pageSql.Append(" sum(isnull(p.released_capital_amount, 0)) as released ");
+        pageSql.Append(" sum(isnull(p.released_capital_amount, 0)) as released, ");
+        pageSql.Append(" sum(isnull(p.net_invested_capital_amount, 0)) as net_invested_capital_amount, ");
+        pageSql.Append(" sum(isnull(p.preferred_return_amount, 0)) ");
+        pageSql.Append(" + sum(isnull(p.sales_gain_amount, 0)) ");
+        pageSql.Append(" + sum(isnull(p.excess_cash_amount, 0)) as net_distributed_amount, ");
+        PortalPortfolioListSql.AppendReservedAmountExpression(pageSql, "p");
+        pageSql.Append(" as reserved_amount ");
         AppendInvestorPortfolioFrom(pageSql, factTable);
         AppendInvestorTransactionWhere(pageSql, view, period);
         pageSql.Append(" group by f.fund_key, f.fund_code ");
@@ -103,6 +112,7 @@ public sealed partial class InvestorPortalService
             pageSize,
             static reader => new InvestorFundDistributionsDto
             {
+                FundKey = reader.GetInt32OrDefault("fund_key"),
                 FundCode = reader.GetStringOrEmpty("fund_code"),
                 FundName = reader.GetStringOrEmpty("fund_name"),
                 Committed = reader.GetDecimalOrDefault("committed"),
@@ -111,7 +121,10 @@ public sealed partial class InvestorPortalService
                 GainDist = reader.GetDecimalOrDefault("gain_dist"),
                 PreferredReturn = reader.GetDecimalOrDefault("preferred_return"),
                 ReturnOfCapital = reader.GetDecimalOrDefault("return_of_capital"),
-                Released = reader.GetDecimalOrDefault("released")
+                Released = reader.GetDecimalOrDefault("released"),
+                NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+                NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+                ReservedAmount = reader.GetDecimalOrDefault("reserved_amount")
             });
     }
 
@@ -139,6 +152,7 @@ public sealed partial class InvestorPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
+        pageSql.Append(" f.fund_key, ");
         pageSql.Append(" isnull(f.fund_code, '') as fund_code, ");
         pageSql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
         AppendIrrColumns(pageSql, isLtd);
@@ -158,6 +172,7 @@ public sealed partial class InvestorPortalService
             pageSize,
             static reader => new InvestorFundIrrDto
             {
+                FundKey = reader.GetInt32OrDefault("fund_key"),
                 FundCode = reader.GetStringOrEmpty("fund_code"),
                 FundName = reader.GetStringOrEmpty("fund_name"),
                 Irr1YearPct = reader.GetNullableDecimal("irr_1_year_pct"),

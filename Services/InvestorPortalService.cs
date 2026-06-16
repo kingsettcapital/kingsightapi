@@ -54,11 +54,14 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         }
     }
 
-    public async Task<InvestorDetailDto?> GetInvestorByKeyAsync(long investorKey)
+    public async Task<InvestorDetailDto?> GetInvestorByKeyAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period)
     {
         try
         {
-            return await GetInvestorByKeyInternalAsync(investorKey);
+            return await GetInvestorByKeyInternalAsync(investorKey, view, period);
         }
         catch (OperationCanceledException)
         {
@@ -273,7 +276,10 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount")
         };
 
-    private async Task<InvestorDetailDto?> GetInvestorByKeyInternalAsync(long investorKey)
+    private async Task<InvestorDetailDto?> GetInvestorByKeyInternalAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period)
     {
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -380,17 +386,27 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
 
         await investorReader.DisposeAsync();
 
-        await using var aggReader = await aggCommand.ExecuteReaderAsync();
-        if (!await aggReader.ReadAsync())
+        decimal totalCommittedValue;
+        decimal totalInvestedValue;
+        int investmentsCount;
+        int activeInvestmentsCount;
+        DateTime? firstInvestmentDate;
+
+        await using (var aggReader = await aggCommand.ExecuteReaderAsync())
         {
-            return null;
+            if (!await aggReader.ReadAsync())
+            {
+                return null;
+            }
+
+            totalCommittedValue = aggReader.GetDecimalOrDefault("total_committed_value");
+            totalInvestedValue = aggReader.GetDecimalOrDefault("total_invested_value");
+            investmentsCount = aggReader.GetInt32OrDefault("investments_count");
+            activeInvestmentsCount = aggReader.GetInt32OrDefault("active_investments_count");
+            firstInvestmentDate = aggReader.GetNullableDateTime("first_investment_date");
         }
 
-        var totalCommittedValue = aggReader.GetDecimalOrDefault("total_committed_value");
-        var totalInvestedValue = aggReader.GetDecimalOrDefault("total_invested_value");
-        var investmentsCount = aggReader.GetInt32OrDefault("investments_count");
-        var activeInvestmentsCount = aggReader.GetInt32OrDefault("active_investments_count");
-        var firstInvestmentDate = aggReader.GetNullableDateTime("first_investment_date");
+        var metrics = await GetInvestorPortfolioMetricsAsync(connection, investorKey, view, period);
 
         int? joinYear = null;
         var effectiveYearSource = firstInvestmentDate ?? memberSince;
@@ -439,6 +455,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         return new InvestorDetailDto
         {
             Summary = summary,
+            Metrics = metrics,
             Sections =
             [
                 new DynamicSectionDto
