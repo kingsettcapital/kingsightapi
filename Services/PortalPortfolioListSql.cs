@@ -27,8 +27,7 @@ internal static class PortalPortfolioListSql
     }
 
     /// <summary>
-    /// Reserved uncalled: warehouse <c>reserved_amount</c> when populated (may be negative);
-    /// otherwise commitment minus capital called (legacy SPA derivation).
+    /// Reserved: warehouse <c>reserved_amount</c> from portfolio facts (may be negative).
     /// </summary>
     public static void AppendReservedAmountAggregate(StringBuilder sql, string factAlias = "a")
     {
@@ -38,18 +37,7 @@ internal static class PortalPortfolioListSql
 
     public static void AppendReservedAmountExpression(StringBuilder sql, string factAlias = "a")
     {
-        sql.Append(" case ");
-        sql.Append($" when abs(case ");
-        sql.Append($" when sum(case when {factAlias}.reserved_amount is not null then 1 else 0 end) > 0 ");
-        sql.Append($" then sum(isnull({factAlias}.reserved_amount, 0)) ");
-        sql.Append($" else 0 end) > 0 ");
-        sql.Append($" then case ");
-        sql.Append($" when sum(case when {factAlias}.reserved_amount is not null then 1 else 0 end) > 0 ");
-        sql.Append($" then sum(isnull({factAlias}.reserved_amount, 0)) ");
-        sql.Append($" else 0 end ");
-        sql.Append($" else sum(isnull({factAlias}.commitment_amount, 0)) ");
-        sql.Append($" - sum(isnull({factAlias}.capital_called_amount, 0)) ");
-        sql.Append(" end ");
+        sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) ");
     }
 
     /// <summary>
