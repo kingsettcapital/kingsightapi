@@ -33,8 +33,11 @@ public sealed class InvestorListItemDto
     [JsonPropertyName("reserved_amount")]
     public decimal ReservedAmount { get; init; }
 
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
+
     [JsonPropertyName("released_capital_amount")]
-    public decimal ReleasedCapitalAmount { get; init; }
+    public decimal? ReleasedCapitalAmount { get; init; }
 
     /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
     public decimal TotalInvested => NetInvestedCapitalAmount;

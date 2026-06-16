@@ -20,7 +20,8 @@ internal static class PortalPortfolioListSql
         sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed_amount, ");
         sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved_amount, ");
-        sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital_amount ");
+        sql.Append($" sum(isnull({factAlias}.unfunded_amount, 0)) as unfunded_amount, ");
+        sql.Append($" sum({factAlias}.released_capital_amount) as released_capital_amount ");
     }
 
     /// <summary>KPI card totals for list page summary (same fact aggregates, summary column names).</summary>
@@ -31,7 +32,9 @@ internal static class PortalPortfolioListSql
         sql.Append($" sum(isnull({factAlias}.preferred_return_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed, ");
-        sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved_uncalled ");
+        sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved_uncalled, ");
+        sql.Append($" sum(isnull({factAlias}.unfunded_amount, 0)) as unfunded, ");
+        sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital ");
     }
 
     public static void AppendQuarterlyPeriodFilter(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)

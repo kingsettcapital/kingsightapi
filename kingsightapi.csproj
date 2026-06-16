@@ -8,6 +8,17 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="kingsightapi.Tests" />
+  </ItemGroup>
+
+  <!-- Test project lives at ../kingsightapi.Tests — exclude nested folder from web SDK glob -->
+  <ItemGroup>
+    <Compile Remove="kingsightapi.Tests/**" />
+    <Content Remove="kingsightapi.Tests/**" />
+    <None Remove="kingsightapi.Tests/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="log4net.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

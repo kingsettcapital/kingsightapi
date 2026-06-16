@@ -40,6 +40,8 @@ internal static class PortalListSort
         ["net_distributed_amount"] = "sum(isnull(a.preferred_return_amount, 0)) + sum(isnull(a.sales_gain_amount, 0)) + sum(isnull(a.excess_cash_amount, 0))",
         ["reservedAmount"] = "sum(isnull(a.reserved_amount, 0))",
         ["reserved_amount"] = "sum(isnull(a.reserved_amount, 0))",
+        ["unfundedAmount"] = "sum(isnull(a.unfunded_amount, 0))",
+        ["unfunded_amount"] = "sum(isnull(a.unfunded_amount, 0))",
         ["releasedCapitalAmount"] = "sum(isnull(a.released_capital_amount, 0))",
         ["released_capital_amount"] = "sum(isnull(a.released_capital_amount, 0))"
     };
@@ -101,7 +103,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorColumns,
-            "investorName, investorType, relationship, fundCount, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
+            "investorName, investorType, relationship, fundCount, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, unfundedAmount, releasedCapitalAmount",
             "b.investor_name",
             out sort,
             out error);

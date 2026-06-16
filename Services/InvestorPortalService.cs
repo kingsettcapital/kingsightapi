@@ -180,7 +180,9 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
                 TotalCommitment = summary.TotalCommitment,
                 NetInvestedCapital = summary.NetInvestedCapital,
                 NetDistributed = summary.NetDistributed,
-                ReservedUncalled = summary.ReservedUncalled
+                ReservedUncalled = summary.ReservedUncalled,
+                Unfunded = summary.Unfunded,
+                ReleasedCapital = summary.ReleasedCapital
             },
             Items = items,
             Page = normalizedPage,
@@ -218,7 +220,9 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
             NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
             NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
-            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled")
+            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled"),
+            Unfunded = reader.GetDecimalOrDefault("unfunded"),
+            ReleasedCapital = reader.GetDecimalOrDefault("released_capital")
         };
     }
 
@@ -265,7 +269,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
             NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
             ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
-            ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
+            UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
+            ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount")
         };
 
     private async Task<InvestorDetailDto?> GetInvestorByKeyInternalAsync(long investorKey)
