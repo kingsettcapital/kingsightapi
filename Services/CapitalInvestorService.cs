@@ -28,7 +28,8 @@ namespace kingsightapi.Services
                 user_updated_by = @user_updated_by
             where investor_key = @investor_key
               and is_current = 1
-            """;
+            """; 
+            //test
 
         private const string UpdateInvestorAliasByCodeSql = """
             update mort.dim_investor
