@@ -1,0 +1,105 @@
+---
+description: DTO and entity model conventions in kingsightapi.Entities
+globs: Entities/**/*.cs
+alwaysApply: false
+---
+
+# Entities (DTOs)
+
+All types live in `kingsightapi.Entities`. These are API contracts, not database entities.
+
+## Class style
+
+- Use `public sealed class` for DTOs and request/response types
+- Prefer `init` properties with defaults: `= string.Empty`, `= []` or `= new()` for collections
+
+## Comments & readability
+
+DTOs are the contract between Angular, controllers, and SQL — document anything that is not obvious from the property name alone.
+
+### Type-level XML docs (required for new public types)
+
+Every new `public sealed class` gets `/// <summary>` describing source table or API role:
+
+```csharp
+/// <summary>
+/// Row from mort.dim_investor for API responses.
+/// </summary>
+public sealed class DimInvestorDto
+```
+
+```csharp
+/// <summary>
+/// Body for batch-updating investor_alias_name on mort.dim_investor.
+/// </summary>
+public sealed class DimInvestorAliasBatchUpdateRequest
+```
+
+### Property-level docs (selective)
+
+Add `/// <summary>` on properties when:
+
+- Name differs from JSON (`Investors` with `[JsonPropertyName("investors")]`)
+- Units or semantics are unclear (`LoanRanking`, `IsDummyLoanIdentifier`)
+- Property mirrors a DB column with a non-obvious alias (`JsFundName`)
+
+Skip XML on self-explanatory properties (`LoanKey`, `FundCode`) unless the team is documenting the full surface for Swagger.
+
+### File organization
+
+Optional file header (one line) when a file holds multiple related types:
+
+```csharp
+// Investor dimension DTOs and batch alias update contracts (mort.dim_investor).
+```
+
+Separate request/response/result types with a blank line and keep related types adjacent (request → item → result).
+
+### Naming vs comments
+
+- **Investor** snake_case names often match SQL — comment only when the UI label differs from the column
+- **Loan/Fund** PascalCase — comment JSON or Fabric quirks, not every property
+
+### Avoid
+
+- `// investor key` above `public long investor_key` (name is sufficient)
+- Outdated summaries after renames — update docs in the same change
+- Inline `//` inside property declarations; use XML docs or clearer names
+
+## Naming conventions (match existing domains)
+
+**Investor dimension** (`DimInvestor*`, batch alias types): use **snake_case** property names aligned with SQL columns and Angular payloads:
+
+```csharp
+public long investor_key { get; init; }
+public string investor_alias_name { get; init; } = string.Empty;
+```
+
+**Loan and fund** DTOs: use **PascalCase** properties (serialized to camelCase in JSON):
+
+```csharp
+public int LoanKey { get; init; }
+public string LoanAliasName { get; init; } = string.Empty;
+```
+
+When adding fields, stay consistent within the same DTO family — do not mix conventions on one type.
+
+## JSON attributes
+
+Use when Angular contract differs from defaults:
+
+- `[JsonPropertyName("investors")]` for explicit JSON names
+- `[JsonNumberHandling(JsonNumberHandling.AllowReadingFromString)]` when keys may arrive as strings from the client
+
+## Request / response shapes
+
+- `*Request` — PUT/POST bodies
+- `*Dto` — read models returned from GET
+- `*Result` — batch operation outcomes (counts, not-found keys)
+- `*Parent` — wrapper with a list property for batch PUT bodies (e.g. `LoanAliasParent`)
+
+Keep one file per domain (`Investor.cs`, `Loan.cs`, `Fund.cs`) unless a file grows unwieldy.
+
+## Mapping
+
+Services map `SqlDataReader` columns to DTO properties explicitly with `GetOrdinal` + null checks — no AutoMapper in this project.

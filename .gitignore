@@ -25,6 +25,7 @@ CmhcUploads/
 !**/packages/build/
 
 ## Logs and temp
+logs/
 *.log
 *.tmp
 [Tt]est[Rr]esult*/
