@@ -52,4 +52,37 @@ public interface IInvestorPortalService
         FundPeriodFilter? period,
         int page,
         int pageSize);
+
+    /// <summary>Capital Activities table (one row per fund) for the investor portfolio screen. Searchable by fund code or name; sortable.</summary>
+    Task<PagedResult<InvestorFundCapitalActivitiesDto>> GetInvestorCapitalActivitiesAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    /// <summary>Distributions table (one row per fund) for the investor portfolio screen. Searchable by fund code or name; sortable.</summary>
+    Task<PagedResult<InvestorFundDistributionsDto>> GetInvestorDistributionsSummaryAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    /// <summary>IRR table (one row per fund) for the investor portfolio screen. Searchable by fund code or name; sortable.</summary>
+    Task<PagedResult<InvestorFundIrrDto>> GetInvestorIrrAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
 }
