@@ -84,7 +84,7 @@ public sealed class DefaultDateCaptureDto
     public DateTime? DwhUpdateDate { get; init; }
 }
 
-public sealed class DefaultDateCaptureUpdateItem
+public sealed class LoanFormDefaultDateUpdateItem
 {
     public long LoanKey { get; init; }
     public string? LoanCode { get; init; }
@@ -93,7 +93,7 @@ public sealed class DefaultDateCaptureUpdateItem
 
 public sealed class DefaultDateCaptureBatchRequest
 {
-    public List<DefaultDateCaptureUpdateItem> Items { get; init; } = [];
+    public List<LoanFormDefaultDateUpdateItem> Items { get; init; } = [];
 }
 
 #endregion
@@ -146,7 +146,7 @@ public sealed class TaxArrearsDto
     public DateTime? DwhUpdateDate { get; init; }
 }
 
-public sealed class TaxArrearsUpdateItem
+public sealed class LoanFormTaxArrearsUpdateItem
 {
     public long LoanKey { get; init; }
     public string? LoanCode { get; init; }
@@ -157,10 +157,10 @@ public sealed class TaxArrearsUpdateItem
 
 public sealed class TaxArrearsBatchRequest
 {
-    public List<TaxArrearsUpdateItem> Items { get; init; } = [];
+    public List<LoanFormTaxArrearsUpdateItem> Items { get; init; } = [];
 }
 
-public sealed class TaxArrearsCreateRequest
+public sealed class LoanFormTaxArrearsCreateRequest
 {
     public string LoanAlias { get; init; } = string.Empty;
     public string? LoanCode { get; init; }
@@ -192,7 +192,7 @@ public sealed class LtvValidationDto
     public DateTime? DwhUpdateDate { get; init; }
 }
 
-public sealed class LtvValidationUpdateItem
+public sealed class LoanFormLtvValidationUpdateItem
 {
     public long LoanKey { get; init; }
     public string? LoanCode { get; init; }
@@ -203,10 +203,10 @@ public sealed class LtvValidationUpdateItem
 
 public sealed class LtvValidationBatchRequest
 {
-    public List<LtvValidationUpdateItem> Items { get; init; } = [];
+    public List<LoanFormLtvValidationUpdateItem> Items { get; init; } = [];
 }
 
-public sealed class LtvValidationConfirmRequest
+public sealed class LoanFormLtvValidationConfirmRequest
 {
     public List<long> LoanKeys { get; init; } = [];
 }
