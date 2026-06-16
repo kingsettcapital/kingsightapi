@@ -80,6 +80,24 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    /// <summary>Search funds by code or name — used by portfolio transaction tables (one row per fund).</summary>
+    public static void AppendFundCodeOrNameSearchFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_code, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    /// <summary>Search investors by code (investor_id) or name — used by fund transaction tables (one row per investor).</summary>
+    public static void AppendInvestorCodeOrNameSearchFilter(StringBuilder sql, string investorAlias = "i")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull(cast({investorAlias}.investor_id as varchar(20)), '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({investorAlias}.investor_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
     public static void AppendFundTypeFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" and (@fundType is null ");

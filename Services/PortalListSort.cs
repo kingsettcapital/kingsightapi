@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Text;
 
 namespace kingsightapi.Services;
@@ -91,6 +92,154 @@ internal static class PortalListSort
         ["vacantSf"] = "isnull(metrics.vacant_area_sqft, 0)",
         ["vacant_sf"] = "isnull(metrics.vacant_area_sqft, 0)"
     };
+
+    // Portfolio transaction tables order by the SELECT output alias (grouped/aggregate columns),
+    // so each sort key maps to the column alias rather than a table-qualified expression.
+    private static readonly (string Camel, string Snake)[] CapitalActivityMetrics =
+    {
+        ("called", "called"),
+        ("transferIn", "transfer_in"),
+        ("transferOut", "transfer_out"),
+        ("redemption", "redemption")
+    };
+
+    private static readonly (string Camel, string Snake)[] DistributionMetrics =
+    {
+        ("committed", "committed"),
+        ("unfunded", "unfunded"),
+        ("cashDist", "cash_dist"),
+        ("gainDist", "gain_dist"),
+        ("preferredReturn", "preferred_return"),
+        ("returnOfCapital", "return_of_capital"),
+        ("released", "released")
+    };
+
+    private static readonly (string Camel, string Snake)[] IrrMetrics =
+    {
+        ("irr1Year", "irr_1_year_pct"),
+        ("irr3Year", "irr_3_year_pct"),
+        ("irr5Year", "irr_5_year_pct"),
+        ("irr7Year", "irr_7_year_pct"),
+        ("irr10Year", "irr_10_year_pct"),
+        ("irrLtd", "irr_ltd_pct")
+    };
+
+    private static readonly Dictionary<string, string> InvestorCapitalActivitiesColumns =
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), CapitalActivityMetrics);
+
+    private static readonly Dictionary<string, string> InvestorDistributionsColumns =
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), DistributionMetrics);
+
+    private static readonly Dictionary<string, string> InvestorIrrColumns =
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), IrrMetrics);
+
+    private static readonly Dictionary<string, string> FundCapitalActivitiesColumns =
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), CapitalActivityMetrics);
+
+    private static readonly Dictionary<string, string> FundDistributionsColumns =
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), DistributionMetrics);
+
+    private static readonly Dictionary<string, string> FundIrrColumns =
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), IrrMetrics);
+
+    private static Dictionary<string, string> BuildTransactionSortMap(
+        (string Camel, string Snake) code,
+        (string Camel, string Snake) name,
+        (string Camel, string Snake)[] metrics)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (camel, snake) in new[] { code, name }.Concat(metrics))
+        {
+            map[camel] = snake;
+            map[snake] = snake;
+        }
+
+        return map;
+    }
+
+    public static bool TryParseInvestorCapitalActivities(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            InvestorCapitalActivitiesColumns,
+            "fundCode, fundName, called, transferIn, transferOut, redemption",
+            "fund_code",
+            out sort,
+            out error);
+
+    public static bool TryParseInvestorDistributions(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            InvestorDistributionsColumns,
+            "fundCode, fundName, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
+            "fund_code",
+            out sort,
+            out error);
+
+    public static bool TryParseInvestorIrr(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            InvestorIrrColumns,
+            "fundCode, fundName, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "fund_code",
+            out sort,
+            out error);
+
+    public static bool TryParseFundCapitalActivities(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            FundCapitalActivitiesColumns,
+            "investorCode, investorName, called, transferIn, transferOut, redemption",
+            "investor_name",
+            out sort,
+            out error);
+
+    public static bool TryParseFundDistributions(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            FundDistributionsColumns,
+            "investorCode, investorName, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
+            "investor_name",
+            out sort,
+            out error);
+
+    public static bool TryParseFundIrr(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            FundIrrColumns,
+            "investorCode, investorName, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "investor_name",
+            out sort,
+            out error);
 
     public static bool TryParseInvestor(
         string? sortBy,

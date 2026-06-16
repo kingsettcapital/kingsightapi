@@ -5,7 +5,7 @@ using Microsoft.Data.SqlClient;
 
 namespace kingsightapi.Services;
 
-public sealed class FundPortalService : IFundPortalService
+public sealed partial class FundPortalService : IFundPortalService
 {
     /// <summary>Max flat distribution rows loaded before grouping (fund-level datasets are small).</summary>
     private const int DistributionGroupingFetchCap = 10_000;
