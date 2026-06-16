@@ -1,0 +1,145 @@
+---
+description: Service layer, SQL access, and Fabric database patterns
+globs: Services/**/*.cs
+alwaysApply: false
+---
+
+# Services
+
+## File layout
+
+Each feature gets one file in `Services/` containing:
+
+1. `public interface I{Name}Service` with async methods
+2. `public sealed class {Name}Service : I{Name}Service`
+
+Do not put controllers or DTO definitions in service files.
+
+## Constructor & config
+
+```csharp
+public XxxService(IConfiguration configuration, ILogger<XxxService> logger)
+{
+    _connectionString = configuration.GetConnectionString("FabricConnectionString")
+        ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+    _logger = logger;
+}
+```
+
+Use `FabricConnectionString` for all new Fabric SQL access (matches `InvestorService`, `LoanService`, `FundService`).
+
+## SQL
+
+- Prefer `private const string` with raw string literals (`""" … """`) for static queries
+- Use `StringBuilder` only when building dynamic SQL (existing `LoanService` pattern)
+- Always use parameterized commands — never concatenate user input into SQL
+- Schema-qualify tables: `mort.dim_loan`, `mort.dim_investor`, `wh_enterprise_gold.dbo.dim_fund`
+- Set `CommandType = CommandType.Text`
+- On updates, set `user_updated_date` (UTC) and `user_updated_by` from the request or `'System'` when batch-updating without a user context
+
+## Data access pattern
+
+```csharp
+await using var connection = new SqlConnection(_connectionString);
+await connection.OpenAsync();
+
+await using var command = new SqlCommand(sql, connection) { CommandType = CommandType.Text };
+// add parameters
+
+await using var reader = await command.ExecuteReaderAsync();
+var keyOrdinal = reader.GetOrdinal("column_name");
+
+while (await reader.ReadAsync())
+{
+    // map with IsDBNull checks; use Convert.ToInt32/GetString/GetDateTime as needed
+}
+```
+
+- Return `Task<IReadOnlyList<TDto>>` for lists, `Task<bool>` when a single row updated, or dedicated result DTOs for batch operations
+- Log row counts on successful reads: `_logger.LogInformation("Retrieved {Count} …", rows.Count)`
+
+## Batch updates
+
+Reuse parameters across rows in a loop (`command.Parameters.Add` once, update `.Value` per item) when updating many keys in one connection — see `InvestorService.UpdateInvestorAliasesAsync`.
+
+## Nullable parameters
+
+Use `(object?)value ?? DBNull.Value` for optional SQL parameters in batch updates.
+
+## Interfaces
+
+Keep interfaces narrow and aligned with controller needs. Add methods to the interface and implementation together; register in `Program.cs`.
+
+## Comments & readability
+
+Services hold SQL and mapping logic — comments should orient the reader to *data source* and *intent*, not restate C# syntax.
+
+### SQL constants
+
+Place a single-line comment above each `private const string` (or before a `StringBuilder` build) describing table and purpose:
+
+```csharp
+// Lists current investors from mort.dim_investor (is_current = 1).
+private const string ListInvestorsSql = """
+    select investor_key, ...
+    from mort.dim_investor
+    Where is_current = 1
+    ...
+    """;
+```
+
+For updates, note which columns are written and audit fields:
+
+```csharp
+// Updates investor_alias_name and system audit columns on mort.dim_investor by investor_key.
+private const string UpdateInvestorAliasSql = """ ... """;
+```
+
+### Public methods
+
+Add a `/// <summary>` on interface members and implementations when behavior is non-obvious (batch partial success, returns `false` vs zero rows, multiple SQL round-trips):
+
+```csharp
+/// <summary>
+/// Batch-updates alias names; returns counts and keys that did not match a row.
+/// </summary>
+Task<DimInvestorAliasBatchUpdateResult> UpdateInvestorAliasesAsync(...);
+```
+
+For straightforward CRUD-style methods, a one-line `//` before the method body is enough:
+
+```csharp
+public async Task<IReadOnlyList<LoanDto>> GetLoansAsync()
+{
+    // Join dim_loan to dim_investor for display name; current loans only.
+```
+
+### Reader mapping blocks
+
+When mapping many columns, optional short comments grouping ordinals help scanning:
+
+```csharp
+// Loan identity & display
+var loanKeyOrdinal = reader.GetOrdinal("loan_key");
+var loanCodeOrdinal = reader.GetOrdinal("loan_code");
+```
+
+Do not comment every `IsDBNull` line.
+
+### Complex control flow
+
+Comment loops that have business meaning (batch not-found tracking, partial updates):
+
+```csharp
+// Track keys with zero rows affected so the API can report not-found separately.
+else
+{
+    notFound.Add(item.investor_key);
+}
+```
+
+### Avoid
+
+- Commenting `await connection.OpenAsync()`
+- Leaving commented-out SQL or property mappings — remove or restore in a dedicated change
+- Long narrative blocks; prefer extracting a well-named private method over a paragraph comment

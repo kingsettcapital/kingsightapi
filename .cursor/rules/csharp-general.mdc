@@ -1,0 +1,90 @@
+---
+description: General C# and .NET coding standards for kingsightapi
+globs: **/*.cs
+alwaysApply: false
+---
+
+# C# Standards
+
+## Language & framework
+
+- Target `net8.0`; use modern C# (raw string literals, collection expressions `[]` where appropriate)
+- Keep nullable reference types correct; avoid suppressions unless necessary
+- Use `async`/`await` end-to-end for I/O; suffix async methods with `Async`
+
+## Namespaces & usings
+
+- Root namespace: `kingsightapi` with sub-namespaces `Controllers`, `Services`, `Entities`
+- Group usings: framework first, then project (`kingsightapi.*`)
+
+## Types
+
+- `sealed` for service implementations and DTOs unless inheritance is required
+- Interfaces for services consumed by controllers
+- Avoid `public` fields; use properties only
+
+## Logging
+
+- Inject `ILogger<T>`; use `LogInformation`, `LogWarning`, `LogError`
+- Message templates with named placeholders, not `$"..."` in log calls
+
+## Comments & readability
+
+### Philosophy
+
+1. **Self-documenting code first** — descriptive method and variable names (`notFoundInvestorKeys`, `UpdateInvestorAliasAsync`)
+2. **Comments for context** — why, which system, which table, which client expectation
+3. **XML docs for public API surface** — types and members consumed across projects or published to Swagger
+
+### `Program.cs` and startup
+
+Use section comments to mirror existing style:
+
+```csharp
+// DI registrations
+builder.Services.AddSingleton<IInvestorService, InvestorService>();
+
+// CORS - allow Angular dev origin; adjust for production
+builder.Services.AddCors(...);
+
+// Angular sends camelCase; accept it reliably even if defaults change.
+options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+```
+
+### Interfaces
+
+Document non-obvious contract on the interface; implementation can stay brief if the interface summary is clear.
+
+### Formatting for readability (with or without comments)
+
+- One blank line between logical steps inside long methods (open connection → command → reader loop)
+- Keep SQL in raw strings or constants, not inline in controllers
+- Align related registrations and usings; remove unused usings in touched files
+
+### Language
+
+- Write comments in English
+- Use `//` for implementation notes; `///` for public API documentation
+- End summaries with a period in XML docs; `//` lines can be phrase or sentence style but stay consistent within a file
+
+### Do not
+
+- Comment every line in mapping loops
+- Use `TODO` without a ticket or owner — fix or create a tracked item
+- Disable warnings with comments instead of fixing the issue
+
+## What to avoid
+
+- Entity Framework or other ORMs (project uses ADO.NET)
+- Putting SQL or connection strings in controllers
+- Exposing stack traces or internal errors in API responses
+- Force-pushing or amending commits unless the user explicitly requests it
+- Large refactors unrelated to the task at hand
+
+## New endpoints checklist
+
+1. DTOs in `Entities/`
+2. `I*Service` + implementation in `Services/`
+3. Controller action with validation and standard error handling
+4. `builder.Services.AddSingleton<…>()` in `Program.cs`
+5. Verify route matches Angular client expectations (camelCase JSON, CORS)
