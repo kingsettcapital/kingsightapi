@@ -14,6 +14,9 @@ public sealed class InvestorListItemDto
     [JsonPropertyName("investor_type")]
     public string InvestorType { get; init; } = string.Empty;
 
+    [JsonPropertyName("investor_type_name")]
+    public string InvestorTypeName { get; init; } = string.Empty;
+
     [JsonPropertyName("relationship_name")]
     public string RelationshipName { get; init; } = string.Empty;
 
@@ -23,8 +26,26 @@ public sealed class InvestorListItemDto
     [JsonPropertyName("contact_last_name")]
     public string ContactLastName { get; init; } = string.Empty;
 
+    [JsonPropertyName("contact_email")]
+    public string? ContactEmail { get; init; }
+
     [JsonPropertyName("contact_name")]
     public string ContactName { get; init; } = string.Empty;
+
+    [JsonPropertyName("address_line1")]
+    public string? AddressLine1 { get; init; }
+
+    [JsonPropertyName("address_line2")]
+    public string? AddressLine2 { get; init; }
+
+    [JsonPropertyName("city")]
+    public string? City { get; init; }
+
+    [JsonPropertyName("province")]
+    public string? Province { get; init; }
+
+    [JsonPropertyName("province_code")]
+    public string? ProvinceCode { get; init; }
 
     [JsonPropertyName("fund_count")]
     public int FundCount { get; init; }
@@ -48,6 +69,7 @@ public sealed class InvestorListItemDto
     public decimal? ReleasedCapitalAmount { get; init; }
 
     /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
+    [JsonPropertyName("total_invested")]
     public decimal TotalInvested => NetInvestedCapitalAmount;
 }
 
@@ -176,6 +198,9 @@ public sealed class InvestorSummaryDto
     [JsonPropertyName("investor_type")]
     public string InvestorType { get; init; } = string.Empty;
 
+    [JsonPropertyName("investor_type_name")]
+    public string InvestorTypeName { get; init; } = string.Empty;
+
     [JsonPropertyName("relationship_name")]
     public string RelationshipName { get; init; } = string.Empty;
 
@@ -187,8 +212,26 @@ public sealed class InvestorSummaryDto
     [JsonPropertyName("contact_last_name")]
     public string ContactLastName { get; init; } = string.Empty;
 
+    [JsonPropertyName("contact_email")]
+    public string? ContactEmail { get; init; }
+
     [JsonPropertyName("contact_name")]
     public string ContactName { get; init; } = string.Empty;
+
+    [JsonPropertyName("address_line1")]
+    public string? AddressLine1 { get; init; }
+
+    [JsonPropertyName("address_line2")]
+    public string? AddressLine2 { get; init; }
+
+    [JsonPropertyName("city")]
+    public string? City { get; init; }
+
+    [JsonPropertyName("province")]
+    public string? Province { get; init; }
+
+    [JsonPropertyName("province_code")]
+    public string? ProvinceCode { get; init; }
 
     [JsonPropertyName("fund_count")]
     public int FundCount { get; init; }

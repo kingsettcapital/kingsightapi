@@ -68,8 +68,13 @@ public sealed class CapitalInvestorsListTests
         {
             InvestorKey = 758,
             InvestorName = "Jona Capital Inc.",
+            InvestorTypeName = "Corporation",
             RelationshipName = "Jon Love's Funds",
             ContactName = "Jon Love",
+            ContactEmail = "jon@example.com",
+            AddressLine1 = "123 Main Street",
+            City = "Toronto",
+            ProvinceCode = "ON",
             FundCount = 9,
             TotalCommitment = 1000000m,
             NetInvestedCapital = 800000m,
@@ -83,6 +88,10 @@ public sealed class CapitalInvestorsListTests
 
         Assert.Equal("Jon Love's Funds", root.GetProperty("relationship_name").GetString());
         Assert.Equal("Jon Love", root.GetProperty("contact_name").GetString());
+        Assert.Equal("Corporation", root.GetProperty("investor_type_name").GetString());
+        Assert.Equal("jon@example.com", root.GetProperty("contact_email").GetString());
+        Assert.Equal("123 Main Street", root.GetProperty("address_line1").GetString());
+        Assert.Equal("ON", root.GetProperty("province_code").GetString());
         Assert.Equal(9, root.GetProperty("fund_count").GetInt32());
         Assert.Equal(50000m, root.GetProperty("reserved_amount").GetDecimal());
     }

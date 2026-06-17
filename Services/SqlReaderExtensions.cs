@@ -97,6 +97,17 @@ internal static class SqlReaderExtensions
             : null;
     }
 
+    public static string? GetNullableTrimmedString(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var value = reader.GetString(ordinal).Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
+    }
+
     public static string? GetNullableStringIfPresent(this SqlDataReader reader, string column)
     {
         if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))

@@ -148,6 +148,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         pageSql.Append(" isnull(b.relationship_name, '') as relationship_name, ");
         pageSql.Append(" isnull(b.contact_first_name, '') as contact_first_name, ");
         pageSql.Append(" isnull(b.contact_last_name, '') as contact_last_name, ");
+        AppendInvestorListIdentityColumns(pageSql);
         pageSql.Append(" count(distinct a.fund_key) as fund_count, ");
         PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
         AppendInvestorListingFrom(pageSql, portfolioTable, view, period);
@@ -263,6 +264,16 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         PortalPortfolioListSql.AddPeriodParameter(command, period);
     }
 
+    private static void AppendInvestorListIdentityColumns(StringBuilder sql, string investorAlias = "b")
+    {
+        sql.Append($" max({investorAlias}.contact_email) as contact_email, ");
+        sql.Append($" max({investorAlias}.address_line1) as address_line1, ");
+        sql.Append($" max({investorAlias}.address_line2) as address_line2, ");
+        sql.Append($" max({investorAlias}.city) as city, ");
+        sql.Append($" max({investorAlias}.province) as province, ");
+        sql.Append($" max({investorAlias}.province_code) as province_code, ");
+    }
+
     private static InvestorListItemDto MapInvestorListItem(SqlDataReader reader)
     {
         var commitment = reader.GetDecimalOrDefault("commitment_amount");
@@ -275,10 +286,17 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             InvestorKey = reader.GetInt64OrDefault("investor_key"),
             InvestorName = reader.GetStringOrEmpty("investor_name"),
             InvestorType = reader.GetStringOrEmpty("investor_type_name"),
+            InvestorTypeName = reader.GetStringOrEmpty("investor_type_name"),
             RelationshipName = reader.GetStringOrEmpty("relationship_name"),
             ContactFirstName = contactFirst,
             ContactLastName = contactLast,
+            ContactEmail = reader.GetNullableTrimmedString("contact_email"),
             ContactName = PortalPortfolioMetrics.FormatContactName(contactFirst, contactLast),
+            AddressLine1 = reader.GetNullableTrimmedString("address_line1"),
+            AddressLine2 = reader.GetNullableTrimmedString("address_line2"),
+            City = reader.GetNullableTrimmedString("city"),
+            Province = reader.GetNullableTrimmedString("province"),
+            ProvinceCode = reader.GetNullableTrimmedString("province_code"),
             FundCount = reader.GetInt32OrDefault("fund_count"),
             CommitmentAmount = commitment,
             NetInvestedCapitalAmount = netInvested,
@@ -306,10 +324,11 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         investorSql.Append(" isnull(i.relationship_name, '') as relationship_name, ");
         investorSql.Append(" isnull(i.investor_type_name, '') as investor_type_name, ");
         investorSql.Append(" case when isnull(i.is_current, 1) = 1 then 'Active' else 'Inactive' end as investor_status, ");
-        investorSql.Append(" isnull(i.address_line1, '') as address_line1, ");
-        investorSql.Append(" isnull(i.address_line2, '') as address_line2, ");
-        investorSql.Append(" isnull(i.city, '') as city, ");
-        investorSql.Append(" isnull(i.province, '') as province, ");
+        investorSql.Append(" i.address_line1, ");
+        investorSql.Append(" i.address_line2, ");
+        investorSql.Append(" i.city, ");
+        investorSql.Append(" i.province, ");
+        investorSql.Append(" i.province_code, ");
         investorSql.Append(" isnull(i.country, '') as country, ");
         investorSql.Append(" isnull(i.contact_first_name, '') as contact_first_name, ");
         investorSql.Append(" isnull(i.contact_last_name, '') as contact_last_name, ");
@@ -333,10 +352,11 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         string relationshipName;
         string investorType;
         string status;
-        string addressLine1;
-        string addressLine2;
-        string city;
-        string province;
+        string? addressLine1;
+        string? addressLine2;
+        string? city;
+        string? province;
+        string? provinceCode;
         string country;
         string contactFirstName;
         string contactLastName;
@@ -358,10 +378,11 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             relationshipName = investorReader.GetStringOrEmpty("relationship_name");
             investorType = investorReader.GetStringOrEmpty("investor_type_name");
             status = investorReader.GetStringOrEmpty("investor_status");
-            addressLine1 = investorReader.GetStringOrEmpty("address_line1");
-            addressLine2 = investorReader.GetStringOrEmpty("address_line2");
-            city = investorReader.GetStringOrEmpty("city");
-            province = investorReader.GetStringOrEmpty("province");
+            addressLine1 = investorReader.GetNullableTrimmedString("address_line1");
+            addressLine2 = investorReader.GetNullableTrimmedString("address_line2");
+            city = investorReader.GetNullableTrimmedString("city");
+            province = investorReader.GetNullableTrimmedString("province");
+            provinceCode = investorReader.GetNullableTrimmedString("province_code");
             country = investorReader.GetStringOrEmpty("country");
             contactFirstName = investorReader.GetStringOrEmpty("contact_first_name");
             contactLastName = investorReader.GetStringOrEmpty("contact_last_name");
@@ -457,11 +478,18 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             InvestorId = investorId,
             InvestorName = investorName,
             InvestorType = investorType,
+            InvestorTypeName = investorType,
             RelationshipName = relationshipName,
             Status = status,
             ContactFirstName = contactFirstName,
             ContactLastName = contactLastName,
+            ContactEmail = contactEmail,
             ContactName = PortalPortfolioMetrics.FormatContactName(contactFirstName, contactLastName),
+            AddressLine1 = addressLine1,
+            AddressLine2 = addressLine2,
+            City = city,
+            Province = province,
+            ProvinceCode = provinceCode,
             FundCount = metrics.FundCount > 0 ? metrics.FundCount : investmentsCount,
             TotalInvested = metrics.NetInvestedCapital > 0m ? metrics.NetInvestedCapital : totalInvestedValue,
             TotalCommitment = metrics.TotalCommitment > 0m ? metrics.TotalCommitment : totalCommittedValue,
