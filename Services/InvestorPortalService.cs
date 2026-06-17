@@ -75,16 +75,11 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         }
     }
 
-    public async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(
-        long investorKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize)
+    public async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize)
     {
         try
         {
-            return await GetInvestorFundsInternalAsync(investorKey, view, period, page, pageSize);
+            return await GetInvestorFundsInternalAsync(investorKey, page, pageSize);
         }
         catch (OperationCanceledException)
         {
@@ -318,47 +313,28 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         };
         investorCommand.Parameters.AddWithValue("@investorKey", investorKey);
 
-        long resolvedInvestorKey;
-        int investorId;
-        string investorName;
-        string investorShortName;
-        string relationshipName;
-        string investorType;
-        string status;
-        string addressLine1;
-        string addressLine2;
-        string city;
-        string province;
-        string country;
-        string contactFirstName;
-        string contactLastName;
-        string contactEmail;
-        DateTime? memberSince;
-
-        await using (var investorReader = await investorCommand.ExecuteReaderAsync())
+        await using var investorReader = await investorCommand.ExecuteReaderAsync();
+        if (!await investorReader.ReadAsync())
         {
-            if (!await investorReader.ReadAsync())
-            {
-                return null;
-            }
-
-            memberSince = investorReader.GetNullableDateTime("member_since");
-            resolvedInvestorKey = investorReader.GetInt64OrDefault("investor_key");
-            investorId = investorReader.GetInt32OrDefault("investor_id");
-            investorName = investorReader.GetStringOrEmpty("investor_name");
-            investorShortName = investorReader.GetStringOrEmpty("investor_short_name");
-            relationshipName = investorReader.GetStringOrEmpty("relationship_name");
-            investorType = investorReader.GetStringOrEmpty("investor_type_name");
-            status = investorReader.GetStringOrEmpty("investor_status");
-            addressLine1 = investorReader.GetStringOrEmpty("address_line1");
-            addressLine2 = investorReader.GetStringOrEmpty("address_line2");
-            city = investorReader.GetStringOrEmpty("city");
-            province = investorReader.GetStringOrEmpty("province");
-            country = investorReader.GetStringOrEmpty("country");
-            contactFirstName = investorReader.GetStringOrEmpty("contact_first_name");
-            contactLastName = investorReader.GetStringOrEmpty("contact_last_name");
-            contactEmail = investorReader.GetStringOrEmpty("contact_email");
+            return null;
         }
+
+        var memberSince = investorReader.GetNullableDateTime("member_since");
+        var resolvedInvestorKey = investorReader.GetInt64OrDefault("investor_key");
+        var investorId = investorReader.GetInt32OrDefault("investor_id");
+        var investorName = investorReader.GetStringOrEmpty("investor_name");
+        var investorShortName = investorReader.GetStringOrEmpty("investor_short_name");
+        var relationshipName = investorReader.GetStringOrEmpty("relationship_name");
+        var investorType = investorReader.GetStringOrEmpty("investor_type_name");
+        var status = investorReader.GetStringOrEmpty("investor_status");
+        var addressLine1 = investorReader.GetStringOrEmpty("address_line1");
+        var addressLine2 = investorReader.GetStringOrEmpty("address_line2");
+        var city = investorReader.GetStringOrEmpty("city");
+        var province = investorReader.GetStringOrEmpty("province");
+        var country = investorReader.GetStringOrEmpty("country");
+        var contactFirstName = investorReader.GetStringOrEmpty("contact_first_name");
+        var contactLastName = investorReader.GetStringOrEmpty("contact_last_name");
+        var contactEmail = investorReader.GetStringOrEmpty("contact_email");
 
         var aggSql = new StringBuilder();
         aggSql.Append(" select ");
@@ -408,6 +384,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         };
         aggCommand.Parameters.AddWithValue("@investorKey", investorKey);
 
+        await investorReader.DisposeAsync();
+
         decimal totalCommittedValue;
         decimal totalInvestedValue;
         int investmentsCount;
@@ -418,20 +396,14 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         {
             if (!await aggReader.ReadAsync())
             {
-                totalCommittedValue = 0m;
-                totalInvestedValue = 0m;
-                investmentsCount = 0;
-                activeInvestmentsCount = 0;
-                firstInvestmentDate = null;
+                return null;
             }
-            else
-            {
-                totalCommittedValue = aggReader.GetDecimalOrDefault("total_committed_value");
-                totalInvestedValue = aggReader.GetDecimalOrDefault("total_invested_value");
-                investmentsCount = aggReader.GetInt32OrDefault("investments_count");
-                activeInvestmentsCount = aggReader.GetInt32OrDefault("active_investments_count");
-                firstInvestmentDate = aggReader.GetNullableDateTime("first_investment_date");
-            }
+
+            totalCommittedValue = aggReader.GetDecimalOrDefault("total_committed_value");
+            totalInvestedValue = aggReader.GetDecimalOrDefault("total_invested_value");
+            investmentsCount = aggReader.GetInt32OrDefault("investments_count");
+            activeInvestmentsCount = aggReader.GetInt32OrDefault("active_investments_count");
+            firstInvestmentDate = aggReader.GetNullableDateTime("first_investment_date");
         }
 
         var metrics = await GetInvestorPortfolioMetricsAsync(connection, investorKey, view, period);
@@ -500,70 +472,200 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         };
     }
 
-    private async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsInternalAsync(
-        long investorKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize)
+    private async Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsInternalAsync(long investorKey, int page, int pageSize)
     {
-        var factTable = PortfolioFactTable(view);
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
 
-        var pageSql = new StringBuilder();
-        pageSql.Append(" select ");
-        pageSql.Append(" f.fund_key, ");
-        pageSql.Append(" isnull(f.fund_code, '') as fund_code, ");
-        pageSql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
-        pageSql.Append(" max(isnull(f.fund_type_name, '')) as fund_type, ");
-        pageSql.Append(" max(isnull(f.fund_strategy_name, isnull(f.fund_type_name, ''))) as fund_category, ");
-        pageSql.Append(" case ");
-        pageSql.Append(" when max(case when f.dissolution_date is not null then 1 else 0 end) = 1 then 'Dissolved' ");
-        pageSql.Append(" when max(case when isnull(f.is_active, 0) = 1 then 1 else 0 end) = 1 then 'Active' ");
-        pageSql.Append(" else 'Inactive' ");
-        pageSql.Append(" end as fund_status, ");
-        AppendInvestorPortfolioMetricAggregates(pageSql, "p");
-        AppendInvestorPortfolioFrom(pageSql, factTable);
-        AppendInvestorTransactionWhere(pageSql, view, period);
-        pageSql.Append(" group by f.fund_key, f.fund_code ");
-        pageSql.Append(" order by f.fund_code ");
-        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
 
-        return await ExecuteInvestorTransactionPageAsync(
-            BuildInvestorTransactionCountSql(factTable, view, period),
-            pageSql,
-            investorKey,
-            period,
-            null,
-            null,
-            page,
-            pageSize,
-            static reader =>
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) ");
+        countSql.Append(" from ( ");
+        AppendInvestorFundsBaseSelect(countSql);
+        countSql.Append(" ) fund_rows ");
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        countCommand.Parameters.AddWithValue("@investorKey", investorKey);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        var fundsSql = new StringBuilder();
+        AppendInvestorFundsBaseSelect(fundsSql);
+        fundsSql.Append(" order by df.fund_code ");
+        fundsSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        var funds = new List<(int FundKey, string FundCode, string FundName, string FundType, string FundCategory, string Status)>();
+        await using (var fundsCommand = new SqlCommand(fundsSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        })
+        {
+            fundsCommand.Parameters.AddWithValue("@investorKey", investorKey);
+            fundsCommand.Parameters.AddWithValue("@offset", offset);
+            fundsCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
+
+            await using var fundsReader = await fundsCommand.ExecuteReaderAsync();
+            while (await fundsReader.ReadAsync())
             {
-                var commitment = reader.GetDecimalOrDefault("commitment_amount");
-                var netInvested = reader.GetDecimalOrDefault("net_invested_capital_amount");
-                var investedPercent = commitment > 0m
-                    ? (decimal?)Math.Round(netInvested / commitment * 100m, 1, MidpointRounding.AwayFromZero)
-                    : null;
+                funds.Add((
+                    fundsReader.GetInt32OrDefault("fund_key"),
+                    fundsReader.GetStringOrEmpty("fund_code"),
+                    fundsReader.GetStringOrEmpty("fund_name"),
+                    fundsReader.GetStringOrEmpty("fund_type"),
+                    fundsReader.GetStringOrEmpty("fund_category"),
+                    fundsReader.GetStringOrEmpty("fund_status")
+                ));
+            }
+        }
 
-                return new InvestorInvestmentDto
-                {
-                    FundKey = reader.GetInt32OrDefault("fund_key"),
-                    FundCode = reader.GetStringOrEmpty("fund_code"),
-                    FundName = reader.GetStringOrEmpty("fund_name"),
-                    FundType = reader.GetStringOrEmpty("fund_type"),
-                    FundCategory = reader.GetStringOrEmpty("fund_category"),
-                    Status = reader.GetStringOrEmpty("fund_status"),
-                    InvestedAmount = netInvested,
-                    InvestedAmountFmv = netInvested,
-                    TotalReturnPercent = investedPercent,
-                    CommitmentAmount = commitment,
-                    NetInvestedCapitalAmount = netInvested,
-                    NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
-                    ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
-                    UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
-                    ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount"),
-                    InvestedPercent = investedPercent
-                };
+        if (funds.Count == 0)
+        {
+            return new PagedResult<InvestorInvestmentDto>
+            {
+                Items = [],
+                Page = normalizedPage,
+                PageSize = normalizedPageSize,
+                TotalCount = totalCount
+            };
+        }
+
+        var fundCodeParameters = new List<string>();
+        for (var i = 0; i < funds.Count; i++)
+        {
+            fundCodeParameters.Add($"@fundCode{i}");
+        }
+
+        var aggregateSql = new StringBuilder();
+        aggregateSql.Append(" select ");
+        aggregateSql.Append(" x.fund_code, ");
+        aggregateSql.Append(" isnull(comm.invested_amount_total, 0) as invested_amount_total, ");
+        aggregateSql.Append(" isnull(inv.invested_amount_fmv_total, 0) as invested_amount_fmv_total, ");
+        aggregateSql.Append(" inv.total_return_percent as total_return_percent ");
+        aggregateSql.Append(" from ( ");
+        aggregateSql.Append(" select distinct isnull(df2.fund_code, '') as fund_code ");
+        aggregateSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df2 on df2.fund_key = fc.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df2");
+        aggregateSql.Append(" where fc.investor_key = @investorKey ");
+        aggregateSql.Append(" union ");
+        aggregateSql.Append(" select distinct isnull(df2.fund_code, '') as fund_code ");
+        aggregateSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df2 on df2.fund_key = fi.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df2");
+        aggregateSql.Append(" where fi.investor_key = @investorKey ");
+        aggregateSql.Append(" ) x ");
+        aggregateSql.Append(" left join ( ");
+        aggregateSql.Append(" select isnull(df3.fund_code, '') as fund_code, sum(isnull(fc.committed_amount, 0)) as invested_amount_total ");
+        aggregateSql.Append($" from {WarehouseTables.FactCommitted} fc ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df3 on df3.fund_key = fc.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df3");
+        aggregateSql.Append(" where fc.investor_key = @investorKey ");
+        aggregateSql.Append(" group by df3.fund_code ");
+        aggregateSql.Append(" ) comm on comm.fund_code = x.fund_code ");
+        aggregateSql.Append(" left join ( ");
+        aggregateSql.Append(" select ");
+        aggregateSql.Append(" isnull(df4.fund_code, '') as fund_code, ");
+        aggregateSql.Append(" ( ");
+        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df4.fund_type_name, '')) = 'unitized' ");
+        aggregateSql.Append("     THEN isnull(fi.invested_units, 0) ELSE 0 END) ");
+        aggregateSql.Append(" + ");
+        aggregateSql.Append(" sum(CASE WHEN lower(isnull(df4.fund_type_name, '')) <> 'unitized' ");
+        aggregateSql.Append("     THEN isnull(fi.invested_amount, 0) ELSE 0 END) ");
+        aggregateSql.Append(" ) as invested_amount_fmv_total, ");
+        aggregateSql.Append(" case ");
+        aggregateSql.Append(" when abs(sum(isnull(fi.invested_amount, 0))) > 0 ");
+        aggregateSql.Append(" then ( (sum(isnull(fi.invested_amount_fmv, 0)) - sum(isnull(fi.invested_amount, 0))) ");
+        aggregateSql.Append("      / abs(sum(isnull(fi.invested_amount, 0))) ) * 100.0 ");
+        aggregateSql.Append(" else null ");
+        aggregateSql.Append(" end as total_return_percent ");
+        aggregateSql.Append($" from {WarehouseTables.FactInvestment} fi ");
+        aggregateSql.Append($" inner join {WarehouseTables.DimFund} df4 on df4.fund_key = fi.fund_key ");
+        aggregateSql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(aggregateSql, "df4");
+        aggregateSql.Append(" where fi.investor_key = @investorKey ");
+        aggregateSql.Append(" group by df4.fund_code ");
+        aggregateSql.Append(" ) inv on inv.fund_code = x.fund_code ");
+        aggregateSql.Append($" where x.fund_code in ({string.Join(", ", fundCodeParameters)}) ");
+
+        var totalsByFundCode = new Dictionary<string, (decimal InvestedAmountTotal, decimal InvestedAmountFmvTotal, decimal? TotalReturnPercent)>(StringComparer.OrdinalIgnoreCase);
+        await using (var aggregateCommand = new SqlCommand(aggregateSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        })
+        {
+            aggregateCommand.Parameters.AddWithValue("@investorKey", investorKey);
+            for (var i = 0; i < funds.Count; i++)
+            {
+                aggregateCommand.Parameters.AddWithValue(fundCodeParameters[i], funds[i].FundCode);
+            }
+
+            await using var aggregateReader = await aggregateCommand.ExecuteReaderAsync();
+            while (await aggregateReader.ReadAsync())
+            {
+                var fundCode = aggregateReader.GetStringOrEmpty("fund_code");
+                totalsByFundCode[fundCode] = (
+                    aggregateReader.GetDecimalOrDefault("invested_amount_total"),
+                    aggregateReader.GetDecimalOrDefault("invested_amount_fmv_total"),
+                    aggregateReader.GetNullableDecimal("total_return_percent")
+                );
+            }
+        }
+
+        var items = new List<InvestorInvestmentDto>();
+        foreach (var fund in funds)
+        {
+            totalsByFundCode.TryGetValue(fund.FundCode, out var totals);
+
+            items.Add(new InvestorInvestmentDto
+            {
+                FundKey = fund.FundKey,
+                FundCode = fund.FundCode,
+                FundName = fund.FundName,
+                FundType = fund.FundType,
+                FundCategory = fund.FundCategory,
+                Status = fund.Status,
+                InvestedAmount = totals.InvestedAmountTotal,
+                InvestedAmountFmv = totals.InvestedAmountFmvTotal,
+                TotalReturnPercent = totals.TotalReturnPercent
             });
+        }
+
+        return new PagedResult<InvestorInvestmentDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private static void AppendInvestorFundsBaseSelect(StringBuilder sql)
+    {
+        sql.Append(" select ");
+        sql.Append(" min(df.fund_key) as fund_key, ");
+        sql.Append(" isnull(df.fund_code, '') as fund_code, ");
+        sql.Append(" max(isnull(df.fund_name, '')) as fund_name, ");
+        sql.Append(" max(isnull(df.fund_type_name, '')) as fund_type, ");
+        sql.Append(" max(isnull(df.fund_strategy_name, isnull(df.fund_type_name, ''))) as fund_category, ");
+        sql.Append(" case ");
+        sql.Append(" when max(case when df.dissolution_date is not null then 1 else 0 end) = 1 then 'Dissolved' ");
+        sql.Append(" when max(case when isnull(df.is_current, 1) = 1 then 1 else 0 end) = 1 then 'Active' ");
+        sql.Append(" else 'Inactive' ");
+        sql.Append(" end as fund_status ");
+        sql.Append(" from ( ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactCommitted} where investor_key = @investorKey ");
+        sql.Append(" union ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactInvestment} where investor_key = @investorKey ");
+        sql.Append(" ) fk ");
+        sql.Append($" inner join {WarehouseTables.DimFund} df on df.fund_key = fk.fund_key ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "df");
+        sql.Append(" group by df.fund_code ");
     }
 }

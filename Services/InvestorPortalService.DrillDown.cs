@@ -83,30 +83,19 @@ public sealed partial class InvestorPortalService
             investorKey,
             period,
             null,
-            null,
             page,
             pageSize,
-            static reader =>
+            static reader => new InvestorFundExposureDto
             {
-                var commitment = reader.GetDecimalOrDefault("commitment_amount");
-                var netInvested = reader.GetDecimalOrDefault("net_invested_capital_amount");
-                var investedPercent = commitment > 0m
-                    ? (decimal?)Math.Round(netInvested / commitment * 100m, 1, MidpointRounding.AwayFromZero)
-                    : null;
-
-                return new InvestorFundExposureDto
-                {
-                    FundKey = reader.GetInt32OrDefault("fund_key"),
-                    FundCode = reader.GetStringOrEmpty("fund_code"),
-                    FundName = reader.GetStringOrEmpty("fund_name"),
-                    CommitmentAmount = commitment,
-                    NetInvestedCapitalAmount = netInvested,
-                    NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
-                    ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
-                    UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
-                    ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount"),
-                    InvestedPercent = investedPercent
-                };
+                FundKey = reader.GetInt32OrDefault("fund_key"),
+                FundCode = reader.GetStringOrEmpty("fund_code"),
+                FundName = reader.GetStringOrEmpty("fund_name"),
+                CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
+                NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+                NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+                ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
+                UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
+                ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount")
             });
     }
 

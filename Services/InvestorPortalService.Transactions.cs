@@ -14,7 +14,6 @@ public sealed partial class InvestorPortalService
         string? search,
         string? sortBy,
         string? sortDir,
-        int? fundKey,
         int page,
         int pageSize)
     {
@@ -36,18 +35,17 @@ public sealed partial class InvestorPortalService
         pageSql.Append(" sum(isnull(p.investment_transferred_out_amount, 0)) as transfer_out, ");
         pageSql.Append(" sum(isnull(p.redeemed_amount, 0)) as redemption ");
         AppendInvestorPortfolioFrom(pageSql, factTable);
-        AppendInvestorTransactionWhere(pageSql, view, period, fundKey);
+        AppendInvestorTransactionWhere(pageSql, view, period);
         pageSql.Append(" group by f.fund_key, f.fund_code ");
         orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteInvestorTransactionPageAsync(
-            BuildInvestorTransactionCountSql(factTable, view, period, fundKey),
+            BuildInvestorTransactionCountSql(factTable, view, period),
             pageSql,
             investorKey,
             period,
             search,
-            fundKey,
             page,
             pageSize,
             static reader => new InvestorFundCapitalActivitiesDto
@@ -69,7 +67,6 @@ public sealed partial class InvestorPortalService
         string? search,
         string? sortBy,
         string? sortDir,
-        int? fundKey,
         int page,
         int pageSize)
     {
@@ -100,18 +97,17 @@ public sealed partial class InvestorPortalService
         PortalPortfolioListSql.AppendReservedAmountExpression(pageSql, "p");
         pageSql.Append(" as reserved_amount ");
         AppendInvestorPortfolioFrom(pageSql, factTable);
-        AppendInvestorTransactionWhere(pageSql, view, period, fundKey);
+        AppendInvestorTransactionWhere(pageSql, view, period);
         pageSql.Append(" group by f.fund_key, f.fund_code ");
         orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteInvestorTransactionPageAsync(
-            BuildInvestorTransactionCountSql(factTable, view, period, fundKey),
+            BuildInvestorTransactionCountSql(factTable, view, period),
             pageSql,
             investorKey,
             period,
             search,
-            fundKey,
             page,
             pageSize,
             static reader => new InvestorFundDistributionsDto
@@ -139,7 +135,6 @@ public sealed partial class InvestorPortalService
         string? search,
         string? sortBy,
         string? sortDir,
-        int? fundKey,
         int page,
         int pageSize)
     {
@@ -162,18 +157,17 @@ public sealed partial class InvestorPortalService
         pageSql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
         AppendIrrColumns(pageSql, isLtd);
         AppendInvestorPortfolioFrom(pageSql, factTable);
-        AppendInvestorTransactionWhere(pageSql, view, period, fundKey);
+        AppendInvestorTransactionWhere(pageSql, view, period);
         pageSql.Append(" group by f.fund_key, f.fund_code ");
         orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         return await ExecuteInvestorTransactionPageAsync(
-            BuildInvestorTransactionCountSql(factTable, view, period, fundKey),
+            BuildInvestorTransactionCountSql(factTable, view, period),
             pageSql,
             investorKey,
             period,
             search,
-            fundKey,
             page,
             pageSize,
             static reader => new InvestorFundIrrDto
@@ -206,24 +200,12 @@ public sealed partial class InvestorPortalService
         WarehouseSql.AppendCurrentInvestorFilter(sql, "i");
     }
 
-    private static void AppendInvestorTransactionWhere(
-        StringBuilder sql,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int? fundKey = null)
+    // Shared WHERE clause: investor scope + period filter + fund code/name search.
+    private static void AppendInvestorTransactionWhere(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)
     {
         sql.Append(" where p.investor_key = @investorKey ");
         AppendPortfolioPeriodFilter(sql, view, period);
         WarehouseSql.AppendFundCodeOrNameSearchFilter(sql, "f");
-        AppendInvestorFundKeyFilter(sql, fundKey);
-    }
-
-    private static void AppendInvestorFundKeyFilter(StringBuilder sql, int? fundKey, string fundAlias = "f")
-    {
-        if (fundKey is > 0)
-        {
-            sql.Append($" and {fundAlias}.fund_key = @fundKey ");
-        }
     }
 
     // LTD fact table has no IRR columns; emit 0 for LTD until those columns are available.
@@ -262,17 +244,14 @@ public sealed partial class InvestorPortalService
         }
     }
 
-    private static StringBuilder BuildInvestorTransactionCountSql(
-        string factTable,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int? fundKey = null)
+    // Count of distinct funds matching the investor scope, period, and search.
+    private static StringBuilder BuildInvestorTransactionCountSql(string factTable, TimeGranularity view, FundPeriodFilter? period)
     {
         var sql = new StringBuilder();
         sql.Append(" select count(*) from ( ");
         sql.Append(" select f.fund_key ");
         AppendInvestorPortfolioFrom(sql, factTable);
-        AppendInvestorTransactionWhere(sql, view, period, fundKey);
+        AppendInvestorTransactionWhere(sql, view, period);
         sql.Append(" group by f.fund_key, f.fund_code ");
         sql.Append(" ) fund_rows ");
         return sql;
@@ -284,7 +263,6 @@ public sealed partial class InvestorPortalService
         long investorKey,
         FundPeriodFilter? period,
         string? search,
-        int? fundKey,
         int page,
         int pageSize,
         Func<SqlDataReader, T> mapRow)
@@ -299,14 +277,14 @@ public sealed partial class InvestorPortalService
         {
             CommandType = System.Data.CommandType.Text
         };
-        AddInvestorTransactionParameters(countCommand, investorKey, period, searchTerm, fundKey);
+        AddInvestorTransactionParameters(countCommand, investorKey, period, searchTerm);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
         {
             CommandType = System.Data.CommandType.Text
         };
-        AddInvestorTransactionParameters(pageCommand, investorKey, period, searchTerm, fundKey);
+        AddInvestorTransactionParameters(pageCommand, investorKey, period, searchTerm);
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -332,12 +310,10 @@ public sealed partial class InvestorPortalService
         SqlCommand command,
         long investorKey,
         FundPeriodFilter? period,
-        string? searchTerm,
-        int? fundKey = null)
+        string? searchTerm)
     {
         command.Parameters.AddWithValue("@investorKey", investorKey);
         command.Parameters.AddWithValue("@dateKey", (object?)period?.DateKey ?? DBNull.Value);
         command.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
-        command.Parameters.AddWithValue("@fundKey", fundKey is > 0 ? fundKey.Value : DBNull.Value);
     }
 }
