@@ -519,7 +519,7 @@ public sealed partial class DataExplorerService
             SourceView = sourceView,
             Columns = columns,
             Filters = filters,
-            FilterLogic = matchType.Equals("OR", StringComparison.OrdinalIgnoreCase) ? "or" : "and",
+            FilterLogic = DataExplorerFilterSql.MapFilterLogicFromStorage(matchType),
             GroupByField = groupByField,
             CreatedBy = createdBy,
             CreatedAt = createdAt,

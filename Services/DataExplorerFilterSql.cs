@@ -22,6 +22,7 @@ internal static class DataExplorerFilterSql
   public static bool IsAllowedOperator(string? op) =>
     !string.IsNullOrWhiteSpace(op) && AllowedOperators.Contains(op.Trim());
 
+  /// <summary>AND/OR for SQL WHERE — defaults to AND when empty (data query only).</summary>
   public static string NormalizeFilterLogic(string? filterLogic)
   {
     if (string.IsNullOrWhiteSpace(filterLogic))
@@ -32,7 +33,27 @@ internal static class DataExplorerFilterSql
     return filterLogic.Trim().Equals("or", StringComparison.OrdinalIgnoreCase) ? "OR" : "AND";
   }
 
-  public static string NormalizeMatchTypeForStorage(string? filterLogic) => NormalizeFilterLogic(filterLogic);
+  /// <summary>Persist filter logic as-is; empty string is stored when the client sends none.</summary>
+  public static string NormalizeMatchTypeForStorage(string? filterLogic)
+  {
+    if (string.IsNullOrWhiteSpace(filterLogic))
+    {
+      return string.Empty;
+    }
+
+    return filterLogic.Trim().Equals("or", StringComparison.OrdinalIgnoreCase) ? "OR" : "AND";
+  }
+
+  /// <summary>Maps stored match_type back to the frontend filterLogic value.</summary>
+  public static string? MapFilterLogicFromStorage(string? matchType)
+  {
+    if (string.IsNullOrWhiteSpace(matchType))
+    {
+      return string.Empty;
+    }
+
+    return matchType.Equals("OR", StringComparison.OrdinalIgnoreCase) ? "or" : "and";
+  }
 
   /// <summary>
   /// Appends a WHERE clause combining optional quick-search and structured filters.

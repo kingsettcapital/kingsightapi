@@ -103,7 +103,7 @@ public sealed class DataExplorerTemplateDto
     public string SourceView { get; init; } = string.Empty;
     public List<string> Columns { get; init; } = [];
     public List<DataExplorerFilterDto> Filters { get; init; } = [];
-    public string FilterLogic { get; init; } = "and";
+    public string? FilterLogic { get; init; }
     public string? GroupByField { get; init; }
     public string? CreatedBy { get; init; }
     public DateTime CreatedAt { get; init; }
