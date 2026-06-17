@@ -15,4 +15,14 @@ internal static class WarehouseTables
     public const string FactInvestorPortfolioQuarterly = "dbo.fact_investor_portfolio_quarterly";
     public const string FactFundNav = "dbo.fact_fund_nav";
     public const string FactAssetMetrics = "dbo.fact_asset_metrics";
+
+    // Data Explorer source view (investor + fund + capital data elements).
+    public const string ViewInvestorPortfolioLtdSchema = "dbo";
+    public const string ViewInvestorPortfolioLtdName = "view_investor_portfolio_ltd";
+    public const string ViewInvestorPortfolioLtd = "[dbo].[view_investor_portfolio_ltd]";
+
+    // Data Explorer saved templates (user metadata).
+    public const string DataExplorerTemplate = "dbo.data_explorer_template";
+    public const string DataExplorerTemplateColumn = "dbo.data_explorer_template_column";
+    public const string DataExplorerTemplateFilter = "dbo.data_explorer_template_filter";
 }
