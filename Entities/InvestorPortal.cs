@@ -23,6 +23,9 @@ public sealed class InvestorListItemDto
     [JsonPropertyName("contact_last_name")]
     public string ContactLastName { get; init; } = string.Empty;
 
+    [JsonPropertyName("contact_name")]
+    public string ContactName { get; init; } = string.Empty;
+
     [JsonPropertyName("fund_count")]
     public int FundCount { get; init; }
 
@@ -113,6 +116,9 @@ public sealed class InvestorFundExposureDto
 
     [JsonPropertyName("released_capital_amount")]
     public decimal? ReleasedCapitalAmount { get; init; }
+
+    [JsonPropertyName("invested_percent")]
+    public decimal? InvestedPercent { get; init; }
 }
 
 /// <summary>Underlying asset row for investor drill-down.</summary>
@@ -152,29 +158,107 @@ public sealed class InvestorUnderlyingAssetDto
 
 public sealed class InvestorSummaryDto
 {
+    [JsonPropertyName("investor_key")]
     public long InvestorKey { get; init; }
+
+    [JsonPropertyName("investor_id")]
     public int InvestorId { get; init; }
+
+    [JsonPropertyName("investor_name")]
     public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_type")]
     public string InvestorType { get; init; } = string.Empty;
+
+    [JsonPropertyName("relationship_name")]
+    public string RelationshipName { get; init; } = string.Empty;
+
     public string Status { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_first_name")]
+    public string ContactFirstName { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_last_name")]
+    public string ContactLastName { get; init; } = string.Empty;
+
+    [JsonPropertyName("contact_name")]
+    public string ContactName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_count")]
+    public int FundCount { get; init; }
+
+    [JsonPropertyName("total_invested")]
     public decimal TotalInvested { get; init; }
+
+    [JsonPropertyName("total_commitment")]
+    public decimal TotalCommitment { get; init; }
+
+    [JsonPropertyName("net_invested_capital")]
+    public decimal NetInvestedCapital { get; init; }
+
+    [JsonPropertyName("net_distributed")]
+    public decimal NetDistributed { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal? ReleasedCapitalAmount { get; init; }
+
+    [JsonPropertyName("investments_count")]
     public int InvestmentsCount { get; init; }
+
+    [JsonPropertyName("documents_count")]
     public int DocumentsCount { get; init; }
+
+    [JsonPropertyName("join_year")]
     public int? JoinYear { get; init; }
 }
 
 /// <summary>Investments tab on investor profile (one row per fund).</summary>
 public sealed class InvestorInvestmentDto
 {
+    [JsonPropertyName("fund_key")]
     public int FundKey { get; init; }
 
     [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
 
+    [JsonPropertyName("fund_name")]
     public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_type")]
     public string FundType { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_category")]
     public string FundCategory { get; init; } = string.Empty;
+
     public string Status { get; init; } = string.Empty;
+
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount { get; init; }
+
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal? ReleasedCapitalAmount { get; init; }
+
+    [JsonPropertyName("invested_percent")]
+    public decimal? InvestedPercent { get; init; }
+
     public decimal InvestedAmount { get; init; }
     public decimal InvestedAmountFmv { get; init; }
     public decimal? TotalReturnPercent { get; init; }

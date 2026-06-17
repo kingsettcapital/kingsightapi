@@ -85,17 +85,24 @@ public sealed partial class InvestorPortalService
             null,
             page,
             pageSize,
-            static reader => new InvestorFundExposureDto
+            static reader =>
             {
-                FundKey = reader.GetInt32OrDefault("fund_key"),
-                FundCode = reader.GetStringOrEmpty("fund_code"),
-                FundName = reader.GetStringOrEmpty("fund_name"),
-                CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
-                NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
-                NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
-                ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
-                UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
-                ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount")
+                var commitment = reader.GetDecimalOrDefault("commitment_amount");
+                var netInvested = reader.GetDecimalOrDefault("net_invested_capital_amount");
+
+                return new InvestorFundExposureDto
+                {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
+                    FundCode = reader.GetStringOrEmpty("fund_code"),
+                    FundName = reader.GetStringOrEmpty("fund_name"),
+                    CommitmentAmount = commitment,
+                    NetInvestedCapitalAmount = netInvested,
+                    NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+                    ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
+                    UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
+                    ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount"),
+                    InvestedPercent = PortalPortfolioMetrics.ComputeInvestedPercent(commitment, netInvested)
+                };
             });
     }
 
@@ -118,7 +125,6 @@ public sealed partial class InvestorPortalService
         countSql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(countSql, "f");
         AppendInvestorPropertyScopeWhere(countSql, "p", "f");
-        WarehouseSql.AppendLatestAssetMetricsApply(countSql, "p");
 
         await using var countCommand = new SqlCommand(countSql.ToString(), connection)
         {
@@ -142,8 +148,8 @@ public sealed partial class InvestorPortalService
         WarehouseSql.AppendPropertyFundJoin(pageSql, "p", "f");
         pageSql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(pageSql, "f");
-        AppendInvestorPropertyScopeWhere(pageSql, "p", "f");
         WarehouseSql.AppendLatestAssetMetricsApply(pageSql, "p");
+        AppendInvestorPropertyScopeWhere(pageSql, "p", "f");
         pageSql.Append(" order by p.property_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 

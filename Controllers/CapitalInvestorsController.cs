@@ -159,16 +159,26 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors/{investorKey}/funds?page=1&pageSize=50
+    // GET: api/CapitalInvestors/{investorKey}/funds?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
     [HttpGet("{investorKey:long}/funds")]
     public async Task<ActionResult<PagedResult<InvestorInvestmentDto>>> GetFunds(
         long investorKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
         try
         {
-            var result = await _service.GetInvestorFundsAsync(investorKey, page, pageSize);
+            var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+            var result = await _service.GetInvestorFundsAsync(investorKey, resolvedView, period, page, pageSize);
             return Ok(result);
         }
         catch (OperationCanceledException)

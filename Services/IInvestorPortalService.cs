@@ -18,7 +18,12 @@ public interface IInvestorPortalService
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period);
-    Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize);
+    Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
     Task<PagedResult<FundPeriodDto>> GetInvestorPeriodsAsync(
         long investorKey,
         TimeGranularity view,

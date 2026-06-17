@@ -57,4 +57,77 @@ public sealed class CapitalInvestorsListTests
         Assert.Equal(500000000m, root.GetProperty("unfunded").GetDecimal());
         Assert.Equal(120000000m, root.GetProperty("released_capital").GetDecimal());
     }
+
+    [Fact]
+    public void InvestorSummaryDto_serializes_identity_and_capital_fields()
+    {
+        var summary = new InvestorSummaryDto
+        {
+            InvestorKey = 758,
+            InvestorName = "Jona Capital Inc.",
+            RelationshipName = "Jon Love's Funds",
+            ContactName = "Jon Love",
+            FundCount = 9,
+            TotalCommitment = 1000000m,
+            NetInvestedCapital = 800000m,
+            ReservedAmount = 50000m,
+            UnfundedAmount = 200000m,
+            ReleasedCapitalAmount = 0m
+        };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(summary));
+        var root = document.RootElement;
+
+        Assert.Equal("Jon Love's Funds", root.GetProperty("relationship_name").GetString());
+        Assert.Equal("Jon Love", root.GetProperty("contact_name").GetString());
+        Assert.Equal(9, root.GetProperty("fund_count").GetInt32());
+        Assert.Equal(50000m, root.GetProperty("reserved_amount").GetDecimal());
+    }
+
+    [Fact]
+    public void InvestorInvestmentDto_serializes_subscription_metrics()
+    {
+        var dto = new InvestorInvestmentDto
+        {
+            FundKey = 12,
+            FundCode = "CREIF",
+            CommitmentAmount = 667660m,
+            NetInvestedCapitalAmount = 673970m,
+            ReservedAmount = 67660m,
+            InvestedPercent = 100.9m
+        };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(dto));
+        var root = document.RootElement;
+
+        Assert.Equal("CREIF", root.GetProperty("fund_code").GetString());
+        Assert.Equal(67660m, root.GetProperty("reserved_amount").GetDecimal());
+        Assert.Equal(100.9m, root.GetProperty("invested_percent").GetDecimal());
+    }
+
+    [Fact]
+    public void FundSummaryDto_serializes_fund_overview_aliases_and_dpi()
+    {
+        var summary = new FundSummaryDto
+        {
+            FundType = "Unlisted",
+            FundStrategyName = "Income",
+            Netinvestedamount = 673970m,
+            NetDistributed = 0m,
+            ReleasedCapitalAmount = 0m,
+            CurrentValue = 673970m
+        };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(summary));
+        var root = document.RootElement;
+
+        Assert.Equal("Unlisted", root.GetProperty("fund_type_name").GetString());
+        Assert.Equal("Unlisted", root.GetProperty("fund_type").GetString());
+        Assert.Equal("Income", root.GetProperty("strategy").GetString());
+        Assert.Equal(673970m, root.GetProperty("net_invested_capital_amount").GetDecimal());
+        Assert.Equal(0m, root.GetProperty("net_distributed_amount").GetDecimal());
+        Assert.Equal(0m, root.GetProperty("released_capital").GetDecimal());
+        Assert.Equal(0m, root.GetProperty("dpi").GetDecimal());
+        Assert.Equal(1m, root.GetProperty("tvpi").GetDecimal());
+    }
 }

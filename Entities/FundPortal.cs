@@ -32,6 +32,12 @@ public sealed class FundListItemDto
     [JsonPropertyName("released_capital_amount")]
     public decimal ReleasedCapitalAmount { get; init; }
 
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("invested_percent")]
+    public decimal? InvestedPercent { get; init; }
+
     /// <summary>Legacy alias for <see cref="FundStrategyName"/>.</summary>
     public string Category => FundStrategyName;
 
@@ -48,11 +54,23 @@ public sealed class FundDetailDto
 
 public sealed class FundSummaryDto
 {
+    [JsonPropertyName("fund_id")]
     public int FundId { get; init; }
+
+    [JsonPropertyName("fund_code")]
     public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
     public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_type_name")]
     public string FundType { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_type")]
+    public string FundTypeLabel => FundType;
+
     public string Status { get; init; } = string.Empty;
+
     public int Assets { get; init; }
     public int Investors { get; init; }
 
@@ -62,17 +80,82 @@ public sealed class FundSummaryDto
     [JsonPropertyName("commitment")]
     public decimal Commitment { get; init; }
 
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount => Commitment;
+
     [JsonPropertyName("called")]
     public decimal Called { get; init; }
 
     [JsonPropertyName("netinvestedamount")]
     public decimal Netinvestedamount { get; init; }
 
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount => Netinvestedamount;
+
+    [JsonPropertyName("net_invested_capital")]
+    public decimal NetInvestedCapital => Netinvestedamount;
+
     [JsonPropertyName("netinvestedunits")]
     public decimal Netinvestedunits { get; init; }
 
     [JsonPropertyName("reserveamount")]
     public decimal Reserveamount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount => Reserveamount;
+
+    [JsonPropertyName("fund_strategy_name")]
+    public string FundStrategyName { get; init; } = string.Empty;
+
+    [JsonPropertyName("strategy")]
+    public string Strategy => FundStrategyName;
+
+    [JsonPropertyName("net_distributed")]
+    public decimal NetDistributed { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount => NetDistributed;
+
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal ReleasedCapitalAmount { get; init; }
+
+    [JsonPropertyName("released_capital")]
+    public decimal ReleasedCapital => ReleasedCapitalAmount;
+
+    [JsonPropertyName("current_value")]
+    public decimal CurrentValue { get; init; }
+
+    [JsonPropertyName("total_return_percent")]
+    public decimal? TotalReturnPercent { get; init; }
+
+    [JsonPropertyName("invested_percent")]
+    public decimal? InvestedPercent { get; init; }
+
+    /// <summary>Distributed to Paid-In: net distributed / net invested capital.</summary>
+    [JsonPropertyName("dpi")]
+    public decimal? Dpi =>
+        Netinvestedamount > 0m
+            ? Math.Round(NetDistributed / Netinvestedamount, 4, MidpointRounding.AwayFromZero)
+            : null;
+
+    /// <summary>Total value to Paid-In: (current value or NIC + distributions) / net invested capital.</summary>
+    [JsonPropertyName("tvpi")]
+    public decimal? Tvpi
+    {
+        get
+        {
+            if (Netinvestedamount <= 0m)
+            {
+                return null;
+            }
+
+            var totalValue = CurrentValue > 0m ? CurrentValue : Netinvestedamount + NetDistributed;
+            return Math.Round(totalValue / Netinvestedamount, 4, MidpointRounding.AwayFromZero);
+        }
+    }
 }
 
 /// <summary>Investors tab on fund detail.</summary>
@@ -132,6 +215,20 @@ public sealed class FundAssetDto
 
     [JsonPropertyName("property_disposition")]
     public string? PropertyDisposition { get; init; }
+
+    [JsonPropertyName("gla_sf")]
+    public decimal? GlaSf { get; init; }
+
+    [JsonPropertyName("occupancy_pct")]
+    public decimal? OccupancyPct { get; init; }
+
+    [JsonPropertyName("market_value")]
+    public decimal? MarketValue { get; init; }
+
+    [JsonPropertyName("cap_rate")]
+    public decimal? CapRate { get; init; }
+
+    public string Status => PropertyStatus;
 }
 
 /// <summary>Period dropdown option (quarter or day) scoped by fund, view, and metric.</summary>

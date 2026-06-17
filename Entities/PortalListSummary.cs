@@ -57,6 +57,12 @@ public sealed class FundListSummaryDto
 
     [JsonPropertyName("reserved_uncalled")]
     public decimal ReservedUncalled { get; init; }
+
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded { get; init; }
+
+    [JsonPropertyName("released_capital")]
+    public decimal ReleasedCapital { get; init; }
 }
 
 /// <summary>Assets list page KPI row (Figma summary cards).</summary>
