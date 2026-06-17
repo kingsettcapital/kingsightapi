@@ -77,8 +77,14 @@ public sealed class InvestorDetailMetricsDto
     [JsonPropertyName("reserved_amount")]
     public decimal ReservedAmount { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved => ReservedAmount;
+
     [JsonPropertyName("unfunded_amount")]
     public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded => UnfundedAmount;
 
     [JsonPropertyName("released_capital_amount")]
     public decimal? ReleasedCapitalAmount { get; init; }
@@ -202,8 +208,14 @@ public sealed class InvestorSummaryDto
     [JsonPropertyName("reserved_amount")]
     public decimal ReservedAmount { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved => ReservedAmount;
+
     [JsonPropertyName("unfunded_amount")]
     public decimal UnfundedAmount { get; init; }
+
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded => UnfundedAmount;
 
     [JsonPropertyName("released_capital_amount")]
     public decimal? ReleasedCapitalAmount { get; init; }

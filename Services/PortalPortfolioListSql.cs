@@ -75,7 +75,7 @@ internal static class PortalPortfolioListSql
         sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed, ");
         AppendReservedAmountExpression(sql, factAlias);
-        sql.Append(" as reserved_uncalled, ");
+        sql.Append(" as reserved, ");
         AppendUnfundedAmountExpression(sql, factAlias);
         sql.Append(" as unfunded, ");
         sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital ");

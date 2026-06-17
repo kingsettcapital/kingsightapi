@@ -406,7 +406,7 @@ public sealed partial class FundPortalService : IFundPortalService
                 TotalCommitment = summary.TotalCommitment,
                 NetInvestedCapital = summary.NetInvestedCapital,
                 NetDistributed = summary.NetDistributed,
-                ReservedUncalled = summary.ReservedUncalled,
+                Reserved = summary.Reserved,
                 Unfunded = summary.Unfunded,
                 ReleasedCapital = summary.ReleasedCapital
             },
@@ -447,7 +447,7 @@ public sealed partial class FundPortalService : IFundPortalService
             TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
             NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
             NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
-            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled"),
+            Reserved = reader.GetDecimalOrDefault("reserved"),
             Unfunded = reader.GetDecimalOrDefault("unfunded"),
             ReleasedCapital = reader.GetDecimalOrDefault("released_capital")
         };
@@ -1337,7 +1337,7 @@ public sealed partial class FundPortalService : IFundPortalService
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" commitment_amount = sum(commitment_amount), ");
         pageSql.Append(" Description = 'Total Commitment as of Date' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
@@ -1496,7 +1496,7 @@ public sealed partial class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(unfunded_amount), ");
         pageSql.Append(" Description = 'Total Unfunded Commitment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
@@ -1637,7 +1637,7 @@ public sealed partial class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(nav), ");
         pageSql.Append(" Description = 'Total NAV' ");
         pageSql.Append($" from {WarehouseTables.FactFundNav} ");
@@ -1792,7 +1792,7 @@ public sealed partial class FundPortalService : IFundPortalService
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)), ");
         pageSql.Append(" Description = 'Total Investment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
@@ -1939,7 +1939,7 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
-        pageSql.Append(" Period = 'LTD', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: false);
         AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
@@ -2165,7 +2165,7 @@ public sealed partial class FundPortalService : IFundPortalService
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Commitment";
         }
@@ -2188,7 +2188,7 @@ public sealed partial class FundPortalService : IFundPortalService
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Investment";
         }

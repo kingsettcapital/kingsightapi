@@ -47,6 +47,7 @@ public sealed class CapitalInvestorsListTests
         var summary = new InvestorListSummaryDto
         {
             TotalInvestors = 644,
+            Reserved = 120000000m,
             Unfunded = 500000000m,
             ReleasedCapital = 120000000m
         };
@@ -56,6 +57,8 @@ public sealed class CapitalInvestorsListTests
 
         Assert.Equal(500000000m, root.GetProperty("unfunded").GetDecimal());
         Assert.Equal(120000000m, root.GetProperty("released_capital").GetDecimal());
+        Assert.Equal(120000000m, root.GetProperty("reserved").GetDecimal());
+        Assert.Equal(120000000m, root.GetProperty("reserved_uncalled").GetDecimal());
     }
 
     [Fact]

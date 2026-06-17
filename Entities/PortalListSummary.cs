@@ -30,8 +30,11 @@ public sealed class InvestorListSummaryDto
     [JsonPropertyName("net_distributed")]
     public decimal NetDistributed { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved { get; init; }
+
     [JsonPropertyName("reserved_uncalled")]
-    public decimal ReservedUncalled { get; init; }
+    public decimal ReservedUncalled => Reserved;
 
     [JsonPropertyName("unfunded")]
     public decimal Unfunded { get; init; }
@@ -55,8 +58,11 @@ public sealed class FundListSummaryDto
     [JsonPropertyName("net_distributed")]
     public decimal NetDistributed { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved { get; init; }
+
     [JsonPropertyName("reserved_uncalled")]
-    public decimal ReservedUncalled { get; init; }
+    public decimal ReservedUncalled => Reserved;
 
     [JsonPropertyName("unfunded")]
     public decimal Unfunded { get; init; }

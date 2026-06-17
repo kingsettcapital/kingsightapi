@@ -459,7 +459,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" commitment_amount = sum(p.commitment_amount), ");
         pageSql.Append(" Description = 'Total Commitment as of Date' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
@@ -629,7 +629,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(p.unfunded_amount), ");
         pageSql.Append(" Description = 'Total Unfunded Commitment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
@@ -788,7 +788,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(n.nav), ");
         pageSql.Append(" Description = 'Total NAV' ");
         pageSql.Append($" from {WarehouseTables.FactFundNav} n ");
@@ -1006,7 +1006,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)), ");
         pageSql.Append(" Description = 'Total Investment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
@@ -1161,7 +1161,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
         pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
-        pageSql.Append(" Period = 'LTD', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: false);
         AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
@@ -1392,7 +1392,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Commitment";
         }
@@ -1416,7 +1416,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Investment";
         }

@@ -99,6 +99,9 @@ public sealed class InvestorFundIrrDto
 
     [JsonPropertyName("irr_ltd_pct")]
     public decimal? IrrLtdPct { get; init; }
+
+    [JsonPropertyName("irr_itd_pct")]
+    public decimal? IrrItdPct => IrrLtdPct;
 }
 
 /// <summary>Capital Activities row — fund detail, one row per investor.</summary>
@@ -180,4 +183,7 @@ public sealed class FundInvestorIrrDto
 
     [JsonPropertyName("irr_ltd_pct")]
     public decimal? IrrLtdPct { get; init; }
+
+    [JsonPropertyName("irr_itd_pct")]
+    public decimal? IrrItdPct => IrrLtdPct;
 }

@@ -236,7 +236,7 @@ public sealed partial class InvestorPortalService
             TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
             NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
             NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
-            ReservedAmount = reader.GetDecimalOrDefault("reserved_uncalled"),
+            ReservedAmount = reader.GetDecimalOrDefault("reserved"),
             UnfundedAmount = reader.GetDecimalOrDefault("unfunded"),
             ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital")
         };
