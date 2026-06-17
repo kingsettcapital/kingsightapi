@@ -159,16 +159,67 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors/{investorKey}/funds?page=1&pageSize=50
+    // GET: api/CapitalInvestors/{investorKey}/funds/{fundKey}?view=ltd|quarterly|daily&dateKey=
+    [HttpGet("{investorKey:long}/funds/{fundKey:int}")]
+    public async Task<ActionResult<InvestorFundSubscriptionDetailDto>> GetFundSubscription(
+        long investorKey,
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey);
+            var result = await _service.GetInvestorFundSubscriptionAsync(investorKey, fundKey, resolvedView, period);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation(
+                "Get fund subscription for investor {InvestorKey} fund {FundKey} cancelled",
+                investorKey,
+                fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving fund subscription for investor {InvestorKey} fund {FundKey}",
+                investorKey,
+                fundKey);
+            return StatusCode(500, "An error occurred while retrieving the investor fund subscription.");
+        }
+    }
+
+    // GET: api/CapitalInvestors/{investorKey}/funds?view=ltd|quarterly&dateKey=&page=1&pageSize=50
     [HttpGet("{investorKey:long}/funds")]
     public async Task<ActionResult<PagedResult<InvestorInvestmentDto>>> GetFunds(
         long investorKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
         try
         {
-            var result = await _service.GetInvestorFundsAsync(investorKey, page, pageSize);
+            var period = BuildPeriodFilter(dateKey);
+            var result = await _service.GetInvestorFundsAsync(investorKey, resolvedView, period, page, pageSize);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -383,6 +434,7 @@ public class CapitalInvestorsController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] int? fundKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
@@ -395,7 +447,8 @@ public class CapitalInvestorsController : ControllerBase
         try
         {
             var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetInvestorCapitalActivitiesAsync(investorKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var result = await _service.GetInvestorCapitalActivitiesAsync(
+                investorKey, view.Value, period, search, sortBy, sortDir, fundKey, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -424,6 +477,7 @@ public class CapitalInvestorsController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] int? fundKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
@@ -436,7 +490,8 @@ public class CapitalInvestorsController : ControllerBase
         try
         {
             var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetInvestorDistributionsSummaryAsync(investorKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var result = await _service.GetInvestorDistributionsSummaryAsync(
+                investorKey, view.Value, period, search, sortBy, sortDir, fundKey, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -465,6 +520,7 @@ public class CapitalInvestorsController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] int? fundKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
@@ -477,7 +533,8 @@ public class CapitalInvestorsController : ControllerBase
         try
         {
             var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetInvestorIrrAsync(investorKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var result = await _service.GetInvestorIrrAsync(
+                investorKey, view.Value, period, search, sortBy, sortDir, fundKey, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
