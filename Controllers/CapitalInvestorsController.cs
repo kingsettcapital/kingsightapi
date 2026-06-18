@@ -324,6 +324,31 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
+    // GET: api/CapitalInvestors/{investorKey}/underlying-assets?page=1&pageSize=25&search=
+    [HttpGet("{investorKey:long}/underlying-assets")]
+    public async Task<ActionResult<PagedResult<InvestorUnderlyingAssetGridItemDto>>> GetUnderlyingAssets(
+        long investorKey,
+        [FromQuery] string? search,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25)
+    {
+        try
+        {
+            var result = await _service.GetInvestorUnderlyingAssetsAsync(investorKey, search, page, pageSize);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get underlying assets for investor {InvestorKey} cancelled", investorKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving underlying assets for investor {InvestorKey}", investorKey);
+            return StatusCode(500, "An error occurred while retrieving underlying assets.");
+        }
+    }
+
     // GET: api/CapitalInvestors/{investorKey}/distributions?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
     [HttpGet("{investorKey:long}/distributions")]
     public async Task<ActionResult<PagedResult<FundDistributionGroupDto>>> GetDistributions(

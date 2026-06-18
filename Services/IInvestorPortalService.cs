@@ -161,4 +161,11 @@ public interface IInvestorPortalService
         FundPeriodFilter? period,
         int page,
         int pageSize);
+
+    /// <summary>Underlying assets grid from <c>view_investor_fund_asset</c> (investor detail overview).</summary>
+    Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsAsync(
+        long investorKey,
+        string? search,
+        int page,
+        int pageSize);
 }

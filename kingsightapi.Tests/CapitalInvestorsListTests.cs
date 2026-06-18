@@ -142,4 +142,31 @@ public sealed class CapitalInvestorsListTests
         Assert.Equal(0m, root.GetProperty("dpi").GetDecimal());
         Assert.Equal(1m, root.GetProperty("tvpi").GetDecimal());
     }
+
+    [Fact]
+    public void InvestorUnderlyingAssetGridItemDto_serializes_snake_case_and_camelCase_aliases()
+    {
+        var dto = new InvestorUnderlyingAssetGridItemDto
+        {
+            PropertyName = "Example Property",
+            City = "Toronto",
+            Province = "ON",
+            Geography = "Canada",
+            AssetType = "Office",
+            AssetSubType = "Class A",
+            InvestmentType = "Direct"
+        };
+
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(dto));
+        var root = document.RootElement;
+
+        Assert.Equal("Example Property", root.GetProperty("property_name").GetString());
+        Assert.Equal("Example Property", root.GetProperty("propertyName").GetString());
+        Assert.Equal("Toronto", root.GetProperty("city").GetString());
+        Assert.Equal("ON", root.GetProperty("province").GetString());
+        Assert.Equal("Office", root.GetProperty("asset_type").GetString());
+        Assert.Equal("Office", root.GetProperty("assetType").GetString());
+        Assert.Equal("Class A", root.GetProperty("asset_sub_type").GetString());
+        Assert.Equal("Direct", root.GetProperty("investment_type").GetString());
+    }
 }

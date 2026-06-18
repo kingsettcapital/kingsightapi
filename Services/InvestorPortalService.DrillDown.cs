@@ -53,6 +53,28 @@ public sealed partial class InvestorPortalService
         }
     }
 
+    public async Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsAsync(
+        long investorKey,
+        string? search,
+        int page,
+        int pageSize)
+    {
+        try
+        {
+            return await GetInvestorUnderlyingAssetsInternalAsync(investorKey, search, page, pageSize);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get underlying assets for investor {InvestorKey} cancelled", investorKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving underlying assets for investor {InvestorKey}", investorKey);
+            throw;
+        }
+    }
+
     private async Task<PagedResult<InvestorFundExposureDto>> GetInvestorFundExposureInternalAsync(
         long investorKey,
         TimeGranularity view,
@@ -193,6 +215,92 @@ public sealed partial class InvestorPortalService
         }
 
         return new PagedResult<InvestorUnderlyingAssetDto>
+        {
+            Items = items,
+            Page = normalizedPage,
+            PageSize = normalizedPageSize,
+            TotalCount = totalCount
+        };
+    }
+
+    private async Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsInternalAsync(
+        long investorKey,
+        string? search,
+        int page,
+        int pageSize)
+    {
+        var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+        var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        var countSql = new StringBuilder();
+        countSql.Append(" select count(*) from ( ");
+        countSql.Append(" select distinct ");
+        countSql.Append(" a.property_name, ");
+        countSql.Append(" a.city, ");
+        countSql.Append(" a.province, ");
+        countSql.Append(" a.geography, ");
+        countSql.Append(" a.asset_type, ");
+        countSql.Append(" a.asset_sub_type, ");
+        countSql.Append(" a.investment_type ");
+        WarehouseSql.AppendInvestorFundAssetFrom(countSql);
+        WarehouseSql.AppendInvestorFundAssetScopeWhere(countSql);
+        WarehouseSql.AppendInvestorFundAssetSearchFilter(countSql);
+        countSql.Append(" ) asset_rows ");
+
+        await using var countCommand = new SqlCommand(countSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        countCommand.Parameters.AddWithValue("@investorKey", investorKey);
+        countCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
+
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select distinct ");
+        pageSql.Append(" a.property_name, ");
+        pageSql.Append(" a.city, ");
+        pageSql.Append(" a.province, ");
+        pageSql.Append(" a.geography, ");
+        pageSql.Append(" a.asset_type, ");
+        pageSql.Append(" a.asset_sub_type, ");
+        pageSql.Append(" a.investment_type ");
+        WarehouseSql.AppendInvestorFundAssetFrom(pageSql);
+        WarehouseSql.AppendInvestorFundAssetScopeWhere(pageSql);
+        WarehouseSql.AppendInvestorFundAssetSearchFilter(pageSql);
+        pageSql.Append(" order by a.property_name ");
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        pageCommand.Parameters.AddWithValue("@investorKey", investorKey);
+        pageCommand.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        pageCommand.Parameters.AddWithValue("@offset", offset);
+        pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
+
+        var items = new List<InvestorUnderlyingAssetGridItemDto>();
+        await using (var reader = await pageCommand.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                items.Add(new InvestorUnderlyingAssetGridItemDto
+                {
+                    PropertyName = reader.GetNullableTrimmedString("property_name"),
+                    City = reader.GetNullableTrimmedString("city"),
+                    Province = reader.GetNullableTrimmedString("province"),
+                    Geography = reader.GetNullableTrimmedString("geography"),
+                    AssetType = reader.GetNullableTrimmedString("asset_type"),
+                    AssetSubType = reader.GetNullableTrimmedString("asset_sub_type"),
+                    InvestmentType = reader.GetNullableTrimmedString("investment_type")
+                });
+            }
+        }
+
+        return new PagedResult<InvestorUnderlyingAssetGridItemDto>
         {
             Items = items,
             Page = normalizedPage,

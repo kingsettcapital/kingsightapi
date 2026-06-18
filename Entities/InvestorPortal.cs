@@ -268,6 +268,43 @@ public sealed class InvestorUnderlyingAssetDto
     public string Status { get; init; } = string.Empty;
 }
 
+/// <summary>Underlying asset row for investor detail Underlying Assets grid (<c>view_investor_fund_asset</c>).</summary>
+public sealed class InvestorUnderlyingAssetGridItemDto
+{
+    [JsonPropertyName("property_name")]
+    public string? PropertyName { get; init; }
+
+    [JsonPropertyName("propertyName")]
+    public string? PropertyNameAlias => PropertyName;
+
+    [JsonPropertyName("city")]
+    public string? City { get; init; }
+
+    [JsonPropertyName("province")]
+    public string? Province { get; init; }
+
+    [JsonPropertyName("geography")]
+    public string? Geography { get; init; }
+
+    [JsonPropertyName("asset_type")]
+    public string? AssetType { get; init; }
+
+    [JsonPropertyName("assetType")]
+    public string? AssetTypeAlias => AssetType;
+
+    [JsonPropertyName("asset_sub_type")]
+    public string? AssetSubType { get; init; }
+
+    [JsonPropertyName("assetSubType")]
+    public string? AssetSubTypeAlias => AssetSubType;
+
+    [JsonPropertyName("investment_type")]
+    public string? InvestmentType { get; init; }
+
+    [JsonPropertyName("investmentType")]
+    public string? InvestmentTypeAlias => InvestmentType;
+}
+
 public sealed class InvestorSummaryDto
 {
     [JsonPropertyName("investor_key")]

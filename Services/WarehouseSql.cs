@@ -143,6 +143,36 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    public static void AppendInvestorFundAssetSearchFilter(StringBuilder sql, string assetAlias = "a")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull({assetAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.city, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.province, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.asset_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.asset_sub_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.investment_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendInvestorFundAssetFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.ViewInvestorFundAsset} a ");
+        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, "b");
+        sql.Append($" inner join {WarehouseTables.DimInvestor} c on a.investor_key = c.investor_key ");
+        sql.Append(" and ");
+        AppendCurrentInvestorFilter(sql, "c");
+    }
+
+    public static void AppendInvestorFundAssetScopeWhere(StringBuilder sql, string assetAlias = "a")
+    {
+        sql.Append($" where {assetAlias}.investor_key = @investorKey ");
+        sql.Append($" and isnull({assetAlias}.is_current, 1) = 1 ");
+    }
+
     public static void AppendPropertyAssetTypeFilter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append(" and (@assetType is null ");
