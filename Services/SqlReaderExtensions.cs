@@ -50,6 +50,16 @@ internal static class SqlReaderExtensions
         return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
     }
 
+    public static int? GetNullableInt32(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
     public static DateTime? GetNullableDateTime(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);

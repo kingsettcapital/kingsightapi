@@ -98,6 +98,22 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    /// <summary>Exact fund code filter for transaction table dropdowns.</summary>
+    public static void AppendFundCodeFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append(" and (@fundCode is null ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_code, '')) = lower(@fundCode) ");
+        sql.Append(" ) ");
+    }
+
+    /// <summary>Exact investor name filter for fund-scoped transaction table dropdowns.</summary>
+    public static void AppendInvestorNameFilter(StringBuilder sql, string investorAlias = "i")
+    {
+        sql.Append(" and (@investorName is null ");
+        sql.Append($" or lower(isnull({investorAlias}.investor_name, '')) = lower(@investorName) ");
+        sql.Append(" ) ");
+    }
+
     public static void AppendFundTypeFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" and (@fundType is null ");
@@ -199,8 +215,19 @@ internal static class WarehouseSql
         string propertyAlias = "p",
         string applyAlias = "metrics")
     {
+        AppendLatestAssetMetricsApply(sql, propertyAlias, applyAlias, includeLeasingColumns: false);
+    }
+
+    /// <summary>Latest metrics row including leasing columns from <c>fact_asset_metrics</c>.</summary>
+    public static void AppendLatestAssetMetricsApply(
+        StringBuilder sql,
+        string propertyAlias,
+        string applyAlias,
+        bool includeLeasingColumns)
+    {
         sql.Append($" outer apply ( ");
         sql.Append(" select top 1 ");
+        sql.Append(" date_key, ");
         sql.Append(" gross_leasable_area_sqft, ");
         sql.Append(" occupied_area_sqft, ");
         sql.Append(" committed_area_sqft, ");
@@ -210,6 +237,19 @@ internal static class WarehouseSql
         sql.Append(" vacant_units, ");
         sql.Append(" weighted_avg_lease_term_months, ");
         sql.Append(" weighted_avg_lease_term_rent_months ");
+        if (includeLeasingColumns)
+        {
+            sql.Append(", gla_available_to_lease_sqft ");
+            sql.Append(", total_leasing_committed_sqft ");
+            sql.Append(", new_leasing_committed_sqft ");
+            sql.Append(", renewal_leasing_committed_sqft ");
+            sql.Append(", gla_available_to_lease_units ");
+            sql.Append(", total_leasing_committed_units ");
+            sql.Append(", new_leasing_committed_units ");
+            sql.Append(", renewal_leasing_committed_units ");
+            sql.Append(", last_refreshed_date ");
+        }
+
         sql.Append($" from {WarehouseTables.FactAssetMetrics} m ");
         sql.Append($" where m.property_key = {propertyAlias}.property_key ");
         sql.Append(" order by m.date_key desc ");

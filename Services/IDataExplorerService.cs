@@ -8,8 +8,11 @@ namespace kingsightapi.Services;
 /// </summary>
 public interface IDataExplorerService
 {
-    /// <summary>Columns available in the explorer view, grouped into Investors / Fund / Capital.</summary>
-    Task<IReadOnlyList<DataExplorerColumnGroupDto>> GetColumnsAsync();
+    /// <summary>Explorer product dropdown (Investor Data Product / Asset Data Product).</summary>
+    Task<IReadOnlyList<PortalFilterOptionDto>> GetProductsAsync();
+
+    /// <summary>Columns available in the explorer view, grouped by product.</summary>
+    Task<IReadOnlyList<DataExplorerColumnGroupDto>> GetColumnsAsync(string? product);
 
     /// <summary>Paginated rows for the selected columns, filters, and optional group-by.</summary>
     Task<DataExplorerDataResult> GetDataAsync(DataExplorerDataRequest request);
@@ -20,8 +23,8 @@ public interface IDataExplorerService
     /// <summary>Updates an existing template (replaces columns and filters).</summary>
     Task<DataExplorerTemplateDto> UpdateTemplateAsync(long templateId, DataExplorerSaveTemplateRequest request, string? modifiedBy);
 
-    /// <summary>Active saved templates for the Saved panel.</summary>
-    Task<IReadOnlyList<DataExplorerTemplateSummaryDto>> GetTemplatesAsync();
+    /// <summary>Active saved templates for the Saved panel, optionally filtered by product.</summary>
+    Task<IReadOnlyList<DataExplorerTemplateSummaryDto>> GetTemplatesAsync(string? product);
 
     /// <summary>Loads one template by id (for reopening in the explorer).</summary>
     Task<DataExplorerTemplateDto?> GetTemplateAsync(long templateId);

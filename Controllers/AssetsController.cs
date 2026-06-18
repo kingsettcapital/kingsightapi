@@ -81,7 +81,7 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}
     [HttpGet("{propertyKey:long}")]
-    public async Task<ActionResult<PropertyDetailDto>> GetByKey(long propertyKey)
+    public async Task<ActionResult<PropertyProfileDto>> GetByKey(long propertyKey)
     {
         try
         {
@@ -97,6 +97,27 @@ public class AssetsController : ControllerBase
         {
             ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving the asset.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/leasing-summary
+    [HttpGet("{propertyKey:long}/leasing-summary")]
+    public async Task<ActionResult<AssetLeasingSummaryDto>> GetLeasingSummary(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyLeasingSummaryAsync(propertyKey);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get leasing summary for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving leasing summary for asset {PropertyKey}", propertyKey);
+            return StatusCode(500, "An error occurred while retrieving the asset leasing summary.");
         }
     }
 

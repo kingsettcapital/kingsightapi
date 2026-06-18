@@ -18,7 +18,7 @@ public sealed partial class DataExplorerService
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
 
-        if (await TemplateNameExistsAsync(connection, validated.Name, excludeTemplateId: null))
+        if (await TemplateNameExistsAsync(connection, validated.Name, validated.SourceView, excludeTemplateId: null))
         {
             throw new ArgumentException($"A template named '{validated.Name}' already exists.");
         }
@@ -32,6 +32,7 @@ public sealed partial class DataExplorerService
                 transaction,
                 validated.Name,
                 validated.Description,
+                validated.SourceView,
                 matchType,
                 validated.GroupByColumn?.Name,
                 createdByValue,
@@ -75,7 +76,7 @@ public sealed partial class DataExplorerService
             throw new ArgumentException($"Template '{templateId}' was not found.");
         }
 
-        if (await TemplateNameExistsAsync(connection, validated.Name, templateId))
+        if (await TemplateNameExistsAsync(connection, validated.Name, validated.SourceView, templateId))
         {
             throw new ArgumentException($"A template named '{validated.Name}' already exists.");
         }
@@ -89,6 +90,7 @@ public sealed partial class DataExplorerService
                 " update " + WarehouseTables.DataExplorerTemplate + " set " +
                 " template_name = @templateName, " +
                 " description = @description, " +
+                " source_view = @sourceView, " +
                 " match_type = @matchType, " +
                 " group_by_field = @groupByField, " +
                 " modified_by = @modifiedBy, " +
@@ -100,6 +102,7 @@ public sealed partial class DataExplorerService
                 updateCommand.Parameters.AddWithValue("@templateId", templateId);
                 updateCommand.Parameters.AddWithValue("@templateName", validated.Name);
                 updateCommand.Parameters.AddWithValue("@description", (object?)validated.Description ?? DBNull.Value);
+                updateCommand.Parameters.AddWithValue("@sourceView", validated.SourceView);
                 updateCommand.Parameters.AddWithValue("@matchType", matchType);
                 updateCommand.Parameters.AddWithValue("@groupByField", (object?)validated.GroupByColumn?.Name ?? DBNull.Value);
                 updateCommand.Parameters.AddWithValue("@modifiedBy", (object?)modifiedByValue ?? DBNull.Value);
@@ -129,13 +132,25 @@ public sealed partial class DataExplorerService
             ?? throw new InvalidOperationException("Template was updated but could not be loaded.");
     }
 
-    public async Task<IReadOnlyList<DataExplorerTemplateSummaryDto>> GetTemplatesAsync()
+    public async Task<IReadOnlyList<DataExplorerTemplateSummaryDto>> GetTemplatesAsync(string? product)
     {
+        string? sourceViewFilter = null;
+        if (!string.IsNullOrWhiteSpace(product))
+        {
+            if (!DataExplorerProducts.TryParse(product, out var resolvedProduct))
+            {
+                throw new ArgumentException($"Product '{product}' is invalid. Valid values: {DataExplorerProducts.Investor}, {DataExplorerProducts.Asset}.");
+            }
+
+            sourceViewFilter = SourceViewForProduct(resolvedProduct);
+        }
+
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" t.template_id, ");
         sql.Append(" t.template_name, ");
         sql.Append(" t.description, ");
+        sql.Append(" t.source_view, ");
         sql.Append(" t.group_by_field, ");
         sql.Append(" t.created_by, ");
         sql.Append(" t.created_at, ");
@@ -144,6 +159,10 @@ public sealed partial class DataExplorerService
         sql.Append($" (select count(*) from {WarehouseTables.DataExplorerTemplateFilter} f where f.template_id = t.template_id) as filter_count ");
         sql.Append($" from {WarehouseTables.DataExplorerTemplate} t ");
         sql.Append(" where t.is_active = 1 ");
+        if (sourceViewFilter is not null)
+        {
+            sql.Append(" and t.source_view = @sourceView ");
+        }
         sql.Append(" order by t.template_name ");
 
         await using var connection = new SqlConnection(_connectionString);
@@ -153,16 +172,22 @@ public sealed partial class DataExplorerService
         {
             CommandType = System.Data.CommandType.Text
         };
+        if (sourceViewFilter is not null)
+        {
+            command.Parameters.AddWithValue("@sourceView", sourceViewFilter);
+        }
 
         var items = new List<DataExplorerTemplateSummaryDto>();
         await using var reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
+            var sourceView = reader.GetStringOrEmpty("source_view");
             items.Add(new DataExplorerTemplateSummaryDto
             {
                 TemplateId = reader.GetInt64OrDefault("template_id"),
                 Name = reader.GetStringOrEmpty("template_name"),
                 Description = reader.GetNullableString("description"),
+                Product = ProductFromSourceView(sourceView),
                 ColumnCount = reader.GetInt32OrDefault("column_count"),
                 FilterCount = reader.GetInt32OrDefault("filter_count"),
                 GroupByField = reader.GetNullableString("group_by_field"),
@@ -217,6 +242,8 @@ public sealed partial class DataExplorerService
     {
         public required string Name { get; init; }
         public string? Description { get; init; }
+        public required string Product { get; init; }
+        public required string SourceView { get; init; }
         public required List<DataExplorerColumnDto> Columns { get; init; }
         public required List<ResolvedDataExplorerFilter> Filters { get; init; }
         public DataExplorerColumnDto? GroupByColumn { get; init; }
@@ -224,6 +251,11 @@ public sealed partial class DataExplorerService
 
     private async Task<ValidatedTemplateRequest> ValidateTemplateRequestAsync(DataExplorerSaveTemplateRequest request)
     {
+        if (!DataExplorerProducts.TryParse(request.Product, out var product))
+        {
+            throw new ArgumentException($"Product '{request.Product}' is invalid. Valid values: {DataExplorerProducts.Investor}, {DataExplorerProducts.Asset}.");
+        }
+
         var name = request.Name?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(name))
         {
@@ -235,7 +267,7 @@ public sealed partial class DataExplorerService
             throw new ArgumentException("Template name must be 200 characters or fewer.");
         }
 
-        var catalog = await GetColumnCatalogAsync();
+        var catalog = await GetColumnCatalogAsync(product);
         var byKey = BuildLookup(catalog);
 
         var columns = ResolveSelectedColumns(request.Columns, byKey);
@@ -265,20 +297,33 @@ public sealed partial class DataExplorerService
         {
             Name = name,
             Description = description,
+            Product = product,
+            SourceView = SourceViewForProduct(product),
             Columns = columns,
             Filters = filters,
             GroupByColumn = groupByColumn
         };
     }
 
+    private static string SourceViewForProduct(string product) =>
+        product == DataExplorerProducts.Asset
+            ? WarehouseTables.ViewInvestorFundAssetName
+            : WarehouseTables.ViewInvestorPortfolioLtdName;
+
+    private static string ProductFromSourceView(string? sourceView) =>
+        string.Equals(sourceView, WarehouseTables.ViewInvestorFundAssetName, StringComparison.OrdinalIgnoreCase)
+            ? DataExplorerProducts.Asset
+            : DataExplorerProducts.Investor;
+
     private static async Task<bool> TemplateNameExistsAsync(
         SqlConnection connection,
         string templateName,
+        string sourceView,
         long? excludeTemplateId)
     {
         const string sql =
             " select count(*) from " + WarehouseTables.DataExplorerTemplate +
-            " where is_active = 1 and template_name = @templateName " +
+            " where is_active = 1 and template_name = @templateName and source_view = @sourceView " +
             " and (@excludeTemplateId is null or template_id <> @excludeTemplateId) ";
 
         await using var command = new SqlCommand(sql, connection)
@@ -286,6 +331,7 @@ public sealed partial class DataExplorerService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@templateName", templateName);
+        command.Parameters.AddWithValue("@sourceView", sourceView);
         command.Parameters.AddWithValue("@excludeTemplateId", (object?)excludeTemplateId ?? DBNull.Value);
         var count = Convert.ToInt32(await command.ExecuteScalarAsync());
         return count > 0;
@@ -312,6 +358,7 @@ public sealed partial class DataExplorerService
         SqlTransaction transaction,
         string templateName,
         string? description,
+        string sourceView,
         string matchType,
         string? groupByField,
         string? createdBy,
@@ -337,7 +384,7 @@ public sealed partial class DataExplorerService
         {
             insertCommand.Parameters.AddWithValue("@templateName", templateName);
             insertCommand.Parameters.AddWithValue("@description", (object?)description ?? DBNull.Value);
-            insertCommand.Parameters.AddWithValue("@sourceView", WarehouseTables.ViewInvestorPortfolioLtdName);
+            insertCommand.Parameters.AddWithValue("@sourceView", sourceView);
             insertCommand.Parameters.AddWithValue("@matchType", matchType);
             insertCommand.Parameters.AddWithValue("@groupByField", (object?)groupByField ?? DBNull.Value);
             insertCommand.Parameters.AddWithValue("@createdBy", (object?)createdBy ?? DBNull.Value);
@@ -347,16 +394,17 @@ public sealed partial class DataExplorerService
             await insertCommand.ExecuteNonQueryAsync();
         }
 
-        // Fabric does not support OUTPUT or SCOPE_IDENTITY() — resolve id by unique template_name.
+        // Fabric does not support OUTPUT or SCOPE_IDENTITY() — resolve id by unique template_name per source_view.
         const string lookupSql =
             " select template_id from " + WarehouseTables.DataExplorerTemplate +
-            " where template_name = @templateName and is_active = 1 ";
+            " where template_name = @templateName and source_view = @sourceView and is_active = 1 ";
 
         await using var lookupCommand = new SqlCommand(lookupSql, connection, transaction)
         {
             CommandType = System.Data.CommandType.Text
         };
         lookupCommand.Parameters.AddWithValue("@templateName", templateName);
+        lookupCommand.Parameters.AddWithValue("@sourceView", sourceView);
         var lookupResult = await lookupCommand.ExecuteScalarAsync();
         if (lookupResult is null || lookupResult == DBNull.Value)
         {
@@ -516,7 +564,7 @@ public sealed partial class DataExplorerService
             TemplateId = templateId,
             Name = templateName,
             Description = description,
-            SourceView = sourceView,
+            Product = ProductFromSourceView(sourceView),
             Columns = columns,
             Filters = filters,
             FilterLogic = DataExplorerFilterSql.MapFilterLogicFromStorage(matchType),

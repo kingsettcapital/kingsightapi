@@ -81,18 +81,51 @@ internal static class PortalPortfolioListSql
         sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital ");
     }
 
-    public static void AppendQuarterlyPeriodFilter(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)
+    public static void AppendQuarterlyPeriodFilter(
+        StringBuilder sql,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string factAlias = "a")
     {
-        if (view != TimeGranularity.Quarterly || period?.HasDateKey != true)
+        if (view != TimeGranularity.Quarterly)
         {
             return;
         }
 
-        sql.Append(" and quarter_year = ( ");
-        sql.Append($" select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey ");
-        sql.Append(" ) ");
+        AppendPortfolioFactQuarterlyPeriodFilter(sql, period, factAlias);
     }
 
-    public static void AddPeriodParameter(SqlCommand command, FundPeriodFilter? period) =>
+    /// <summary>Filters portfolio fact rows to one quarter (<c>dateKey</c>) or all quarters in a year (<c>calendarYear</c>).</summary>
+    public static void AppendPortfolioFactQuarterlyPeriodFilter(
+        StringBuilder sql,
+        FundPeriodFilter? period,
+        string factAlias = "p")
+    {
+        if (period?.HasDateKey == true)
+        {
+            sql.Append($" and {factAlias}.quarter_year = ( ");
+            sql.Append($" select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey ");
+            sql.Append(" ) ");
+            return;
+        }
+
+        if (period?.HasCalendarYear == true)
+        {
+            sql.Append($" and {factAlias}.quarter_year in ( ");
+            sql.Append($" select distinct quarter_year from {WarehouseTables.DimDate} where calendar_year = @calendarYear ");
+            sql.Append(" ) ");
+        }
+    }
+
+    /// <summary>Quarterly view without a specific <c>dateKey</c> returns one row per quarter (not aggregated across the year).</summary>
+    public static bool GroupsPortfolioByQuarterYear(TimeGranularity view, FundPeriodFilter? period) =>
+        view == TimeGranularity.Quarterly && period?.HasDateKey != true;
+
+    public static void AddPeriodParameter(SqlCommand command, FundPeriodFilter? period)
+    {
         command.Parameters.AddWithValue("@dateKey", period?.HasDateKey == true ? period.DateKey!.Value : DBNull.Value);
+        command.Parameters.AddWithValue(
+            "@calendarYear",
+            period?.HasCalendarYear == true ? period.CalendarYear!.Value : DBNull.Value);
+    }
 }

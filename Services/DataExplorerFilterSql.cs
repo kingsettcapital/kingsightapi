@@ -64,7 +64,8 @@ internal static class DataExplorerFilterSql
     string? searchTerm,
     IReadOnlyList<ResolvedDataExplorerFilter> filters,
     string filterLogic,
-    SqlParameterCollection parameters)
+    SqlParameterCollection parameters,
+    string? columnAlias = null)
   {
     var conditions = new List<string>();
 
@@ -72,12 +73,12 @@ internal static class DataExplorerFilterSql
     {
       var searchParts = new StringBuilder(" ( ");
       searchParts.Append(" lower(isnull(cast(");
-      searchParts.Append(Quote(searchableColumns[0].Name));
+      searchParts.Append(QualifyColumn(columnAlias, searchableColumns[0].Name));
       searchParts.Append(" as nvarchar(4000)), '')) like '%' + lower(@search) + '%' ");
       for (var i = 1; i < searchableColumns.Count; i++)
       {
         searchParts.Append(" or lower(isnull(cast(");
-        searchParts.Append(Quote(searchableColumns[i].Name));
+        searchParts.Append(QualifyColumn(columnAlias, searchableColumns[i].Name));
         searchParts.Append(" as nvarchar(4000)), '')) like '%' + lower(@search) + '%' ");
       }
 
@@ -90,7 +91,7 @@ internal static class DataExplorerFilterSql
     {
       var filter = filters[i];
       var paramName = $"@filter{i}";
-      conditions.Add(BuildFilterCondition(filter.Column.Name, filter.Operator, paramName));
+      conditions.Add(BuildFilterCondition(filter.Column.Name, filter.Operator, paramName, columnAlias));
       parameters.AddWithValue(paramName, (object?)filter.Value ?? DBNull.Value);
     }
 
@@ -103,9 +104,10 @@ internal static class DataExplorerFilterSql
     return " where " + string.Join(joiner, conditions);
   }
 
-  private static string BuildFilterCondition(string columnName, string op, string paramName)
+  private static string BuildFilterCondition(string columnName, string op, string paramName, string? columnAlias)
   {
-    var col = $"isnull(cast({Quote(columnName)} as nvarchar(4000)), '')";
+    var quoted = QualifyColumn(columnAlias, columnName);
+    var col = $"isnull(cast({quoted} as nvarchar(4000)), '')";
     var lowerCol = $"lower({col})";
 
     return op.ToLowerInvariant() switch
@@ -116,11 +118,14 @@ internal static class DataExplorerFilterSql
       "notequals" => $" {lowerCol} <> lower({paramName}) ",
       "startswith" => $" {lowerCol} like lower({paramName}) + '%' ",
       "endswith" => $" {lowerCol} like '%' + lower({paramName}) ",
-      "isempty" => $" ({Quote(columnName)} is null or {col} = '') ",
-      "isnotempty" => $" ({Quote(columnName)} is not null and {col} <> '') ",
+      "isempty" => $" ({quoted} is null or {col} = '') ",
+      "isnotempty" => $" ({quoted} is not null and {col} <> '') ",
       _ => throw new ArgumentException($"Filter operator '{op}' is not supported.")
     };
   }
+
+  private static string QualifyColumn(string? columnAlias, string columnName) =>
+    string.IsNullOrWhiteSpace(columnAlias) ? Quote(columnName) : $"{columnAlias}.{Quote(columnName)}";
 
   public static string Quote(string name) => "[" + name.Replace("]", "]]") + "]";
 }

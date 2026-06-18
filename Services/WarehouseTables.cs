@@ -21,6 +21,11 @@ internal static class WarehouseTables
     public const string ViewInvestorPortfolioLtdName = "view_investor_portfolio_ltd";
     public const string ViewInvestorPortfolioLtd = "[dbo].[view_investor_portfolio_ltd]";
 
+    // Data Explorer asset product source view.
+    public const string ViewInvestorFundAssetSchema = "dbo";
+    public const string ViewInvestorFundAssetName = "view_investor_fund_asset";
+    public const string ViewInvestorFundAsset = "[dbo].[view_investor_fund_asset]";
+
     // Data Explorer saved templates (user metadata).
     public const string DataExplorerTemplate = "dbo.data_explorer_template";
     public const string DataExplorerTemplateColumn = "dbo.data_explorer_template_column";

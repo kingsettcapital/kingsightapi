@@ -14,7 +14,7 @@ public interface IInvestorPortalService
         string? sortDir,
         int page,
         int pageSize);
-    Task<InvestorDetailDto?> GetInvestorByKeyAsync(
+    Task<InvestorProfileDto?> GetInvestorByKeyAsync(
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period);
@@ -61,12 +61,30 @@ public interface IInvestorPortalService
         int page,
         int pageSize);
 
+    Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey);
+
+    Task<TransactionFilterOptionsDto> GetInvestorCapitalActivitiesFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetInvestorDistributionsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetInvestorIrrFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
     /// <summary>Capital Activities table (one row per fund) for the investor portfolio screen. Searchable by fund code or name; sortable.</summary>
     Task<PagedResult<InvestorFundCapitalActivitiesDto>> GetInvestorCapitalActivitiesAsync(
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
         int page,
@@ -78,6 +96,7 @@ public interface IInvestorPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
         int page,
@@ -89,10 +108,45 @@ public interface IInvestorPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
         int page,
         int pageSize);
+
+    /// <summary>Capital obligations table (quarterly only; unpivoted Commitment/Unfunded/Reserve/Release rows).</summary>
+    Task<PagedResult<InvestorFundObligationDto>> GetInvestorCapitalObligationsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? fundCode,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetInvestorObligationsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    /// <summary>Net assets table (quarterly only; unpivoted IRR horizon rows).</summary>
+    Task<PagedResult<InvestorFundNetAssetsDto>> GetInvestorNetAssetsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? fundCode,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetInvestorNetAssetsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
 
     Task<PagedResult<InvestorFundExposureDto>> GetInvestorFundExposureAsync(
         long investorKey,

@@ -95,8 +95,13 @@ internal static class PortalListSort
         ["vacant_sf"] = "isnull(metrics.vacant_area_sqft, 0)"
     };
 
-    // Portfolio transaction tables order by the SELECT output alias (grouped/aggregate columns),
-    // so each sort key maps to the column alias rather than a table-qualified expression.
+    // Grouped portfolio transaction tables (one row per fund/investor) plus unpivoted obligation rows.
+    private static readonly (string Camel, string Snake)[] GroupedTransactionFields =
+    {
+        ("quarterYear", "quarter_year"),
+        ("type", "type")
+    };
+
     private static readonly (string Camel, string Snake)[] CapitalActivityMetrics =
     {
         ("called", "called"),
@@ -113,7 +118,10 @@ internal static class PortalListSort
         ("gainDist", "gain_dist"),
         ("preferredReturn", "preferred_return"),
         ("returnOfCapital", "return_of_capital"),
-        ("released", "released")
+        ("released", "released"),
+        ("netInvestedCapitalAmount", "net_invested_capital_amount"),
+        ("netDistributedAmount", "net_distributed_amount"),
+        ("reservedAmount", "reserved_amount")
     };
 
     private static readonly (string Camel, string Snake)[] IrrMetrics =
@@ -126,23 +134,67 @@ internal static class PortalListSort
         ("irrLtd", "irr_ltd_pct")
     };
 
+    private static readonly (string Camel, string Snake)[] UnpivotedObligationMetrics =
+    {
+        ("quarterYear", "quarter_year"),
+        ("type", "type"),
+        ("amount", "amount")
+    };
+
+    private static readonly (string Camel, string Snake)[] UnpivotedNetAssetsMetrics =
+    {
+        ("quarterYear", "quarter_year"),
+        ("type", "type"),
+        ("ret", "ret")
+    };
+
     private static readonly Dictionary<string, string> InvestorCapitalActivitiesColumns =
-        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), CapitalActivityMetrics);
+        BuildTransactionSortMap(
+            ("fundCode", "fund_code"),
+            ("fundName", "fund_name"),
+            GroupedTransactionFields.Concat(CapitalActivityMetrics).ToArray());
 
     private static readonly Dictionary<string, string> InvestorDistributionsColumns =
-        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), DistributionMetrics);
+        BuildTransactionSortMap(
+            ("fundCode", "fund_code"),
+            ("fundName", "fund_name"),
+            GroupedTransactionFields.Concat(DistributionMetrics).ToArray());
 
     private static readonly Dictionary<string, string> InvestorIrrColumns =
-        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), IrrMetrics);
+        BuildTransactionSortMap(
+            ("fundCode", "fund_code"),
+            ("fundName", "fund_name"),
+            GroupedTransactionFields.Concat(IrrMetrics).ToArray());
+
+    private static readonly Dictionary<string, string> InvestorObligationsColumns =
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), UnpivotedObligationMetrics);
+
+    private static readonly Dictionary<string, string> InvestorNetAssetsColumns =
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), UnpivotedNetAssetsMetrics);
 
     private static readonly Dictionary<string, string> FundCapitalActivitiesColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), CapitalActivityMetrics);
+        BuildTransactionSortMap(
+            ("investorCode", "investor_code"),
+            ("investorName", "investor_name"),
+            GroupedTransactionFields.Concat(CapitalActivityMetrics).ToArray());
 
     private static readonly Dictionary<string, string> FundDistributionsColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), DistributionMetrics);
+        BuildTransactionSortMap(
+            ("investorCode", "investor_code"),
+            ("investorName", "investor_name"),
+            GroupedTransactionFields.Concat(DistributionMetrics).ToArray());
 
     private static readonly Dictionary<string, string> FundIrrColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), IrrMetrics);
+        BuildTransactionSortMap(
+            ("investorCode", "investor_code"),
+            ("investorName", "investor_name"),
+            GroupedTransactionFields.Concat(IrrMetrics).ToArray());
+
+    private static readonly Dictionary<string, string> FundObligationsColumns =
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), UnpivotedObligationMetrics);
+
+    private static readonly Dictionary<string, string> FundNetAssetsColumns =
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), UnpivotedNetAssetsMetrics);
 
     private static Dictionary<string, string> BuildTransactionSortMap(
         (string Camel, string Snake) code,
@@ -168,7 +220,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorCapitalActivitiesColumns,
-            "fundCode, fundName, called, transferIn, transferOut, redemption",
+            "fundCode, fundName, quarterYear, type, called, transferIn, transferOut, redemption",
             "fund_code",
             out sort,
             out error);
@@ -182,7 +234,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorDistributionsColumns,
-            "fundCode, fundName, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
+            "fundCode, fundName, quarterYear, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released, netInvestedCapitalAmount, netDistributedAmount, reservedAmount",
             "fund_code",
             out sort,
             out error);
@@ -196,7 +248,35 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorIrrColumns,
-            "fundCode, fundName, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "fundCode, fundName, quarterYear, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "fund_code",
+            out sort,
+            out error);
+
+    public static bool TryParseInvestorObligations(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            InvestorObligationsColumns,
+            "fundCode, fundName, quarterYear, type, amount",
+            "fund_code",
+            out sort,
+            out error);
+
+    public static bool TryParseInvestorNetAssets(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            InvestorNetAssetsColumns,
+            "fundCode, fundName, quarterYear, type, ret",
             "fund_code",
             out sort,
             out error);
@@ -210,7 +290,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundCapitalActivitiesColumns,
-            "investorCode, investorName, called, transferIn, transferOut, redemption",
+            "investorCode, investorName, quarterYear, type, called, transferIn, transferOut, redemption",
             "investor_name",
             out sort,
             out error);
@@ -224,7 +304,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundDistributionsColumns,
-            "investorCode, investorName, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
+            "investorCode, investorName, quarterYear, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
             "investor_name",
             out sort,
             out error);
@@ -238,7 +318,35 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundIrrColumns,
-            "investorCode, investorName, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "investorCode, investorName, quarterYear, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "investor_name",
+            out sort,
+            out error);
+
+    public static bool TryParseFundObligations(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            FundObligationsColumns,
+            "investorCode, investorName, quarterYear, type, amount",
+            "investor_name",
+            out sort,
+            out error);
+
+    public static bool TryParseFundNetAssets(
+        string? sortBy,
+        string? sortDir,
+        out PortalListOrderBy sort,
+        out string? error) =>
+        TryParse(
+            sortBy,
+            sortDir,
+            FundNetAssetsColumns,
+            "investorCode, investorName, quarterYear, type, ret",
             "investor_name",
             out sort,
             out error);

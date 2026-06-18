@@ -73,6 +73,90 @@ public sealed class InvestorListItemDto
     public decimal TotalInvested => NetInvestedCapitalAmount;
 }
 
+/// <summary>Filter dropdown values for transaction tables (fund code or investor name).</summary>
+public sealed class TransactionFilterOptionsDto
+{
+    public IReadOnlyList<PortalFilterOptionDto> Items { get; init; } = [];
+}
+
+/// <summary>Flat investor profile header for GET /api/CapitalInvestors/{investorKey}.</summary>
+public sealed class InvestorProfileDto
+{
+    [JsonPropertyName("investor_name")]
+    public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_type")]
+    public string InvestorType { get; init; } = string.Empty;
+
+    public string Relationship { get; init; } = string.Empty;
+    public string Status { get; init; } = string.Empty;
+    public string Contact { get; init; } = string.Empty;
+
+    [JsonPropertyName("total_commitment")]
+    public decimal TotalCommitment { get; init; }
+
+    [JsonPropertyName("net_invested_capital")]
+    public decimal NetInvestedCapital { get; init; }
+
+    [JsonPropertyName("net_distributed")]
+    public decimal NetDistributed { get; init; }
+
+    [JsonPropertyName("reserved_uncalled")]
+    public decimal ReservedUncalled { get; init; }
+
+    [JsonPropertyName("released_capital")]
+    public decimal? ReleasedCapital { get; init; }
+
+    [JsonPropertyName("fund_count")]
+    public int FundCount { get; init; }
+
+    public IReadOnlyList<InvestorProfileFundDto> Funds { get; init; } = [];
+
+    [JsonPropertyName("capital_deployed")]
+    public decimal CapitalDeployed { get; init; }
+}
+
+public sealed class InvestorProfileFundDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+}
+
+/// <summary>Per-fund holding row for investor fund holdings grid.</summary>
+public sealed class InvestorFundHoldingDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    public DateTime? Since { get; init; }
+
+    public decimal Commitment { get; init; }
+    public decimal Unfunded { get; init; }
+
+    [JsonPropertyName("net_invested")]
+    public decimal NetInvested { get; init; }
+
+    public decimal Distributed { get; init; }
+}
+
+/// <summary>Investor fund holdings from latest <c>fact_investor_portfolio_ltd</c> snapshot.</summary>
+public sealed class InvestorFundHoldingsResultDto
+{
+    [JsonPropertyName("date_key")]
+    public int? DateKey { get; init; }
+
+    public IReadOnlyList<InvestorFundHoldingDto> Items { get; init; } = [];
+}
+
 /// <summary>Investor profile header + overview tab.</summary>
 public sealed class InvestorDetailDto
 {

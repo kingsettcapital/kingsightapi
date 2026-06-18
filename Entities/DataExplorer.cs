@@ -12,6 +12,27 @@ public static class DataExplorerGroups
     public const string Investors = "Investors";
     public const string Fund = "Fund";
     public const string Capital = "Capital";
+    public const string Asset = "Asset";
+}
+
+/// <summary>Data Explorer product dropdown values.</summary>
+public static class DataExplorerProducts
+{
+    public const string Investor = "investor";
+    public const string Asset = "asset";
+
+    public static bool TryParse(string? value, out string product)
+    {
+        if (string.Equals(value, Asset, StringComparison.OrdinalIgnoreCase))
+        {
+            product = Asset;
+            return true;
+        }
+
+        product = Investor;
+        return string.IsNullOrWhiteSpace(value)
+            || string.Equals(value, Investor, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>A single selectable column from the explorer view, with display metadata.</summary>
@@ -57,6 +78,9 @@ public sealed class DataExplorerFilterDto
 /// <summary>Request body for the data population endpoint (selected columns + filters + paging/sort).</summary>
 public sealed class DataExplorerDataRequest
 {
+    /// <summary>Explorer product: investor (default) or asset.</summary>
+    public string? Product { get; init; }
+
     /// <summary>Columns the user selected. Accepts raw column names or camelCase field names.</summary>
     public List<string> Columns { get; init; } = [];
 
@@ -84,6 +108,9 @@ public sealed class DataExplorerDataRequest
 /// <summary>Body for creating or updating a saved explorer template.</summary>
 public sealed class DataExplorerSaveTemplateRequest
 {
+    /// <summary>Explorer product: investor (default) or asset.</summary>
+    public string? Product { get; init; }
+
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
     public List<string> Columns { get; init; } = [];
@@ -100,7 +127,10 @@ public sealed class DataExplorerTemplateDto
     public long TemplateId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
-    public string SourceView { get; init; } = string.Empty;
+
+    /// <summary>Explorer product slug: investor or asset.</summary>
+    public string Product { get; init; } = DataExplorerProducts.Investor;
+
     public List<string> Columns { get; init; } = [];
     public List<DataExplorerFilterDto> Filters { get; init; } = [];
     public string? FilterLogic { get; init; }
@@ -119,6 +149,10 @@ public sealed class DataExplorerTemplateSummaryDto
     public long TemplateId { get; init; }
     public string Name { get; init; } = string.Empty;
     public string? Description { get; init; }
+
+    /// <summary>Explorer product slug: investor or asset.</summary>
+    public string Product { get; init; } = DataExplorerProducts.Investor;
+
     public int ColumnCount { get; init; }
     public int FilterCount { get; init; }
     public string? GroupByField { get; init; }

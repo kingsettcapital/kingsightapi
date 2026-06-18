@@ -16,9 +16,9 @@ public sealed partial class DataExplorerService : IDataExplorerService
     private readonly string _connectionString;
     private readonly ILogger<DataExplorerService> _logger;
 
-    // The view schema is static at runtime, so cache the column catalog after the first load.
+    // The view schema is static at runtime, so cache the column catalog per product after the first load.
     private readonly SemaphoreSlim _columnsLock = new(1, 1);
-    private IReadOnlyList<DataExplorerColumnDto>? _columnsCache;
+    private readonly Dictionary<string, IReadOnlyList<DataExplorerColumnDto>> _columnsCache = new(StringComparer.OrdinalIgnoreCase);
 
     // Acronyms that should stay upper-cased in generated labels.
     private static readonly HashSet<string> Acronyms = new(StringComparer.OrdinalIgnoreCase)
@@ -36,12 +36,24 @@ public sealed partial class DataExplorerService : IDataExplorerService
             ConnectionLogging.Sanitize(_connectionString));
     }
 
-    public async Task<IReadOnlyList<DataExplorerColumnGroupDto>> GetColumnsAsync()
-    {
-        var columns = await GetColumnCatalogAsync();
+    public Task<IReadOnlyList<PortalFilterOptionDto>> GetProductsAsync() =>
+        Task.FromResult<IReadOnlyList<PortalFilterOptionDto>>(
+        [
+            new PortalFilterOptionDto { Value = DataExplorerProducts.Investor, Label = "Investor Data Product" },
+            new PortalFilterOptionDto { Value = DataExplorerProducts.Asset, Label = "Asset Data Product" }
+        ]);
 
-        // Keep the group order deterministic: Investors, then Fund, then Capital.
-        var groupOrder = new[] { DataExplorerGroups.Investors, DataExplorerGroups.Fund, DataExplorerGroups.Capital };
+    public async Task<IReadOnlyList<DataExplorerColumnGroupDto>> GetColumnsAsync(string? product)
+    {
+        if (!DataExplorerProducts.TryParse(product, out var resolvedProduct))
+        {
+            throw new ArgumentException($"Product '{product}' is invalid. Valid values: {DataExplorerProducts.Investor}, {DataExplorerProducts.Asset}.");
+        }
+
+        var columns = await GetColumnCatalogAsync(resolvedProduct);
+        var groupOrder = resolvedProduct == DataExplorerProducts.Asset
+            ? new[] { DataExplorerGroups.Asset, DataExplorerGroups.Fund, DataExplorerGroups.Investors }
+            : new[] { DataExplorerGroups.Investors, DataExplorerGroups.Fund, DataExplorerGroups.Capital };
 
         return groupOrder
             .Select(group => new DataExplorerColumnGroupDto
@@ -60,7 +72,12 @@ public sealed partial class DataExplorerService : IDataExplorerService
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var catalog = await GetColumnCatalogAsync();
+        if (!DataExplorerProducts.TryParse(request.Product, out var product))
+        {
+            throw new ArgumentException($"Product '{request.Product}' is invalid. Valid values: {DataExplorerProducts.Investor}, {DataExplorerProducts.Asset}.");
+        }
+
+        var catalog = await GetColumnCatalogAsync(product);
         var byKey = BuildLookup(catalog);
 
         var selected = ResolveSelectedColumns(request.Columns, byKey);
@@ -86,6 +103,8 @@ public sealed partial class DataExplorerService : IDataExplorerService
         }
 
         var searchableColumns = selected.Where(c => c.Type == "text").ToList();
+        var fromClause = ResolveProductFromClause(product);
+        var columnAlias = product == DataExplorerProducts.Asset ? "a" : null;
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -94,12 +113,12 @@ public sealed partial class DataExplorerService : IDataExplorerService
         if (groupByColumn is not null)
         {
             countSql.Append(" select count(*) from ( ");
-            countSql.Append($" select {Quote(groupByColumn.Name)} ");
-            countSql.Append($" from {WarehouseTables.ViewInvestorPortfolioLtd} ");
+            countSql.Append($" select {QuoteColumn(product, groupByColumn.Name)} ");
+            countSql.Append($" from {fromClause} ");
         }
         else
         {
-            countSql.Append($" select count(*) from {WarehouseTables.ViewInvestorPortfolioLtd} ");
+            countSql.Append($" select count(*) from {fromClause} ");
         }
 
         await using var countCommand = new SqlCommand { Connection = connection, CommandType = System.Data.CommandType.Text };
@@ -108,11 +127,12 @@ public sealed partial class DataExplorerService : IDataExplorerService
             searchTerm,
             resolvedFilters,
             filterLogic,
-            countCommand.Parameters);
+            countCommand.Parameters,
+            columnAlias);
         countSql.Append(countWhere);
         if (groupByColumn is not null)
         {
-            countSql.Append($" group by {Quote(groupByColumn.Name)} ");
+            countSql.Append($" group by {QuoteColumn(product, groupByColumn.Name)} ");
             countSql.Append(" ) grouped_rows ");
         }
 
@@ -121,8 +141,8 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(BuildSelectList(selected, groupByColumn));
-        pageSql.Append($" from {WarehouseTables.ViewInvestorPortfolioLtd} ");
+        pageSql.Append(BuildSelectList(selected, groupByColumn, product));
+        pageSql.Append($" from {fromClause} ");
 
         await using var pageCommand = new SqlCommand { Connection = connection, CommandType = System.Data.CommandType.Text };
         var pageWhere = DataExplorerFilterSql.BuildWhereClause(
@@ -130,14 +150,15 @@ public sealed partial class DataExplorerService : IDataExplorerService
             searchTerm,
             resolvedFilters,
             filterLogic,
-            pageCommand.Parameters);
+            pageCommand.Parameters,
+            columnAlias);
         pageSql.Append(pageWhere);
         if (groupByColumn is not null)
         {
-            pageSql.Append($" group by {Quote(groupByColumn.Name)} ");
+            pageSql.Append($" group by {QuoteColumn(product, groupByColumn.Name)} ");
         }
 
-        pageSql.Append($" order by {Quote(sortColumn.Name)} {(descending ? "desc" : "asc")} ");
+        pageSql.Append($" order by {QuoteColumn(product, sortColumn.Name)} {(descending ? "desc" : "asc")} ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         pageCommand.CommandText = pageSql.ToString();
@@ -172,23 +193,24 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
     // --- column catalog (cached) ---------------------------------------------------------------
 
-    private async Task<IReadOnlyList<DataExplorerColumnDto>> GetColumnCatalogAsync()
+    private async Task<IReadOnlyList<DataExplorerColumnDto>> GetColumnCatalogAsync(string product)
     {
-        if (_columnsCache is not null)
+        if (_columnsCache.TryGetValue(product, out var cached))
         {
-            return _columnsCache;
+            return cached;
         }
 
         await _columnsLock.WaitAsync();
         try
         {
-            if (_columnsCache is not null)
+            if (_columnsCache.TryGetValue(product, out cached))
             {
-                return _columnsCache;
+                return cached;
             }
 
-            _columnsCache = await LoadColumnCatalogAsync();
-            return _columnsCache;
+            cached = await LoadColumnCatalogAsync(product);
+            _columnsCache[product] = cached;
+            return cached;
         }
         finally
         {
@@ -196,8 +218,9 @@ public sealed partial class DataExplorerService : IDataExplorerService
         }
     }
 
-    private async Task<IReadOnlyList<DataExplorerColumnDto>> LoadColumnCatalogAsync()
+    private async Task<IReadOnlyList<DataExplorerColumnDto>> LoadColumnCatalogAsync(string product)
     {
+        var (schema, table, viewName, classify) = ResolveProductSchema(product);
         // Fabric uses a case-sensitive (BIN2) collation, so system views/columns must be upper-cased.
         // Alias to lower-case names so the reader lookups stay consistent with the rest of the codebase.
         const string sql =
@@ -213,8 +236,8 @@ public sealed partial class DataExplorerService : IDataExplorerService
         {
             CommandType = System.Data.CommandType.Text
         };
-        command.Parameters.AddWithValue("@schema", WarehouseTables.ViewInvestorPortfolioLtdSchema);
-        command.Parameters.AddWithValue("@table", WarehouseTables.ViewInvestorPortfolioLtdName);
+        command.Parameters.AddWithValue("@schema", schema);
+        command.Parameters.AddWithValue("@table", table);
 
         var columns = new List<DataExplorerColumnDto>();
         await using var reader = await command.ExecuteReaderAsync();
@@ -227,7 +250,7 @@ public sealed partial class DataExplorerService : IDataExplorerService
                 Name = name,
                 Field = JsonNamingPolicy.CamelCase.ConvertName(name),
                 Label = BuildLabel(name),
-                Group = ClassifyGroup(name),
+                Group = classify(name),
                 DataType = dataType,
                 Type = MapType(dataType),
                 Ordinal = reader.GetInt32OrDefault("ordinal_position")
@@ -238,11 +261,43 @@ public sealed partial class DataExplorerService : IDataExplorerService
         {
             _logger.LogWarning(
                 "Data Explorer view {View} returned no columns from INFORMATION_SCHEMA.",
-                WarehouseTables.ViewInvestorPortfolioLtd);
+                viewName);
         }
 
         return columns;
     }
+
+    private static (string Schema, string Table, string ViewName, Func<string, string> Classify) ResolveProductSchema(string product) =>
+        product == DataExplorerProducts.Asset
+            ? (WarehouseTables.ViewInvestorFundAssetSchema,
+                WarehouseTables.ViewInvestorFundAssetName,
+                WarehouseTables.ViewInvestorFundAsset,
+                ClassifyAssetGroup)
+            : (WarehouseTables.ViewInvestorPortfolioLtdSchema,
+                WarehouseTables.ViewInvestorPortfolioLtdName,
+                WarehouseTables.ViewInvestorPortfolioLtd,
+                ClassifyGroup);
+
+    private static string ResolveProductFromClause(string product)
+    {
+        if (product == DataExplorerProducts.Asset)
+        {
+            var sql = new StringBuilder();
+            sql.Append($"{WarehouseTables.ViewInvestorFundAsset} a ");
+            sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+            sql.Append(" and ");
+            WarehouseSql.AppendCurrentFundFilter(sql, "b");
+            sql.Append($" inner join {WarehouseTables.DimInvestor} c on a.investor_key = c.investor_key ");
+            sql.Append(" and ");
+            WarehouseSql.AppendCurrentInvestorFilter(sql, "c");
+            return sql.ToString();
+        }
+
+        return WarehouseTables.ViewInvestorPortfolioLtd;
+    }
+
+    private static string QuoteColumn(string product, string name) =>
+        product == DataExplorerProducts.Asset ? $"a.{Quote(name)}" : Quote(name);
 
     // --- selection / validation helpers --------------------------------------------------------
 
@@ -361,26 +416,28 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
     private static string BuildSelectList(
         IReadOnlyList<DataExplorerColumnDto> selected,
-        DataExplorerColumnDto? groupByColumn)
+        DataExplorerColumnDto? groupByColumn,
+        string product)
     {
         if (groupByColumn is null)
         {
-            return string.Join(", ", selected.Select(c => Quote(c.Name)));
+            return string.Join(", ", selected.Select(c => QuoteColumn(product, c.Name)));
         }
 
         // When grouping, non-group columns are aggregated so SQL Server accepts the SELECT.
         var parts = new List<string>();
         foreach (var column in selected)
         {
+            var quoted = QuoteColumn(product, column.Name);
             if (column.Name.Equals(groupByColumn.Name, StringComparison.OrdinalIgnoreCase))
             {
-                parts.Add(Quote(column.Name));
+                parts.Add(quoted);
                 continue;
             }
 
             parts.Add(column.Type == "number"
-                ? $"sum(isnull({Quote(column.Name)}, 0)) as {Quote(column.Name)}"
-                : $"max({Quote(column.Name)}) as {Quote(column.Name)}");
+                ? $"sum(isnull({quoted}, 0)) as {Quote(column.Name)}"
+                : $"max({quoted}) as {Quote(column.Name)}");
         }
 
         return string.Join(", ", parts);
@@ -406,6 +463,23 @@ public sealed partial class DataExplorerService : IDataExplorerService
         }
 
         return DataExplorerGroups.Capital;
+    }
+
+    private static string ClassifyAssetGroup(string columnName)
+    {
+        var lower = columnName.ToLowerInvariant();
+
+        if (lower.Contains("investor") || lower.Contains("relationship") || lower.Contains("contact") || lower.Contains("client"))
+        {
+            return DataExplorerGroups.Investors;
+        }
+
+        if (lower.Contains("fund") || lower.Contains("strategy") || lower.Contains("vintage"))
+        {
+            return DataExplorerGroups.Fund;
+        }
+
+        return DataExplorerGroups.Asset;
     }
 
     private static string MapType(string dataType) =>

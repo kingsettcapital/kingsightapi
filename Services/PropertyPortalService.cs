@@ -18,11 +18,12 @@ public interface IPropertyPortalService
         int page,
         int pageSize,
         string? fundCode);
-    Task<PropertyDetailDto?> GetPropertyByKeyAsync(long propertyKey);
+    Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey);
+    Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
 }
 
-public sealed class PropertyPortalService : IPropertyPortalService
+public sealed partial class PropertyPortalService : IPropertyPortalService
 {
     private readonly string _connectionString;
     private readonly ILogger<PropertyPortalService> _logger;
@@ -66,7 +67,7 @@ public sealed class PropertyPortalService : IPropertyPortalService
         }
     }
 
-    public async Task<PropertyDetailDto?> GetPropertyByKeyAsync(long propertyKey)
+    public async Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey)
     {
         try
         {
@@ -80,6 +81,24 @@ public sealed class PropertyPortalService : IPropertyPortalService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving property {PropertyKey}", propertyKey);
+            throw;
+        }
+    }
+
+    public async Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey)
+    {
+        try
+        {
+            return await GetPropertyLeasingSummaryInternalAsync(propertyKey);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get leasing summary for property {PropertyKey} cancelled", propertyKey);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving leasing summary for property {PropertyKey}", propertyKey);
             throw;
         }
     }
@@ -242,140 +261,6 @@ public sealed class PropertyPortalService : IPropertyPortalService
         };
     }
 
-    private async Task<PropertyDetailDto?> GetPropertyByKeyInternalAsync(long propertyKey)
-    {
-        var sql = new StringBuilder();
-        sql.Append(" select p.*, ");
-        sql.Append(" metrics.gross_leasable_area_sqft, ");
-        sql.Append(" metrics.occupied_area_sqft, ");
-        sql.Append(" metrics.committed_area_sqft, ");
-        sql.Append(" metrics.vacant_area_sqft, ");
-        sql.Append(" metrics.weighted_avg_lease_term_months ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
-        WarehouseSql.AppendLatestAssetMetricsApply(sql);
-        sql.Append(" where p.property_key = @propertyKey ");
-        sql.Append(" and ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync();
-
-        await using var command = new SqlCommand(sql.ToString(), connection)
-        {
-            CommandType = System.Data.CommandType.Text
-        };
-        command.Parameters.AddWithValue("@propertyKey", propertyKey);
-
-        await using var reader = await command.ExecuteReaderAsync();
-        if (!await reader.ReadAsync())
-        {
-            return null;
-        }
-
-        var glaSf = reader.GetNullableDecimal("gross_leasable_area_sqft");
-        var occupiedSf = reader.GetNullableDecimal("occupied_area_sqft");
-        var weightedAvgLeaseTermMonths = reader.GetNullableDecimal("weighted_avg_lease_term_months");
-
-        var fields = DisplayFieldBuilder.DictionaryFromSqlReader(reader);
-        await reader.CloseAsync();
-
-        var investments = await GetPropertyInvestmentsInternalAsync(propertyKey, connection);
-        fields["investmentsCount"] = DisplayFieldBuilder.Integer(investments.Count);
-        fields["status"] = DisplayFieldBuilder.Status(fields.TryGetValue("propertyStatus", out var propertyStatus)
-            ? propertyStatus.Value?.ToString()
-            : "Active");
-
-        var location = DisplayFieldBuilder.Text(
-            $"{GetOrDefault(fields, "city").Value}, {GetOrDefault(fields, "province").Value}".Trim(' ', ','));
-        // TODO: Map Ownership from warehouse query when column is available.
-        const bool ownership = false;
-        var assetSize = glaSf ?? 0m;
-        var isPortfolio = ToBoolean(GetOrDefault(fields, "portfolio").Value);
-
-        var summary = new PropertySummaryDto
-        {
-            PropertyKey = ToInt64(GetOrDefault(fields, "propertyKey").Value),
-            PropertyName = Convert.ToString(GetOrDefault(fields, "propertyName").Value) ?? string.Empty,
-            Location = Convert.ToString(location.Value) ?? string.Empty,
-            AssetType = Convert.ToString(GetOrDefault(fields, "assetType").Value) ?? string.Empty,
-            Status = Convert.ToString(GetOrDefault(fields, "status").Value) ?? string.Empty,
-            Ownership = ownership,
-            AssetSize = assetSize,
-            IsPortfolio = isPortfolio,
-            AcquisitionDate = GetOrDefault(fields, "propertyAcquisition").Value,
-            Investments = ToInt32(GetOrDefault(fields, "investmentsCount").Value)
-        };
-
-        var assetDetails = new List<DynamicFieldDto>
-        {
-            DisplayFieldBuilder.ToDynamicField("assetType", GetOrDefault(fields, "assetType")),
-            DisplayFieldBuilder.ToDynamicField("status", GetOrDefault(fields, "status")),
-            DisplayFieldBuilder.ToDynamicField("location", location),
-            DisplayFieldBuilder.ToDynamicField("acquisitionDate", GetOrDefault(fields, "propertyAcquisition")),
-            DisplayFieldBuilder.ToDynamicField("ownership", DisplayFieldBuilder.Boolean(ownership)),
-            DisplayFieldBuilder.ToDynamicField("assetSize", DisplayFieldBuilder.Number(assetSize)),
-            DisplayFieldBuilder.ToDynamicField("isPortfolio", DisplayFieldBuilder.Boolean(isPortfolio))
-        };
-
-        return new PropertyDetailDto
-        {
-            Summary = summary,
-            Sections =
-            [
-                new DynamicSectionDto
-                {
-                    Title = "Asset Details",
-                    Fields = assetDetails
-                },
-                new DynamicSectionDto
-                {
-                    Title = "Acquisition",
-                    Fields = BuildLifecycleMetricFields(glaSf, occupiedSf, weightedAvgLeaseTermMonths)
-                },
-                new DynamicSectionDto
-                {
-                    Title = "Sale",
-                    Fields = BuildLifecycleMetricFields(glaSf, occupiedSf, weightedAvgLeaseTermMonths)
-                }
-            ]
-        };
-    }
-
-    /// <summary>Acquisition/Sale metrics; GLA, occupancy, and WALT from <c>fact_asset_metrics</c> when present.</summary>
-    private static List<DynamicFieldDto> BuildLifecycleMetricFields(
-        decimal? glaSf,
-        decimal? occupiedSf,
-        decimal? weightedAvgLeaseTermMonths)
-    {
-        decimal? occupancy = glaSf > 0 && occupiedSf.HasValue
-            ? occupiedSf.Value / glaSf.Value * 100m
-            : null;
-
-        return
-        [
-            DisplayFieldBuilder.ToDynamicField("debt", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("equity", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("totalAssetValue", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("assetLevelDebtPercent", DisplayFieldBuilder.Percent(0m)),
-            DisplayFieldBuilder.ToDynamicField("purchaseCosts", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("ltv", DisplayFieldBuilder.Percent(0m)),
-            DisplayFieldBuilder.ToDynamicField("capRate", DisplayFieldBuilder.Percent(0m)),
-            DisplayFieldBuilder.ToDynamicField("noi", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("gla", glaSf.HasValue ? DisplayFieldBuilder.Number(glaSf.Value) : DisplayFieldBuilder.Number(0m)),
-            DisplayFieldBuilder.ToDynamicField("propertyManager", DisplayFieldBuilder.Number(0m)),
-            DisplayFieldBuilder.ToDynamicField(
-                "occupancy",
-                occupancy.HasValue ? DisplayFieldBuilder.Percent(occupancy.Value) : DisplayFieldBuilder.Percent(0m)),
-            DisplayFieldBuilder.ToDynamicField(
-                "weightedAverageLeaseTerm",
-                weightedAvgLeaseTermMonths.HasValue
-                    ? DisplayFieldBuilder.Number(weightedAvgLeaseTermMonths.Value)
-                    : DisplayFieldBuilder.Number(0m)),
-            DisplayFieldBuilder.ToDynamicField("averageInPlaceRentPerSf", DisplayFieldBuilder.Money(0m)),
-            DisplayFieldBuilder.ToDynamicField("salesPerSfRetail", DisplayFieldBuilder.Money(0m))
-        ];
-    }
-
     private async Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsInternalAsync(long propertyKey)
     {
         await using var connection = new SqlConnection(_connectionString);
@@ -521,87 +406,6 @@ public sealed class PropertyPortalService : IPropertyPortalService
             CommittedSf = reader.GetNullableDecimal("committed_sf"),
             VacantSf = reader.GetNullableDecimal("vacant_sf"),
             IsPortfolio = reader.GetBooleanFromColumns("portfolio")
-        };
-    }
-
-    private static TypedValueDto GetOrDefault(
-        IReadOnlyDictionary<string, TypedValueDto> fields,
-        params string[] keys)
-    {
-        foreach (var key in keys)
-        {
-            if (fields.TryGetValue(key, out var value))
-            {
-                return value;
-            }
-        }
-
-        return DisplayFieldBuilder.Text(string.Empty);
-    }
-
-    private static int ToInt32(object? value)
-    {
-        if (value is null or DBNull)
-        {
-            return 0;
-        }
-
-        var raw = Convert.ToString(value)?.Trim();
-        return int.TryParse(raw, out var parsed) ? parsed : 0;
-    }
-
-    private static long ToInt64(object? value)
-    {
-        if (value is null or DBNull)
-        {
-            return 0L;
-        }
-
-        var raw = Convert.ToString(value)?.Trim();
-        return long.TryParse(raw, out var parsed) ? parsed : 0L;
-    }
-
-    private static decimal ToDecimal(object? value)
-    {
-        if (value is null or DBNull)
-        {
-            return 0m;
-        }
-
-        var raw = Convert.ToString(value)?.Trim();
-        return decimal.TryParse(raw, out var parsed) ? parsed : 0m;
-    }
-
-    private static decimal? ToNullableDecimal(object? value)
-    {
-        if (value is null or DBNull)
-        {
-            return null;
-        }
-
-        var raw = Convert.ToString(value)?.Trim();
-        return decimal.TryParse(raw, out var parsed) ? parsed : null;
-    }
-
-    private static bool ToBoolean(object? value)
-    {
-        if (value is null or DBNull)
-        {
-            return false;
-        }
-
-        return value switch
-        {
-            bool b => b,
-            byte or sbyte or short or ushort or int or uint or long or ulong =>
-                Convert.ToInt64(value) != 0,
-            decimal or double or float =>
-                Convert.ToDecimal(value) != 0m,
-            string s when bool.TryParse(s, out var parsed) => parsed,
-            string s => s.Equals("1", StringComparison.OrdinalIgnoreCase)
-                || s.Equals("yes", StringComparison.OrdinalIgnoreCase)
-                || s.Equals("y", StringComparison.OrdinalIgnoreCase),
-            _ => false
         };
     }
 }

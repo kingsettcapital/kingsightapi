@@ -14,6 +14,12 @@ public sealed class InvestorFundCapitalActivitiesDto
     [JsonPropertyName("fund_name")]
     public string FundName { get; init; } = string.Empty;
 
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
+
     [JsonPropertyName("called")]
     public decimal Called { get; init; }
 
@@ -38,6 +44,12 @@ public sealed class InvestorFundDistributionsDto
 
     [JsonPropertyName("fund_name")]
     public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
 
     [JsonPropertyName("committed")]
     public decimal Committed { get; init; }
@@ -82,6 +94,12 @@ public sealed class InvestorFundIrrDto
     [JsonPropertyName("fund_name")]
     public string FundName { get; init; } = string.Empty;
 
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
+
     [JsonPropertyName("irr_1_year_pct")]
     public decimal? Irr1YearPct { get; init; }
 
@@ -104,6 +122,48 @@ public sealed class InvestorFundIrrDto
     public decimal? IrrItdPct => IrrLtdPct;
 }
 
+/// <summary>Capital obligation row — investor detail, unpivoted from portfolio facts.</summary>
+public sealed class InvestorFundObligationDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
+    public string Type { get; init; } = string.Empty;
+
+    public decimal Amount { get; init; }
+}
+
+/// <summary>Net assets row — investor detail, unpivoted IRR horizons from quarterly portfolio facts.</summary>
+public sealed class InvestorFundNetAssetsDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
+    public string Type { get; init; } = string.Empty;
+
+    public decimal? Ret { get; init; }
+}
+
 /// <summary>Capital Activities row — fund detail, one row per investor.</summary>
 public sealed class FundInvestorCapitalActivitiesDto
 {
@@ -112,6 +172,12 @@ public sealed class FundInvestorCapitalActivitiesDto
 
     [JsonPropertyName("investor_name")]
     public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
 
     [JsonPropertyName("called")]
     public decimal Called { get; init; }
@@ -134,6 +200,12 @@ public sealed class FundInvestorDistributionsDto
 
     [JsonPropertyName("investor_name")]
     public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
 
     [JsonPropertyName("committed")]
     public decimal Committed { get; init; }
@@ -166,6 +238,12 @@ public sealed class FundInvestorIrrDto
     [JsonPropertyName("investor_name")]
     public string InvestorName { get; init; } = string.Empty;
 
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
+    public string Type { get; init; } = string.Empty;
+
     [JsonPropertyName("irr_1_year_pct")]
     public decimal? Irr1YearPct { get; init; }
 
@@ -186,4 +264,40 @@ public sealed class FundInvestorIrrDto
 
     [JsonPropertyName("irr_itd_pct")]
     public decimal? IrrItdPct => IrrLtdPct;
+}
+
+/// <summary>Capital obligation row — fund detail, unpivoted from portfolio facts.</summary>
+public sealed class FundInvestorObligationDto
+{
+    [JsonPropertyName("investor_code")]
+    public string InvestorCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_name")]
+    public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
+    public string Type { get; init; } = string.Empty;
+
+    public decimal Amount { get; init; }
+}
+
+/// <summary>Net assets row — fund detail, unpivoted IRR horizons from quarterly portfolio facts.</summary>
+public sealed class FundInvestorNetAssetsDto
+{
+    [JsonPropertyName("investor_code")]
+    public string InvestorCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("investor_name")]
+    public string InvestorName { get; init; } = string.Empty;
+
+    [JsonPropertyName("quarter_year")]
+    public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
+    public string Type { get; init; } = string.Empty;
+
+    public decimal? Ret { get; init; }
 }

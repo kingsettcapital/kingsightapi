@@ -23,14 +23,38 @@ public class DataExplorerController : ControllerBase
         _logger = logger;
     }
 
-    // GET: api/data-explorer/columns
-    [HttpGet("columns")]
-    public async Task<ActionResult<IReadOnlyList<DataExplorerColumnGroupDto>>> GetColumns()
+    // GET: api/data-explorer/products
+    [HttpGet("products")]
+    public async Task<ActionResult<IReadOnlyList<PortalFilterOptionDto>>> GetProducts()
     {
         try
         {
-            var result = await _service.GetColumnsAsync();
+            return Ok(await _service.GetProductsAsync());
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get data explorer products cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving data explorer products");
+            return StatusCode(500, "An error occurred while retrieving products.");
+        }
+    }
+
+    // GET: api/data-explorer/columns?product=investor|asset
+    [HttpGet("columns")]
+    public async Task<ActionResult<IReadOnlyList<DataExplorerColumnGroupDto>>> GetColumns([FromQuery] string? product)
+    {
+        try
+        {
+            var result = await _service.GetColumnsAsync(product);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (OperationCanceledException)
         {
@@ -45,7 +69,7 @@ public class DataExplorerController : ControllerBase
     }
 
     // POST: api/data-explorer/data
-    // Body: { columns, filters?, filterLogic?, groupByField?, search?, sortBy?, sortDir?, page?, pageSize? }
+    // Body: { product?, columns, filters?, filterLogic?, groupByField?, search?, sortBy?, sortDir?, page?, pageSize? }
     [HttpPost("data")]
     public async Task<ActionResult<DataExplorerDataResult>> GetData([FromBody] DataExplorerDataRequest request)
     {
@@ -75,14 +99,18 @@ public class DataExplorerController : ControllerBase
         }
     }
 
-    // GET: api/data-explorer/templates
+    // GET: api/data-explorer/templates?product=investor|asset
     [HttpGet("templates")]
-    public async Task<ActionResult<IReadOnlyList<DataExplorerTemplateSummaryDto>>> GetTemplates()
+    public async Task<ActionResult<IReadOnlyList<DataExplorerTemplateSummaryDto>>> GetTemplates([FromQuery] string? product)
     {
         try
         {
-            var result = await _service.GetTemplatesAsync();
+            var result = await _service.GetTemplatesAsync(product);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (OperationCanceledException)
         {
@@ -128,7 +156,7 @@ public class DataExplorerController : ControllerBase
     }
 
     // POST: api/data-explorer/templates
-    // Body: { name, description?, columns, filters?, filterLogic?, groupByField? }
+    // Body: { product?, name, description?, columns, filters?, filterLogic?, groupByField? }
     [HttpPost("templates")]
     public async Task<ActionResult<DataExplorerTemplateDto>> SaveTemplate([FromBody] DataExplorerSaveTemplateRequest request)
     {

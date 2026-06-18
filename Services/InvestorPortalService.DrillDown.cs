@@ -83,6 +83,7 @@ public sealed partial class InvestorPortalService
             investorKey,
             period,
             null,
+            null,
             page,
             pageSize,
             static reader =>
