@@ -121,6 +121,37 @@ internal static class PortalPortfolioListSql
     public static bool GroupsPortfolioByQuarterYear(TimeGranularity view, FundPeriodFilter? period) =>
         view == TimeGranularity.Quarterly && period?.HasDateKey != true;
 
+    public static void AppendGroupedQuarterYearAndPeriodColumns(
+        StringBuilder sql,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string factAlias = "p")
+    {
+        if (GroupsPortfolioByQuarterYear(view, period))
+        {
+            sql.Append($" isnull({factAlias}.quarter_year, '') as quarter_year, ");
+            sql.Append($" isnull({factAlias}.quarter_year, '') as period, ");
+            return;
+        }
+
+        if (view == TimeGranularity.Ltd)
+        {
+            sql.Append($" max(isnull(cast({factAlias}.date_key as varchar(20)), '')) as quarter_year, ");
+            sql.Append(" cast(null as varchar(100)) as period, ");
+            return;
+        }
+
+        if (view == TimeGranularity.Quarterly)
+        {
+            sql.Append($" max(isnull({factAlias}.quarter_year, '')) as quarter_year, ");
+            sql.Append($" max(isnull({factAlias}.quarter_year, '')) as period, ");
+            return;
+        }
+
+        sql.Append($" max(isnull({factAlias}.quarter_year, '')) as quarter_year, ");
+        sql.Append(" cast(null as varchar(100)) as period, ");
+    }
+
     public static void AddPeriodParameter(SqlCommand command, FundPeriodFilter? period)
     {
         command.Parameters.AddWithValue("@dateKey", period?.HasDateKey == true ? period.DateKey!.Value : DBNull.Value);

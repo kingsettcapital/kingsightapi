@@ -55,6 +55,7 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
+                Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Called = reader.GetDecimalOrDefault("called"),
                 TransferIn = reader.GetDecimalOrDefault("transfer_in"),
@@ -114,6 +115,7 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
+                Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Committed = reader.GetDecimalOrDefault("committed"),
                 Unfunded = reader.GetDecimalOrDefault("unfunded"),
@@ -173,6 +175,7 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
+                Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Irr1YearPct = reader.GetNullableDecimal("irr_1_year_pct"),
                 Irr3YearPct = reader.GetNullableDecimal("irr_3_year_pct"),
@@ -219,6 +222,7 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
+                Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Amount = reader.GetDecimalOrDefault("amount")
             });
@@ -260,6 +264,7 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
+                Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Ret = reader.GetNullableDecimal("ret")
             },
@@ -285,7 +290,7 @@ public sealed partial class FundPortalService
         AppendFundUnpivotedOuterWhere(countSql);
 
         var pageSql = new StringBuilder();
-        pageSql.Append($" select investor_code, investor_name, quarter_year, type, {valueColumn} from ( ");
+        pageSql.Append($" select investor_code, investor_name, quarter_year, period, type, {valueColumn} from ( ");
         pageSql.Append(innerSql);
         pageSql.Append(" ) rows where 1=1 ");
         AppendFundUnpivotedOuterWhere(pageSql);
@@ -331,22 +336,8 @@ public sealed partial class FundPortalService
         WarehouseSql.AppendCurrentInvestorFilter(sql, "i");
     }
 
-    private static void AppendGroupedQuarterYearColumn(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)
-    {
-        if (PortalPortfolioListSql.GroupsPortfolioByQuarterYear(view, period))
-        {
-            sql.Append(" isnull(p.quarter_year, '') as quarter_year, ");
-            return;
-        }
-
-        if (view == TimeGranularity.Ltd)
-        {
-            sql.Append(" max(isnull(cast(p.date_key as varchar(20)), '')) as quarter_year, ");
-            return;
-        }
-
-        sql.Append(" max(isnull(p.quarter_year, '')) as quarter_year, ");
-    }
+    private static void AppendGroupedQuarterYearColumn(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period) =>
+        PortalPortfolioListSql.AppendGroupedQuarterYearAndPeriodColumns(sql, view, period);
 
     private static void AppendFundTransactionGroupBy(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)
     {

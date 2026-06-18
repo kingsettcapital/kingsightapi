@@ -86,6 +86,7 @@ internal static class PortalPortfolioTransactionSql
         }
 
         sql.Append(" isnull(p.quarter_year, '') as quarter_year, ");
+        sql.Append(" isnull(p.quarter_year, '') as period, ");
         sql.Append($" '{typeLabel}' as type, ");
         if (coalesceToZero)
         {

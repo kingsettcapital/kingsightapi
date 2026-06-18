@@ -17,6 +17,11 @@ public sealed class InvestorFundCapitalActivitiesDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024"). Mirrors <see cref="QuarterYear"/>.</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -47,6 +52,11 @@ public sealed class InvestorFundDistributionsDto
 
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
 
     /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
@@ -97,6 +107,11 @@ public sealed class InvestorFundIrrDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Fund type from <c>dim_fund.fund_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -137,6 +152,11 @@ public sealed class InvestorFundObligationDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -158,6 +178,11 @@ public sealed class InvestorFundNetAssetsDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -175,6 +200,11 @@ public sealed class FundInvestorCapitalActivitiesDto
 
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
 
     /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
@@ -203,6 +233,11 @@ public sealed class FundInvestorDistributionsDto
 
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
 
     /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
@@ -241,6 +276,11 @@ public sealed class FundInvestorIrrDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Investor type from <c>dim_investor.investor_type_name</c>.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -278,6 +318,11 @@ public sealed class FundInvestorObligationDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
+
     /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
     public string Type { get; init; } = string.Empty;
 
@@ -295,6 +340,11 @@ public sealed class FundInvestorNetAssetsDto
 
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
+
+    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    [JsonPropertyName("period")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Period { get; init; }
 
     /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
     public string Type { get; init; } = string.Empty;

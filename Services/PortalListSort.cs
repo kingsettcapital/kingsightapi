@@ -99,6 +99,7 @@ internal static class PortalListSort
     private static readonly (string Camel, string Snake)[] GroupedTransactionFields =
     {
         ("quarterYear", "quarter_year"),
+        ("period", "period"),
         ("type", "type")
     };
 
@@ -137,6 +138,7 @@ internal static class PortalListSort
     private static readonly (string Camel, string Snake)[] UnpivotedObligationMetrics =
     {
         ("quarterYear", "quarter_year"),
+        ("period", "period"),
         ("type", "type"),
         ("amount", "amount")
     };
@@ -144,6 +146,7 @@ internal static class PortalListSort
     private static readonly (string Camel, string Snake)[] UnpivotedNetAssetsMetrics =
     {
         ("quarterYear", "quarter_year"),
+        ("period", "period"),
         ("type", "type"),
         ("ret", "ret")
     };
@@ -220,7 +223,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorCapitalActivitiesColumns,
-            "fundCode, fundName, quarterYear, type, called, transferIn, transferOut, redemption",
+            "fundCode, fundName, quarterYear, period, type, called, transferIn, transferOut, redemption",
             "fund_code",
             out sort,
             out error);
@@ -234,7 +237,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorDistributionsColumns,
-            "fundCode, fundName, quarterYear, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released, netInvestedCapitalAmount, netDistributedAmount, reservedAmount",
+            "fundCode, fundName, quarterYear, period, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released, netInvestedCapitalAmount, netDistributedAmount, reservedAmount",
             "fund_code",
             out sort,
             out error);
@@ -248,7 +251,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorIrrColumns,
-            "fundCode, fundName, quarterYear, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "fundCode, fundName, quarterYear, period, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
             "fund_code",
             out sort,
             out error);
@@ -262,7 +265,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorObligationsColumns,
-            "fundCode, fundName, quarterYear, type, amount",
+            "fundCode, fundName, quarterYear, period, type, amount",
             "fund_code",
             out sort,
             out error);
@@ -276,7 +279,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorNetAssetsColumns,
-            "fundCode, fundName, quarterYear, type, ret",
+            "fundCode, fundName, quarterYear, period, type, ret",
             "fund_code",
             out sort,
             out error);
@@ -290,7 +293,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundCapitalActivitiesColumns,
-            "investorCode, investorName, quarterYear, type, called, transferIn, transferOut, redemption",
+            "investorCode, investorName, quarterYear, period, type, called, transferIn, transferOut, redemption",
             "investor_name",
             out sort,
             out error);
@@ -304,7 +307,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundDistributionsColumns,
-            "investorCode, investorName, quarterYear, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
+            "investorCode, investorName, quarterYear, period, type, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released",
             "investor_name",
             out sort,
             out error);
@@ -318,7 +321,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundIrrColumns,
-            "investorCode, investorName, quarterYear, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
+            "investorCode, investorName, quarterYear, period, type, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd",
             "investor_name",
             out sort,
             out error);
@@ -332,7 +335,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundObligationsColumns,
-            "investorCode, investorName, quarterYear, type, amount",
+            "investorCode, investorName, quarterYear, period, type, amount",
             "investor_name",
             out sort,
             out error);
@@ -346,7 +349,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundNetAssetsColumns,
-            "investorCode, investorName, quarterYear, type, ret",
+            "investorCode, investorName, quarterYear, period, type, ret",
             "investor_name",
             out sort,
             out error);
