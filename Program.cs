@@ -65,6 +65,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<ITaxArrearsService, TaxArrearsService>();
             builder.Services.AddSingleton<ILtvValidationService, LtvValidationService>();
             builder.Services.AddSingleton<INonKsServicedLoansService, NonKsServicedLoansService>();
+            builder.Services.AddSingleton<IManagementSummaryService, ManagementSummaryService>();
 
             builder.Services.AddCmhcFileStorage(configuration);
             builder.Services.Configure<FormOptions>(options =>

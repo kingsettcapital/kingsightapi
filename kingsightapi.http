@@ -94,6 +94,26 @@ Accept: application/json
 
 ###
 
+GET {{api_HostAddress}}/api/ManagementSummary?statuses=Default
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/1/loan-details?statuses=Default
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/dashboard?asOfDate=2025-08-31&statuses=Default&riskLevels=ALL&sponsor=All
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/1/loan-detail-report?asOfDate=2025-08-31&statuses=Default
+Accept: application/json
+
+###
+
 GET {{api_HostAddress}}/api/OtherCostCapture?loanAliasId=1&statuses=2
 Accept: application/json
 
