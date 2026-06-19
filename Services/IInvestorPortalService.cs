@@ -114,7 +114,7 @@ public interface IInvestorPortalService
         int page,
         int pageSize);
 
-    /// <summary>Capital obligations table (quarterly only; unpivoted Commitment/Unfunded/Reserve/Release rows).</summary>
+    /// <summary>Capital obligations — commitment, unfunded, reserved, released (LTD or quarterly portfolio facts).</summary>
     Task<PagedResult<InvestorFundObligationDto>> GetInvestorCapitalObligationsAsync(
         long investorKey,
         TimeGranularity view,

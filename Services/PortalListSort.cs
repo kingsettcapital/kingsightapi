@@ -140,8 +140,7 @@ internal static class PortalListSort
         ("quarterYear", "quarter_year"),
         ("period", "period"),
         ("commitmentAmount", "commitment_amount"),
-        ("netInvestedCapitalAmount", "net_invested_capital_amount"),
-        ("netDistributedAmount", "net_distributed_amount"),
+        ("unfundedAmount", "unfunded_amount"),
         ("reservedAmount", "reserved_amount"),
         ("releasedCapitalAmount", "released_capital_amount")
     };
@@ -267,7 +266,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorObligationsColumns,
-            "fundCode, fundName, quarterYear, period, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
+            "fundCode, fundName, quarterYear, period, commitmentAmount, unfundedAmount, reservedAmount, releasedCapitalAmount",
             "fund_code",
             out sort,
             out error);
@@ -337,7 +336,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundObligationsColumns,
-            "investorCode, investorName, quarterYear, period, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
+            "investorCode, investorName, quarterYear, period, commitmentAmount, unfundedAmount, reservedAmount, releasedCapitalAmount",
             "investor_name",
             out sort,
             out error);

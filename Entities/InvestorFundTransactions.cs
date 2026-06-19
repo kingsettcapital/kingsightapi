@@ -159,11 +159,8 @@ public sealed class InvestorFundObligationDto
     [JsonPropertyName("commitment_amount")]
     public decimal CommitmentAmount { get; init; }
 
-    [JsonPropertyName("net_invested_capital_amount")]
-    public decimal NetInvestedCapitalAmount { get; init; }
-
-    [JsonPropertyName("net_distributed_amount")]
-    public decimal NetDistributedAmount { get; init; }
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
 
     [JsonPropertyName("reserved_amount")]
     public decimal ReservedAmount { get; init; }
@@ -329,11 +326,8 @@ public sealed class FundInvestorObligationDto
     [JsonPropertyName("commitment_amount")]
     public decimal CommitmentAmount { get; init; }
 
-    [JsonPropertyName("net_invested_capital_amount")]
-    public decimal NetInvestedCapitalAmount { get; init; }
-
-    [JsonPropertyName("net_distributed_amount")]
-    public decimal NetDistributedAmount { get; init; }
+    [JsonPropertyName("unfunded_amount")]
+    public decimal UnfundedAmount { get; init; }
 
     [JsonPropertyName("reserved_amount")]
     public decimal ReservedAmount { get; init; }

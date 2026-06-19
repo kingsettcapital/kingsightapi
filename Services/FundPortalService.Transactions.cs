@@ -234,8 +234,7 @@ public sealed partial class FundPortalService
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
                 Period = reader.GetStringOrEmpty("period"),
                 CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
-                NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
-                NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+                UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
                 ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
                 ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
             });

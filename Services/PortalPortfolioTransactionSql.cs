@@ -9,10 +9,7 @@ internal static class PortalPortfolioTransactionSql
     public static void AppendObligationMetricAggregates(StringBuilder sql, string factAlias = "p")
     {
         sql.Append($" sum(isnull({factAlias}.commitment_amount, 0)) as commitment_amount, ");
-        sql.Append($" sum(isnull({factAlias}.net_invested_capital_amount, 0)) as net_invested_capital_amount, ");
-        sql.Append($" sum(isnull({factAlias}.preferred_return_amount, 0)) ");
-        sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
-        sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed_amount, ");
+        sql.Append($" sum(isnull({factAlias}.unfunded_amount, 0)) as unfunded_amount, ");
         sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved_amount, ");
         sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital_amount ");
     }
