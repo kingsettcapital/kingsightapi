@@ -174,6 +174,7 @@ public sealed class DashboardService : IDashboardService
         sql.Append("   where ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
         sql.Append(" ), 0), ");
+        // AUM — sum of net invested capital across all current funds (LTD portfolio facts).
         sql.Append(" total_aum = isnull(( ");
         sql.Append("   select sum(isnull(a.net_invested_capital_amount, 0)) ");
         sql.Append($"   from {WarehouseTables.FactInvestorPortfolioLtd} a ");
@@ -278,7 +279,7 @@ public sealed class DashboardService : IDashboardService
     private static DashboardKpiWidgetDto BuildPortfolioValueKpi(KpiSnapshot kpi) =>
         new()
         {
-            Value = kpi.PortfolioValue,
+            Value = kpi.TotalAum,
             YtdChangePercent = kpi.YtdReturnPercent,
             Subtitle = "Market Value",
             Format = "money"
