@@ -52,9 +52,7 @@ public sealed partial class FundPortalService
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as investors_count ");
         sql.Append(" from ( ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = f.fund_key ");
-        sql.Append(" union ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = f.fund_key ");
+        sql.Append($" select investor_key from {WarehouseTables.FactInvestorPortfolioLtd} where fund_key = f.fund_key ");
         sql.Append(" ) invkeys ");
         sql.Append(" ) inv ");
         sql.Append(" where f.fund_key = @fundKey ");

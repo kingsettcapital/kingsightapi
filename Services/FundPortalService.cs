@@ -368,7 +368,7 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" isnull(max(inv.investors_count), 0) as investors_count, ");
         PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
         AppendFundListingFrom(pageSql, portfolioTable);
-        AppendFundListingInvestorAssetApplies(pageSql);
+        AppendFundListingInvestorAssetApplies(pageSql, portfolioTable);
         AppendFundListingWhere(pageSql, view, period);
         pageSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
         orderBy.AppendOrderBy(pageSql);
@@ -472,8 +472,11 @@ public sealed partial class FundPortalService : IFundPortalService
         WarehouseSql.AppendFundStrategyFilter(sql, "b");
     }
 
-    /// <summary>Per-fund asset and investor counts (same logic as fund detail summary).</summary>
-    private static void AppendFundListingInvestorAssetApplies(StringBuilder sql, string fundAlias = "b")
+    /// <summary>Per-fund asset and investor counts (investors from portfolio facts).</summary>
+    private static void AppendFundListingInvestorAssetApplies(
+        StringBuilder sql,
+        string portfolioTable,
+        string fundAlias = "b")
     {
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as assets_count ");
@@ -486,9 +489,7 @@ public sealed partial class FundPortalService : IFundPortalService
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as investors_count ");
         sql.Append(" from ( ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = {fundAlias}.fund_key ");
-        sql.Append(" union ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = {fundAlias}.fund_key ");
+        sql.Append($" select investor_key from {portfolioTable} where fund_key = {fundAlias}.fund_key ");
         sql.Append(" ) invkeys ");
         sql.Append(" ) inv ");
     }
