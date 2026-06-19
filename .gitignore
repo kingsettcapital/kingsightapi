@@ -1,6 +1,7 @@
 ## Build results
 [Bb]in/
 [Oo]bj/
+build-out/
 
 ## CMHC uploads (local dev storage)
 CmhcUploads/

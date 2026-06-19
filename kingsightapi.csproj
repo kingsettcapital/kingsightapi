@@ -7,6 +7,11 @@
     <UserSecretsId>kingsightapi-local</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Avoid kingsightapi.exe lock when building while dotnet run is active -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="kingsightapi.Tests" />
   </ItemGroup>
@@ -25,6 +30,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.18.0" />
+    <PackageReference Include="Azure.Storage.Files.DataLake" Version="12.22.0" />
     <PackageReference Include="log4net" Version="3.0.4" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="1.0.0" />

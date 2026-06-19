@@ -60,14 +60,17 @@ namespace kingsightapi
             builder.Services.AddSingleton<IOtherCostCaptureService, OtherCostCaptureService>();
             builder.Services.AddSingleton<ILoanFormService, LoanFormService>();
             builder.Services.AddSingleton<IDataExplorerService, DataExplorerService>();
+            builder.Services.AddSingleton<IDefaultDateCaptureService, DefaultDateCaptureService>();
+            builder.Services.AddSingleton<IDefaultSubjectiveAnalyticsService, DefaultSubjectiveAnalyticsService>();
+            builder.Services.AddSingleton<ITaxArrearsService, TaxArrearsService>();
+            builder.Services.AddSingleton<ILtvValidationService, LtvValidationService>();
+            builder.Services.AddSingleton<INonKsServicedLoansService, NonKsServicedLoansService>();
 
-            builder.Services.Configure<CmhcUploadOptions>(configuration.GetSection(CmhcUploadOptions.SectionName));
+            builder.Services.AddCmhcFileStorage(configuration);
             builder.Services.Configure<FormOptions>(options =>
             {
                 options.MultipartBodyLengthLimit = 52_428_800;
             });
-            builder.Services.AddScoped<ICmhcFileStorage, LocalCmhcFileStorage>();
-            builder.Services.AddScoped<ICmhcUploadService, CmhcUploadService>();
 
             builder.Services.AddEndpointsApiExplorer();
             builder.Services.AddSwaggerGen(options =>
@@ -98,7 +101,16 @@ namespace kingsightapi
 
             using (var scope = app.Services.CreateScope())
             {
-                scope.ServiceProvider.GetRequiredService<ICmhcFileStorage>().EnsureStorageReady();
+                try
+                {
+                    scope.ServiceProvider.GetRequiredService<ICmhcFileStorage>().EnsureStorageReady();
+                }
+                catch (Exception ex)
+                {
+                    startupLogger.LogWarning(
+                        ex,
+                        "CMHC storage preflight failed; the API will start but upload endpoints may fail until OneLake is reachable.");
+                }
             }
 
             if (app.Environment.IsDevelopment())

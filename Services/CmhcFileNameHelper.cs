@@ -26,8 +26,17 @@ namespace kingsightapi.Services
 
         public static string ResolveUniqueFileName(string directory, string sanitizedFileName)
         {
-            var targetPath = Path.Combine(directory, sanitizedFileName);
-            if (!File.Exists(targetPath))
+            IEnumerable<string> existing = Directory.Exists(directory)
+                ? Directory.GetFiles(directory).Select(Path.GetFileName).OfType<string>()
+                : [];
+
+            return ResolveUniqueFileName(existing, sanitizedFileName);
+        }
+
+        public static string ResolveUniqueFileName(IEnumerable<string> existingFileNames, string sanitizedFileName)
+        {
+            var existing = existingFileNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!existing.Contains(sanitizedFileName))
             {
                 return sanitizedFileName;
             }
@@ -38,7 +47,7 @@ namespace kingsightapi.Services
             for (var i = 1; i < 10_000; i++)
             {
                 var candidate = $"{baseName}_{i}{extension}";
-                if (!File.Exists(Path.Combine(directory, candidate)))
+                if (!existing.Contains(candidate))
                 {
                     return candidate;
                 }
