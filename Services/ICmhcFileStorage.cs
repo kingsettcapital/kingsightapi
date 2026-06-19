@@ -2,8 +2,8 @@ namespace kingsightapi.Services
 {
     /// <summary>
     /// CMHC upload file storage abstraction.
-    /// Phase 1: <see cref="LocalCmhcFileStorage"/> writes to <c>CmhcUpload:LocalStoragePath</c>.
-    /// Phase 2: <c>FabricCmhcFileStorage</c> can upload to OneLake; DB keeps logical filename only.
+    /// Production: <see cref="FabricCmhcFileStorage"/> writes to Fabric OneLake (<c>CmhcUpload:FabricFilesPath</c>).
+    /// Dev fallback: <see cref="LocalCmhcFileStorage"/> when <c>StorageProvider</c> is <c>Local</c>.
     /// </summary>
     public interface ICmhcFileStorage
     {
