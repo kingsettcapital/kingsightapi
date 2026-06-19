@@ -92,6 +92,9 @@ public sealed class InvestorProfileDto
     public string Status { get; init; } = string.Empty;
     public string Contact { get; init; } = string.Empty;
 
+    [JsonPropertyName("contact_email")]
+    public string ContactEmail { get; init; } = string.Empty;
+
     [JsonPropertyName("total_commitment")]
     public decimal TotalCommitment { get; init; }
 

@@ -349,6 +349,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             investorReader.GetStringOrEmpty("contact_first_name"),
             investorReader.GetStringOrEmpty("contact_last_name"),
             investorReader.GetStringOrEmpty("contact_email"));
+        var contactEmail = investorReader.GetStringOrEmpty("contact_email");
 
         await investorReader.DisposeAsync();
 
@@ -363,6 +364,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             Relationship = relationship,
             Status = status,
             Contact = contact,
+            ContactEmail = contactEmail,
             TotalCommitment = metrics.TotalCommitment,
             NetInvestedCapital = metrics.NetInvestedCapital,
             NetDistributed = metrics.NetDistributed,
