@@ -137,7 +137,7 @@ public sealed class InvestorFundIrrDto
     public decimal? IrrItdPct => IrrLtdPct;
 }
 
-/// <summary>Capital obligation row — investor detail, unpivoted from portfolio facts.</summary>
+/// <summary>Capital obligation row — investor detail, one row per fund (wide portfolio metrics).</summary>
 public sealed class InvestorFundObligationDto
 {
     [JsonPropertyName("fund_key")]
@@ -152,18 +152,27 @@ public sealed class InvestorFundObligationDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
-    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    /// <summary>LTD or quarterly label (e.g. "LTD", "Q1 2024").</summary>
     [JsonPropertyName("period")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Period { get; init; }
+    public string Period { get; init; } = string.Empty;
 
-    /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
-    public string Type { get; init; } = string.Empty;
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount { get; init; }
 
-    public decimal Amount { get; init; }
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal ReleasedCapitalAmount { get; init; }
 }
 
-/// <summary>Net assets row — investor detail, unpivoted IRR horizons from quarterly portfolio facts.</summary>
+/// <summary>Net asset value row — investor detail, unitized funds only, quarterly NAV from <c>fact_fund_nav</c>.</summary>
 public sealed class InvestorFundNetAssetsDto
 {
     [JsonPropertyName("fund_key")]
@@ -178,15 +187,10 @@ public sealed class InvestorFundNetAssetsDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
-    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
     [JsonPropertyName("period")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Period { get; init; }
+    public string Period { get; init; } = string.Empty;
 
-    /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
-    public string Type { get; init; } = string.Empty;
-
-    public decimal? Ret { get; init; }
+    public decimal Nav { get; init; }
 }
 
 /// <summary>Capital Activities row — fund detail, one row per investor.</summary>
@@ -306,7 +310,7 @@ public sealed class FundInvestorIrrDto
     public decimal? IrrItdPct => IrrLtdPct;
 }
 
-/// <summary>Capital obligation row — fund detail, unpivoted from portfolio facts.</summary>
+/// <summary>Capital obligation row — fund detail, one row per investor (wide portfolio metrics).</summary>
 public sealed class FundInvestorObligationDto
 {
     [JsonPropertyName("investor_code")]
@@ -318,18 +322,27 @@ public sealed class FundInvestorObligationDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
-    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
+    /// <summary>LTD or quarterly label (e.g. "LTD", "Q1 2024").</summary>
     [JsonPropertyName("period")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Period { get; init; }
+    public string Period { get; init; } = string.Empty;
 
-    /// <summary>Obligation category: Commitment, Unfunded, Reserve, or Release.</summary>
-    public string Type { get; init; } = string.Empty;
+    [JsonPropertyName("commitment_amount")]
+    public decimal CommitmentAmount { get; init; }
 
-    public decimal Amount { get; init; }
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    [JsonPropertyName("net_distributed_amount")]
+    public decimal NetDistributedAmount { get; init; }
+
+    [JsonPropertyName("reserved_amount")]
+    public decimal ReservedAmount { get; init; }
+
+    [JsonPropertyName("released_capital_amount")]
+    public decimal ReleasedCapitalAmount { get; init; }
 }
 
-/// <summary>Net assets row — fund detail, unpivoted IRR horizons from quarterly portfolio facts.</summary>
+/// <summary>Net asset value row — fund detail, unitized funds only, quarterly NAV per investor.</summary>
 public sealed class FundInvestorNetAssetsDto
 {
     [JsonPropertyName("investor_code")]
@@ -341,13 +354,8 @@ public sealed class FundInvestorNetAssetsDto
     [JsonPropertyName("quarter_year")]
     public string QuarterYear { get; init; } = string.Empty;
 
-    /// <summary>Quarter label when view is quarterly (e.g. "Q1 2024").</summary>
     [JsonPropertyName("period")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Period { get; init; }
+    public string Period { get; init; } = string.Empty;
 
-    /// <summary>Horizon label: 1 Year, 3 Year, 5 Year, 7 Year, 10 Year, or ITD.</summary>
-    public string Type { get; init; } = string.Empty;
-
-    public decimal? Ret { get; init; }
+    public decimal Nav { get; init; }
 }

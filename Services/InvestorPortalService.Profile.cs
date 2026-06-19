@@ -47,13 +47,56 @@ public sealed partial class InvestorPortalService
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period) =>
-        await GetInvestorTransactionFundFiltersAsync(investorKey, TimeGranularity.Quarterly, period);
+        await GetInvestorTransactionFundFiltersAsync(investorKey, view, period);
 
     public async Task<TransactionFilterOptionsDto> GetInvestorNetAssetsFiltersAsync(
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period) =>
-        await GetInvestorTransactionFundFiltersAsync(investorKey, TimeGranularity.Quarterly, period);
+        await GetInvestorNavFundFiltersAsync(investorKey, period);
+
+    private async Task<TransactionFilterOptionsDto> GetInvestorNavFundFiltersAsync(
+        long investorKey,
+        FundPeriodFilter? period)
+    {
+        var sql = new StringBuilder();
+        sql.Append(" select distinct ");
+        sql.Append(" isnull(f.fund_code, '') as fund_code, ");
+        sql.Append(" isnull(f.fund_name, '') as fund_name ");
+        PortalPortfolioTransactionSql.AppendInvestorNavFrom(sql);
+        sql.Append(" where 1=1 ");
+        PortalPortfolioTransactionSql.AppendUnitizedFundFilter(sql);
+        PortalPortfolioTransactionSql.AppendNavQuarterlyPeriodFilter(sql, period);
+        sql.Append(" order by fund_code ");
+
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new SqlCommand(sql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        AddInvestorTransactionParameters(command, investorKey, period, null, null);
+
+        var items = new List<PortalFilterOptionDto>();
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var code = reader.GetStringOrEmpty("fund_code");
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                continue;
+            }
+
+            items.Add(new PortalFilterOptionDto
+            {
+                Value = code,
+                Label = reader.GetStringOrEmpty("fund_name")
+            });
+        }
+
+        return new TransactionFilterOptionsDto { Items = items };
+    }
 
     private async Task<TransactionFilterOptionsDto> GetInvestorTransactionFundFiltersAsync(
         long investorKey,

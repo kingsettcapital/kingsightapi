@@ -202,15 +202,25 @@ public sealed partial class FundPortalService
             throw new ArgumentException(sortError);
         }
 
-        var innerSql = new StringBuilder();
-        PortalPortfolioTransactionSql.AppendFundObligationsUnion(
-            innerSql,
-            WarehouseTables.FactInvestorPortfolioQuarterly,
-            period);
+        var factTable = view == TimeGranularity.Ltd
+            ? WarehouseTables.FactInvestorPortfolioLtd
+            : WarehouseTables.FactInvestorPortfolioQuarterly;
 
-        return await ExecuteFundUnpivotedPortfolioPageAsync(
-            innerSql,
-            orderBy,
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" isnull(cast(i.investor_id as varchar(20)), '') as investor_code, ");
+        pageSql.Append(" max(isnull(i.investor_name, '')) as investor_name, ");
+        PortalPortfolioTransactionSql.AppendObligationPeriodColumns(pageSql, view, period);
+        PortalPortfolioTransactionSql.AppendObligationMetricAggregates(pageSql);
+        AppendFundPortfolioFrom(pageSql, factTable);
+        AppendFundTransactionWhere(pageSql, view, period);
+        PortalPortfolioTransactionSql.AppendObligationGroupBy(pageSql, view, period, investorScope: false);
+        orderBy.AppendOrderBy(pageSql);
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
+
+        return await ExecuteFundTransactionPageAsync(
+            BuildFundObligationCountSql(factTable, view, period),
+            pageSql,
             fundKey,
             period,
             search,
@@ -222,9 +232,12 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
-                Period = reader.GetNullableTrimmedString("period"),
-                Type = reader.GetStringOrEmpty("type"),
-                Amount = reader.GetDecimalOrDefault("amount")
+                Period = reader.GetStringOrEmpty("period"),
+                CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
+                NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+                NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
+                ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
+                ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
             });
     }
 
@@ -244,15 +257,26 @@ public sealed partial class FundPortalService
             throw new ArgumentException(sortError);
         }
 
-        var innerSql = new StringBuilder();
-        PortalPortfolioTransactionSql.AppendFundNetAssetsUnion(
-            innerSql,
-            WarehouseTables.FactInvestorPortfolioQuarterly,
-            period);
+        var pageSql = new StringBuilder();
+        pageSql.Append(" select ");
+        pageSql.Append(" isnull(cast(i.investor_id as varchar(20)), '') as investor_code, ");
+        pageSql.Append(" max(isnull(i.investor_name, '')) as investor_name, ");
+        pageSql.Append(" isnull(d.quarter_year, '') as quarter_year, ");
+        pageSql.Append(" isnull(d.quarter_year, '') as period, ");
+        pageSql.Append(" sum(isnull(n.nav, 0)) as nav ");
+        PortalPortfolioTransactionSql.AppendFundNavFrom(pageSql);
+        pageSql.Append(" where 1=1 ");
+        PortalPortfolioTransactionSql.AppendUnitizedFundFilter(pageSql);
+        PortalPortfolioTransactionSql.AppendNavQuarterlyPeriodFilter(pageSql, period);
+        WarehouseSql.AppendInvestorCodeOrNameSearchFilter(pageSql, "i");
+        WarehouseSql.AppendInvestorNameFilter(pageSql, "i");
+        pageSql.Append(" group by i.investor_key, i.investor_id, d.quarter_year ");
+        orderBy.AppendOrderBy(pageSql);
+        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
-        return await ExecuteFundUnpivotedPortfolioPageAsync(
-            innerSql,
-            orderBy,
+        return await ExecuteFundTransactionPageAsync(
+            BuildFundNavCountSql(period),
+            pageSql,
             fundKey,
             period,
             search,
@@ -264,60 +288,41 @@ public sealed partial class FundPortalService
                 InvestorCode = reader.GetStringOrEmpty("investor_code"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
-                Period = reader.GetNullableTrimmedString("period"),
-                Type = reader.GetStringOrEmpty("type"),
-                Ret = reader.GetNullableDecimal("ret")
-            },
-            valueColumn: "ret");
+                Period = reader.GetStringOrEmpty("period"),
+                Nav = reader.GetDecimalOrDefault("nav")
+            });
     }
 
-    private async Task<PagedResult<T>> ExecuteFundUnpivotedPortfolioPageAsync<T>(
-        StringBuilder innerSql,
-        PortalListOrderBy orderBy,
-        int fundKey,
-        FundPeriodFilter? period,
-        string? search,
-        string? investorName,
-        int page,
-        int pageSize,
-        Func<SqlDataReader, T> mapRow,
-        string valueColumn = "amount")
+    private static StringBuilder BuildFundObligationCountSql(
+        string factTable,
+        TimeGranularity view,
+        FundPeriodFilter? period)
     {
-        var countSql = new StringBuilder();
-        countSql.Append(" select count(*) from ( ");
-        countSql.Append(innerSql);
-        countSql.Append(" ) rows where 1=1 ");
-        AppendFundUnpivotedOuterWhere(countSql);
-
-        var pageSql = new StringBuilder();
-        pageSql.Append($" select investor_code, investor_name, quarter_year, period, type, {valueColumn} from ( ");
-        pageSql.Append(innerSql);
-        pageSql.Append(" ) rows where 1=1 ");
-        AppendFundUnpivotedOuterWhere(pageSql);
-        orderBy.AppendOrderBy(pageSql);
-        pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
-
-        return await ExecuteFundTransactionPageAsync(
-            countSql,
-            pageSql,
-            fundKey,
-            period,
-            search,
-            investorName,
-            page,
-            pageSize,
-            mapRow);
+        var sql = new StringBuilder();
+        sql.Append(" select count(*) from ( ");
+        sql.Append(" select ");
+        PortalPortfolioTransactionSql.AppendObligationCountGroupKeys(sql, view, period, investorScope: false);
+        AppendFundPortfolioFrom(sql, factTable);
+        AppendFundTransactionWhere(sql, view, period);
+        PortalPortfolioTransactionSql.AppendObligationGroupBy(sql, view, period, investorScope: false);
+        sql.Append(" ) obligation_rows ");
+        return sql;
     }
 
-    private static void AppendFundUnpivotedOuterWhere(StringBuilder sql)
+    private static StringBuilder BuildFundNavCountSql(FundPeriodFilter? period)
     {
-        sql.Append(" and (@search is null ");
-        sql.Append(" or lower(isnull(rows.investor_code, '')) like '%' + lower(@search) + '%' ");
-        sql.Append(" or lower(isnull(rows.investor_name, '')) like '%' + lower(@search) + '%' ");
-        sql.Append(" ) ");
-        sql.Append(" and (@investorName is null ");
-        sql.Append(" or lower(isnull(rows.investor_name, '')) = lower(@investorName) ");
-        sql.Append(" ) ");
+        var sql = new StringBuilder();
+        sql.Append(" select count(*) from ( ");
+        sql.Append(" select i.investor_key, d.quarter_year ");
+        PortalPortfolioTransactionSql.AppendFundNavFrom(sql);
+        sql.Append(" where 1=1 ");
+        PortalPortfolioTransactionSql.AppendUnitizedFundFilter(sql);
+        PortalPortfolioTransactionSql.AppendNavQuarterlyPeriodFilter(sql, period);
+        WarehouseSql.AppendInvestorCodeOrNameSearchFilter(sql, "i");
+        WarehouseSql.AppendInvestorNameFilter(sql, "i");
+        sql.Append(" group by i.investor_key, i.investor_id, d.quarter_year ");
+        sql.Append(" ) nav_rows ");
+        return sql;
     }
 
     private static string PortfolioFactTable(TimeGranularity view) =>

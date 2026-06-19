@@ -3,108 +3,125 @@ using kingsightapi.Entities;
 
 namespace kingsightapi.Services;
 
-/// <summary>
-/// Unpivoted portfolio rows from <c>fact_investor_portfolio_quarterly</c> (obligations and net assets).
-/// </summary>
+/// <summary>Capital obligations (wide portfolio metrics) and unitized fund NAV for net-assets tables.</summary>
 internal static class PortalPortfolioTransactionSql
 {
-    public static void AppendInvestorObligationsUnion(
-        StringBuilder sql,
-        string factTable,
-        FundPeriodFilter? period)
+    public static void AppendObligationMetricAggregates(StringBuilder sql, string factAlias = "p")
     {
-        AppendBranch(sql, factTable, period, investorScope: true, "Commitment", "p.commitment_amount", "amount", coalesceToZero: true, isFirst: true);
-        AppendBranch(sql, factTable, period, investorScope: true, "Unfunded", "p.unfunded_amount", "amount", coalesceToZero: true, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "Reserve", "p.reserved_amount", "amount", coalesceToZero: true, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "Release", "p.released_capital_amount", "amount", coalesceToZero: true, isFirst: false);
+        sql.Append($" sum(isnull({factAlias}.commitment_amount, 0)) as commitment_amount, ");
+        sql.Append($" sum(isnull({factAlias}.net_invested_capital_amount, 0)) as net_invested_capital_amount, ");
+        sql.Append($" sum(isnull({factAlias}.preferred_return_amount, 0)) ");
+        sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
+        sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed_amount, ");
+        sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved_amount, ");
+        sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital_amount ");
     }
 
-    public static void AppendFundObligationsUnion(
+    /// <summary>LTD uses literal <c>LTD</c>; quarterly uses <c>quarter_year</c> from portfolio facts.</summary>
+    public static void AppendObligationPeriodColumns(
         StringBuilder sql,
-        string factTable,
-        FundPeriodFilter? period)
-    {
-        AppendBranch(sql, factTable, period, investorScope: false, "Commitment", "p.commitment_amount", "amount", coalesceToZero: true, isFirst: true);
-        AppendBranch(sql, factTable, period, investorScope: false, "Unfunded", "p.unfunded_amount", "amount", coalesceToZero: true, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "Reserve", "p.reserved_amount", "amount", coalesceToZero: true, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "Release", "p.released_capital_amount", "amount", coalesceToZero: true, isFirst: false);
-    }
-
-    public static void AppendInvestorNetAssetsUnion(
-        StringBuilder sql,
-        string factTable,
-        FundPeriodFilter? period)
-    {
-        AppendBranch(sql, factTable, period, investorScope: true, "1 Year", "p.irr_1_year_pct", "ret", coalesceToZero: false, isFirst: true);
-        AppendBranch(sql, factTable, period, investorScope: true, "3 Year", "p.irr_3_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "5 Year", "p.irr_5_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "7 Year", "p.irr_7_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "10 Year", "p.irr_10_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: true, "ITD", "p.irr_ltd_pct", "ret", coalesceToZero: false, isFirst: false);
-    }
-
-    public static void AppendFundNetAssetsUnion(
-        StringBuilder sql,
-        string factTable,
-        FundPeriodFilter? period)
-    {
-        AppendBranch(sql, factTable, period, investorScope: false, "1 Year", "p.irr_1_year_pct", "ret", coalesceToZero: false, isFirst: true);
-        AppendBranch(sql, factTable, period, investorScope: false, "3 Year", "p.irr_3_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "5 Year", "p.irr_5_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "7 Year", "p.irr_7_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "10 Year", "p.irr_10_year_pct", "ret", coalesceToZero: false, isFirst: false);
-        AppendBranch(sql, factTable, period, investorScope: false, "ITD", "p.irr_ltd_pct", "ret", coalesceToZero: false, isFirst: false);
-    }
-
-    private static void AppendBranch(
-        StringBuilder sql,
-        string factTable,
+        TimeGranularity view,
         FundPeriodFilter? period,
-        bool investorScope,
-        string typeLabel,
-        string valueExpression,
-        string valueColumn,
-        bool coalesceToZero,
-        bool isFirst)
+        string factAlias = "p")
     {
-        if (!isFirst)
+        if (view == TimeGranularity.Ltd)
         {
-            sql.Append(" union all ");
+            sql.Append(" 'LTD' as period, ");
+            sql.Append(" cast('' as varchar(50)) as quarter_year, ");
+            return;
         }
 
-        sql.Append(" select ");
+        PortalPortfolioListSql.AppendGroupedQuarterYearAndPeriodColumns(sql, view, period, factAlias);
+    }
+
+    public static void AppendObligationGroupBy(
+        StringBuilder sql,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        bool investorScope)
+    {
         if (investorScope)
         {
-            sql.Append(" f.fund_key, ");
-            sql.Append(" isnull(f.fund_code, '') as fund_code, ");
-            sql.Append(" isnull(f.fund_name, '') as fund_name, ");
+            sql.Append(" group by f.fund_key, f.fund_code ");
         }
         else
         {
-            sql.Append(" isnull(cast(i.investor_id as varchar(20)), '') as investor_code, ");
-            sql.Append(" isnull(i.investor_name, '') as investor_name, ");
+            sql.Append(" group by i.investor_key, i.investor_id ");
         }
 
-        sql.Append(" isnull(p.quarter_year, '') as quarter_year, ");
-        sql.Append(" isnull(p.quarter_year, '') as period, ");
-        sql.Append($" '{typeLabel}' as type, ");
-        if (coalesceToZero)
+        if (view == TimeGranularity.Quarterly
+            && PortalPortfolioListSql.GroupsPortfolioByQuarterYear(view, period))
         {
-            sql.Append($" isnull({valueExpression}, 0) as {valueColumn} ");
+            sql.Append(", p.quarter_year ");
+        }
+    }
+
+    public static void AppendObligationCountGroupKeys(
+        StringBuilder sql,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        bool investorScope)
+    {
+        if (investorScope)
+        {
+            sql.Append(" f.fund_key ");
         }
         else
         {
-            sql.Append($" {valueExpression} as {valueColumn} ");
+            sql.Append(" i.investor_key ");
         }
 
-        sql.Append($" from {factTable} p ");
-        sql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = p.fund_key ");
+        if (view == TimeGranularity.Quarterly
+            && PortalPortfolioListSql.GroupsPortfolioByQuarterYear(view, period))
+        {
+            sql.Append(", p.quarter_year ");
+        }
+    }
+
+    public static void AppendNavQuarterlyPeriodFilter(
+        StringBuilder sql,
+        FundPeriodFilter? period,
+        string dateAlias = "d")
+    {
+        if (period?.HasDateKey == true)
+        {
+            sql.Append($" and {dateAlias}.date_key = @dateKey ");
+            return;
+        }
+
+        if (period?.HasCalendarYear == true)
+        {
+            sql.Append($" and {dateAlias}.calendar_year = @calendarYear ");
+        }
+    }
+
+    public static void AppendUnitizedFundFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append($" and lower(isnull({fundAlias}.fund_type_name, '')) = 'unitized' ");
+    }
+
+    public static void AppendInvestorNavFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.FactFundNav} n ");
+        sql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = n.fund_key ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
+        sql.Append($" inner join {WarehouseTables.FactInvestorPortfolioLtd} p on p.fund_key = n.fund_key ");
+        sql.Append(" and p.investor_key = @investorKey ");
+        sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
+    }
+
+    public static void AppendFundNavFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.FactFundNav} n ");
+        sql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = n.fund_key ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "f");
+        sql.Append($" inner join {WarehouseTables.FactInvestorPortfolioLtd} p on p.fund_key = n.fund_key ");
+        sql.Append(" and p.fund_key = @fundKey ");
         sql.Append($" inner join {WarehouseTables.DimInvestor} i on i.investor_key = p.investor_key ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentInvestorFilter(sql, "i");
-        sql.Append(investorScope ? " where p.investor_key = @investorKey " : " where p.fund_key = @fundKey ");
-        PortalPortfolioListSql.AppendPortfolioFactQuarterlyPeriodFilter(sql, period);
+        sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
     }
 }

@@ -21,6 +21,7 @@ public interface IPropertyPortalService
     Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey);
     Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
+    Task<IReadOnlyList<PropertyFundHoldingDto>> GetPropertyFundHoldingsAsync(long propertyKey);
 }
 
 public sealed partial class PropertyPortalService : IPropertyPortalService
@@ -354,6 +355,7 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        WarehouseSql.AppendPropertyAssetTypePresentFilter(sql, "p");
         WarehouseSql.AppendPropertySearchFilter(sql, "p");
         WarehouseSql.AppendPropertyAssetTypeFilter(sql, "p");
         WarehouseSql.AppendPropertyInvestmentTypeFilter(sql, "p");

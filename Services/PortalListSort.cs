@@ -135,20 +135,22 @@ internal static class PortalListSort
         ("irrLtd", "irr_ltd_pct")
     };
 
-    private static readonly (string Camel, string Snake)[] UnpivotedObligationMetrics =
+    private static readonly (string Camel, string Snake)[] ObligationMetrics =
     {
         ("quarterYear", "quarter_year"),
         ("period", "period"),
-        ("type", "type"),
-        ("amount", "amount")
+        ("commitmentAmount", "commitment_amount"),
+        ("netInvestedCapitalAmount", "net_invested_capital_amount"),
+        ("netDistributedAmount", "net_distributed_amount"),
+        ("reservedAmount", "reserved_amount"),
+        ("releasedCapitalAmount", "released_capital_amount")
     };
 
-    private static readonly (string Camel, string Snake)[] UnpivotedNetAssetsMetrics =
+    private static readonly (string Camel, string Snake)[] NetAssetsMetrics =
     {
         ("quarterYear", "quarter_year"),
         ("period", "period"),
-        ("type", "type"),
-        ("ret", "ret")
+        ("nav", "nav")
     };
 
     private static readonly Dictionary<string, string> InvestorCapitalActivitiesColumns =
@@ -170,10 +172,10 @@ internal static class PortalListSort
             GroupedTransactionFields.Concat(IrrMetrics).ToArray());
 
     private static readonly Dictionary<string, string> InvestorObligationsColumns =
-        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), UnpivotedObligationMetrics);
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), ObligationMetrics);
 
     private static readonly Dictionary<string, string> InvestorNetAssetsColumns =
-        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), UnpivotedNetAssetsMetrics);
+        BuildTransactionSortMap(("fundCode", "fund_code"), ("fundName", "fund_name"), NetAssetsMetrics);
 
     private static readonly Dictionary<string, string> FundCapitalActivitiesColumns =
         BuildTransactionSortMap(
@@ -194,10 +196,10 @@ internal static class PortalListSort
             GroupedTransactionFields.Concat(IrrMetrics).ToArray());
 
     private static readonly Dictionary<string, string> FundObligationsColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), UnpivotedObligationMetrics);
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), ObligationMetrics);
 
     private static readonly Dictionary<string, string> FundNetAssetsColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), UnpivotedNetAssetsMetrics);
+        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), NetAssetsMetrics);
 
     private static Dictionary<string, string> BuildTransactionSortMap(
         (string Camel, string Snake) code,
@@ -265,7 +267,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorObligationsColumns,
-            "fundCode, fundName, quarterYear, period, type, amount",
+            "fundCode, fundName, quarterYear, period, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
             "fund_code",
             out sort,
             out error);
@@ -279,7 +281,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             InvestorNetAssetsColumns,
-            "fundCode, fundName, quarterYear, period, type, ret",
+            "fundCode, fundName, quarterYear, period, nav",
             "fund_code",
             out sort,
             out error);
@@ -335,7 +337,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundObligationsColumns,
-            "investorCode, investorName, quarterYear, period, type, amount",
+            "investorCode, investorName, quarterYear, period, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
             "investor_name",
             out sort,
             out error);
@@ -349,7 +351,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundNetAssetsColumns,
-            "investorCode, investorName, quarterYear, period, type, ret",
+            "investorCode, investorName, quarterYear, period, nav",
             "investor_name",
             out sort,
             out error);

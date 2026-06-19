@@ -151,27 +151,27 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/assets?page=1&pageSize=50
-    [HttpGet("{fundKey:int}/assets")]
-    public async Task<ActionResult<PagedResult<FundAssetDto>>> GetAssets(
+    // GET: api/funds/{fundKey}/underlying-assets?page=1&pageSize=50
+    [HttpGet("{fundKey:int}/underlying-assets")]
+    public async Task<ActionResult<PagedResult<FundAssetDto>>> GetUnderlyingAssets(
         int fundKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
         try
         {
-            var result = await _service.GetFundAssetsAsync(fundKey, page, pageSize);
+            var result = await _service.GetFundUnderlyingAssetsAsync(fundKey, page, pageSize);
             return Ok(result);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            _logger.LogInformation("Get underlying assets for fund {FundKey} cancelled", fundKey);
             return StatusCode(499);
         }
         catch (Exception ex)
         {
-            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets for fund {FundKey}", fundKey);
-            return StatusCode(500, "An error occurred while retrieving fund assets.");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving underlying assets for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund underlying assets.");
         }
     }
 
@@ -601,7 +601,7 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/capital-obligations?view=quarterly&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
+    // GET: api/funds/{fundKey}/capital-obligations?view=ltd|quarterly&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
     [HttpGet("{fundKey:int}/capital-obligations")]
     public async Task<ActionResult<PagedResult<FundInvestorObligationDto>>> GetCapitalObligations(
         int fundKey,
@@ -618,15 +618,15 @@ public class FundsController : ControllerBase
         if (view is null)
         {
             return BadRequest(
-                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
         }
 
-        if (view != TimeGranularity.Quarterly)
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
         {
-            return BadRequest("Capital obligations are only available when view is quarterly.");
+            return BadRequest("Capital obligations are only available when view is ltd or quarterly.");
         }
 
-        if (dateKey is not > 0 && calendarYear is not > 1900)
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
         {
             return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
         }
@@ -654,7 +654,7 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/capital-obligations/filters?view=quarterly&dateKey=&calendarYear=
+    // GET: api/funds/{fundKey}/capital-obligations/filters?view=ltd|quarterly&dateKey=&calendarYear=
     [HttpGet("{fundKey:int}/capital-obligations/filters")]
     public async Task<ActionResult<TransactionFilterOptionsDto>> GetCapitalObligationsFilters(
         int fundKey,
@@ -665,15 +665,15 @@ public class FundsController : ControllerBase
         if (view is null)
         {
             return BadRequest(
-                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
         }
 
-        if (view != TimeGranularity.Quarterly)
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
         {
-            return BadRequest("Capital obligations filters are only available when view is quarterly.");
+            return BadRequest("Capital obligations filters are only available when view is ltd or quarterly.");
         }
 
-        if (dateKey is not > 0 && calendarYear is not > 1900)
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
         {
             return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
         }

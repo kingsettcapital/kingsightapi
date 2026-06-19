@@ -233,42 +233,7 @@ public sealed class InvestorFundExposureDto
     public decimal? InvestedPercent { get; init; }
 }
 
-/// <summary>Underlying asset row for investor drill-down.</summary>
-public sealed class InvestorUnderlyingAssetDto
-{
-    [JsonPropertyName("property_key")]
-    public long PropertyKey { get; init; }
-
-    [JsonPropertyName("property_name")]
-    public string PropertyName { get; init; } = string.Empty;
-
-    [JsonPropertyName("asset_type")]
-    public string AssetType { get; init; } = string.Empty;
-
-    public string City { get; init; } = string.Empty;
-
-    [JsonPropertyName("fund_code")]
-    public string FundCode { get; init; } = string.Empty;
-
-    [JsonPropertyName("fund_name")]
-    public string FundName { get; init; } = string.Empty;
-
-    [JsonPropertyName("gla_sf")]
-    public decimal? GlaSf { get; init; }
-
-    [JsonPropertyName("occupancy_pct")]
-    public decimal? OccupancyPct { get; init; }
-
-    [JsonPropertyName("market_value")]
-    public decimal? MarketValue { get; init; }
-
-    [JsonPropertyName("cap_rate")]
-    public decimal? CapRate { get; init; }
-
-    public string Status { get; init; } = string.Empty;
-}
-
-/// <summary>Underlying asset row for investor detail Underlying Assets grid (<c>view_investor_fund_asset</c>).</summary>
+/// <summary>Underlying asset row for investor detail Underlying Assets grid (<c>dim_property.fund</c> = <c>dim_fund.fund_code</c>).</summary>
 public sealed class InvestorUnderlyingAssetGridItemDto
 {
     [JsonPropertyName("property_name")]

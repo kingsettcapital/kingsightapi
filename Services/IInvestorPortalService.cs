@@ -155,14 +155,7 @@ public interface IInvestorPortalService
         int page,
         int pageSize);
 
-    Task<PagedResult<InvestorUnderlyingAssetDto>> GetInvestorAssetsAsync(
-        long investorKey,
-        TimeGranularity view,
-        FundPeriodFilter? period,
-        int page,
-        int pageSize);
-
-    /// <summary>Underlying assets grid from <c>view_investor_fund_asset</c> (investor detail overview).</summary>
+    /// <summary>Underlying assets grid — investor LTD funds joined to <c>dim_property.fund</c> = <c>dim_fund.fund_code</c>.</summary>
     Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsAsync(
         long investorKey,
         string? search,

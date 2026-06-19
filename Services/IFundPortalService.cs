@@ -16,7 +16,7 @@ public interface IFundPortalService
         int pageSize);
     Task<FundProfileDto?> GetFundByKeyAsync(int fundKey);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
-    Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize);
+    Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize);
     Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
         int fundKey,
         TimeGranularity view,

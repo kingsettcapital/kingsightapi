@@ -675,7 +675,7 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors/{investorKey}/capital-obligations?view=quarterly&dateKey=&calendarYear=&search=&fundCode=&sortBy=&sortDir=&page=1&pageSize=50
+    // GET: api/CapitalInvestors/{investorKey}/capital-obligations?view=ltd|quarterly&dateKey=&calendarYear=&search=&fundCode=&sortBy=&sortDir=&page=1&pageSize=50
     [HttpGet("{investorKey:long}/capital-obligations")]
     public async Task<ActionResult<PagedResult<InvestorFundObligationDto>>> GetCapitalObligations(
         long investorKey,
@@ -692,15 +692,15 @@ public class CapitalInvestorsController : ControllerBase
         if (view is null)
         {
             return BadRequest(
-                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
         }
 
-        if (view != TimeGranularity.Quarterly)
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
         {
-            return BadRequest("Capital obligations are only available when view is quarterly.");
+            return BadRequest("Capital obligations are only available when view is ltd or quarterly.");
         }
 
-        if (dateKey is not > 0 && calendarYear is not > 1900)
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
         {
             return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
         }
@@ -728,7 +728,7 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors/{investorKey}/capital-obligations/filters?view=quarterly&dateKey=&calendarYear=
+    // GET: api/CapitalInvestors/{investorKey}/capital-obligations/filters?view=ltd|quarterly&dateKey=&calendarYear=
     [HttpGet("{investorKey:long}/capital-obligations/filters")]
     public async Task<ActionResult<TransactionFilterOptionsDto>> GetCapitalObligationsFilters(
         long investorKey,
@@ -739,15 +739,15 @@ public class CapitalInvestorsController : ControllerBase
         if (view is null)
         {
             return BadRequest(
-                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
         }
 
-        if (view != TimeGranularity.Quarterly)
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
         {
-            return BadRequest("Capital obligations filters are only available when view is quarterly.");
+            return BadRequest("Capital obligations filters are only available when view is ltd or quarterly.");
         }
 
-        if (dateKey is not > 0 && calendarYear is not > 1900)
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
         {
             return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
         }
@@ -891,40 +891,6 @@ public class CapitalInvestorsController : ControllerBase
         {
             ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} fund exposure for investor {InvestorKey}", view, investorKey);
             return StatusCode(500, "An error occurred while retrieving fund exposure.");
-        }
-    }
-
-    // GET: api/CapitalInvestors/{investorKey}/assets?view=ltd|quarterly|daily&dateKey=&page=1&pageSize=50
-    [HttpGet("{investorKey:long}/assets")]
-    public async Task<ActionResult<PagedResult<InvestorUnderlyingAssetDto>>> GetAssets(
-        long investorKey,
-        [FromQuery] TimeGranularity? view,
-        [FromQuery] int? dateKey,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
-    {
-        var resolvedView = view ?? TimeGranularity.Ltd;
-        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
-        {
-            return BadRequest(
-                $"Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
-        }
-
-        try
-        {
-            var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetInvestorAssetsAsync(investorKey, resolvedView, period, page, pageSize);
-            return Ok(result);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Get assets for investor {InvestorKey} cancelled", investorKey);
-            return StatusCode(499);
-        }
-        catch (Exception ex)
-        {
-            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets for investor {InvestorKey}", investorKey);
-            return StatusCode(500, "An error occurred while retrieving investor assets.");
         }
     }
 

@@ -180,6 +180,12 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    /// <summary>Assets listing — exclude rows with null or blank <c>asset_type</c>.</summary>
+    public static void AppendPropertyAssetTypePresentFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and nullif(ltrim(rtrim(isnull({propertyAlias}.asset_type, ''))), '') is not null ");
+    }
+
     public static void AppendPropertyInvestmentTypeFilter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append(" and (@investmentType is null ");
@@ -230,6 +236,39 @@ internal static class WarehouseSql
         sql.Append($" isnull({propertyAlias}.fund, '') = isnull({fundAlias}.fund_code, '') ");
         sql.Append($" or isnull({propertyAlias}.fund, '') = isnull({fundAlias}.fund_name, '') ");
         sql.Append($" or isnull({propertyAlias}.fund, '') = isnull({fundAlias}.js_fund_name, '') ");
+        sql.Append(" ) ");
+    }
+
+    /// <summary>Join <c>dim_property.fund</c> to <c>dim_fund.fund_code</c> (underlying assets).</summary>
+    public static void AppendPropertyFundCodeJoin(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" inner join {WarehouseTables.DimFund} {fundAlias} on isnull({propertyAlias}.fund, '') = isnull({fundAlias}.fund_code, '') ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, fundAlias);
+    }
+
+    /// <summary>Limit to funds where the investor has LTD portfolio exposure.</summary>
+    public static void AppendInvestorFundKeyScopeFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append($" and {fundAlias}.fund_key in ( ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        sql.Append(" where investor_key = @investorKey ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyUnderlyingAssetSearchFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.city, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.province, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_sub_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.investment_type, '')) like '%' + lower(@search) + '%' ");
         sql.Append(" ) ");
     }
 

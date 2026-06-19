@@ -539,38 +539,36 @@ public sealed partial class FundPortalService : IFundPortalService
         };
     }
 
-    public async Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize)
+    public async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize)
     {
         try
         {
-            return await GetFundAssetsInternalAsync(fundKey, page, pageSize);
+            return await GetFundUnderlyingAssetsInternalAsync(fundKey, page, pageSize);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            _logger.LogInformation("Get underlying assets for fund {FundKey} cancelled", fundKey);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets for fund {FundKey}", fundKey);
+            _logger.LogError(ex, "Error retrieving underlying assets for fund {FundKey}", fundKey);
             throw;
         }
     }
 
-    private async Task<PagedResult<FundAssetDto>> GetFundAssetsInternalAsync(int fundKey, int page, int pageSize)
+    private async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsInternalAsync(int fundKey, int page, int pageSize)
     {
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) ");
         countSql.Append($" from {WarehouseTables.DimProperty} p ");
-        countSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
-        countSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(countSql, "f");
+        WarehouseSql.AppendPropertyFundCodeJoin(countSql);
         countSql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(countSql, "p", "f");
         WarehouseSql.AppendPropertyFundLevel000Filter(countSql, "p");
+        countSql.Append(" and f.fund_key = @fundKey ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
@@ -587,14 +585,12 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" metrics.gross_leasable_area_sqft as gla_sf, ");
         pageSql.Append(" metrics.occupied_area_sqft as occupied_sf ");
         pageSql.Append($" from {WarehouseTables.DimProperty} p ");
-        pageSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
-        pageSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(pageSql, "f");
+        WarehouseSql.AppendPropertyFundCodeJoin(pageSql);
         WarehouseSql.AppendLatestAssetMetricsApply(pageSql, "p");
         pageSql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(pageSql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(pageSql, "p", "f");
         WarehouseSql.AppendPropertyFundLevel000Filter(pageSql, "p");
+        pageSql.Append(" and f.fund_key = @fundKey ");
         pageSql.Append(" order by p.property_name ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 

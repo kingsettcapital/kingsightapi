@@ -217,3 +217,28 @@ public sealed class PropertyInvestmentDto
     public decimal TotalValue { get; init; }
     public decimal? TotalReturnPercent { get; init; }
 }
+
+/// <summary>Fund holdings grid on asset detail — property linked to current dim_fund row.</summary>
+public sealed class PropertyFundHoldingDto
+{
+    [JsonPropertyName("property_code")]
+    public string PropertyCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_strategy_name")]
+    public string FundStrategyName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_type_name")]
+    public string FundTypeName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_start_date")]
+    public DateTime? FundStartDate { get; init; }
+}

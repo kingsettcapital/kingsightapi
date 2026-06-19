@@ -137,7 +137,7 @@ internal static class PortalPortfolioListSql
         if (view == TimeGranularity.Ltd)
         {
             sql.Append($" max(isnull(cast({factAlias}.date_key as varchar(20)), '')) as quarter_year, ");
-            sql.Append(" cast(null as varchar(100)) as period, ");
+            sql.Append(" 'LTD' as period, ");
             return;
         }
 
