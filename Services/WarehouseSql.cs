@@ -278,6 +278,12 @@ internal static class WarehouseSql
         sql.Append($" and isnull({propertyAlias}.fund_level, '') in ('000 Property', '000 - Property') ");
     }
 
+    /// <summary>Fund asset counts — only active properties.</summary>
+    public static void AppendPropertyActiveStatusFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and {propertyAlias}.property_status = 'Active' ");
+    }
+
     /// <summary>Latest <c>fact_asset_metrics</c> row per property (max <c>date_key</c>).</summary>
     public static void AppendLatestAssetMetricsApply(
         StringBuilder sql,

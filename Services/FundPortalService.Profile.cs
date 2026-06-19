@@ -48,6 +48,7 @@ public sealed partial class FundPortalService
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyBelongsToFundFilter(sql, "p", "f");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        WarehouseSql.AppendPropertyActiveStatusFilter(sql, "p");
         sql.Append(" ) assets ");
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as investors_count ");
