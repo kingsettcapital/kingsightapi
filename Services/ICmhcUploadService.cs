@@ -10,6 +10,7 @@ namespace kingsightapi.Services
             IFormFile file,
             string fileName,
             string uploadedBy,
+            string fileType,
             CancellationToken cancellationToken);
 
         Task<(Stream Stream, string FileName)> GetTemplateAsync(CancellationToken cancellationToken);

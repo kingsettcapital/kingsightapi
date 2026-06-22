@@ -9,7 +9,7 @@ namespace kingsightapi.Services
         private readonly CmhcUploadOptions _options;
         private readonly string _contentRoot;
         private readonly ILogger<LocalCmhcFileStorage> _logger;
-        private string? _resolvedStoragePath;
+        private readonly Dictionary<string, string> _resolvedStoragePaths = new(StringComparer.OrdinalIgnoreCase);
 
         public LocalCmhcFileStorage(
             IOptions<CmhcUploadOptions> options,
@@ -23,8 +23,9 @@ namespace kingsightapi.Services
 
         public void EnsureStorageReady()
         {
-            var storagePath = GetStoragePath();
+            var storagePath = GetStoragePath(CmhcUploadFileTypes.CmhcExcel);
             Directory.CreateDirectory(storagePath);
+            Directory.CreateDirectory(GetStoragePath(CmhcUploadFileTypes.QrSlides));
 
             var templateDir = GetTemplateDirectory();
             Directory.CreateDirectory(templateDir);
@@ -38,9 +39,10 @@ namespace kingsightapi.Services
         public async Task<string> SaveUploadAsync(
             Stream content,
             string sanitizedFileName,
+            string uploadCategory,
             CancellationToken cancellationToken)
         {
-            var storagePath = GetStoragePath();
+            var storagePath = GetStoragePath(uploadCategory);
             Directory.CreateDirectory(storagePath);
 
             var uniqueName = CmhcFileNameHelper.ResolveUniqueFileName(storagePath, sanitizedFileName);
@@ -56,7 +58,7 @@ namespace kingsightapi.Services
 
             await content.CopyToAsync(fileStream, cancellationToken);
 
-            _logger.LogInformation("Saved CMHC upload file {FileName} to {Path}", uniqueName, fullPath);
+            _logger.LogInformation("Saved file upload {FileName} to {Path}", uniqueName, fullPath);
             return uniqueName;
         }
 
@@ -83,26 +85,29 @@ namespace kingsightapi.Services
             return Task.FromResult((stream, _options.TemplateFileName));
         }
 
-        public Task DeleteUploadAsync(string storedFileName, CancellationToken cancellationToken)
+        public Task DeleteUploadAsync(
+            string storedFileName,
+            string uploadCategory,
+            CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
-            var fullPath = Path.Combine(GetStoragePath(), safeName);
+            var fullPath = Path.Combine(GetStoragePath(uploadCategory), safeName);
             if (File.Exists(fullPath))
             {
                 File.Delete(fullPath);
-                _logger.LogInformation("Deleted CMHC upload file {Path}", fullPath);
+                _logger.LogInformation("Deleted file upload {Path}", fullPath);
             }
 
             return Task.CompletedTask;
         }
 
-        private string GetStoragePath()
+        private string GetStoragePath(string? uploadCategory = null)
         {
-            if (_resolvedStoragePath is not null)
+            if (_resolvedStoragePaths.TryGetValue(CmhcUploadFileTypes.Normalize(uploadCategory), out var cached))
             {
-                return _resolvedStoragePath;
+                return cached;
             }
 
             var path = _options.LocalStoragePath;
@@ -111,14 +116,17 @@ namespace kingsightapi.Services
                 path = Path.Combine(_contentRoot, path);
             }
 
-            _resolvedStoragePath = Path.GetFullPath(path);
-            return _resolvedStoragePath;
+            var category = CmhcUploadFileTypes.Normalize(uploadCategory);
+            var relativePath = _options.GetUploadRelativePath(category);
+            var resolved = Path.GetFullPath(Path.Combine(path, relativePath));
+            _resolvedStoragePaths[category] = resolved;
+            return resolved;
         }
 
         private string GetTemplateDirectory()
         {
             var siblingTemplates = Path.GetFullPath(
-                Path.Combine(GetStoragePath(), "..", "templates"));
+                Path.Combine(GetStoragePath(CmhcUploadFileTypes.CmhcExcel), "..", "templates"));
 
             var wwwrootTemplates = Path.Combine(_contentRoot, "wwwroot", "templates");
             return Directory.Exists(wwwrootTemplates) ? wwwrootTemplates : siblingTemplates;
@@ -130,7 +138,7 @@ namespace kingsightapi.Services
             {
                 Path.Combine(_contentRoot, "wwwroot", "templates", _options.TemplateFileName),
                 Path.GetFullPath(
-                    Path.Combine(GetStoragePath(), "..", "templates", _options.TemplateFileName))
+                    Path.Combine(GetStoragePath(CmhcUploadFileTypes.CmhcExcel), "..", "templates", _options.TemplateFileName))
             };
 
             foreach (var candidate in candidates)

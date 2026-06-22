@@ -31,6 +31,12 @@ namespace kingsightapi
                 builder.WebHost.UseUrls(apiUrl);
             }
 
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                // QR slide PDFs can be ~40 MB; default Kestrel limit is ~28.6 MB.
+                options.Limits.MaxRequestBodySize = 62_914_560;
+            });
+
             builder.Services.AddControllers()
                 .AddJsonOptions(options =>
                 {
@@ -70,7 +76,7 @@ namespace kingsightapi
             builder.Services.AddCmhcFileStorage(configuration);
             builder.Services.Configure<FormOptions>(options =>
             {
-                options.MultipartBodyLengthLimit = 52_428_800;
+                options.MultipartBodyLengthLimit = 62_914_560;
             });
 
             builder.Services.AddEndpointsApiExplorer();

@@ -77,15 +77,21 @@ namespace kingsightapi.Services
             IFormFile file,
             string fileName,
             string uploadedBy,
+            string fileType,
             CancellationToken cancellationToken)
         {
+            var uploadCategory = CmhcUploadFileTypes.Normalize(fileType);
             var uploadedByUserId = ParseUploadedBy(uploadedBy);
-            ValidateUpload(file, fileName);
+            ValidateUpload(file, fileName, uploadCategory);
 
             var sanitizedFileName = CmhcFileNameHelper.SanitizeFileName(fileName);
 
             await using var stream = file.OpenReadStream();
-            var storedFileName = await _fileStorage.SaveUploadAsync(stream, sanitizedFileName, cancellationToken);
+            var storedFileName = await _fileStorage.SaveUploadAsync(
+                stream,
+                sanitizedFileName,
+                uploadCategory,
+                cancellationToken);
 
             try
             {
@@ -95,7 +101,7 @@ namespace kingsightapi.Services
             {
                 try
                 {
-                    await _fileStorage.DeleteUploadAsync(storedFileName, cancellationToken);
+                    await _fileStorage.DeleteUploadAsync(storedFileName, uploadCategory, cancellationToken);
                 }
                 catch (Exception ex)
                 {
@@ -109,7 +115,7 @@ namespace kingsightapi.Services
         public Task<(Stream Stream, string FileName)> GetTemplateAsync(CancellationToken cancellationToken) =>
             _fileStorage.GetTemplateAsync(cancellationToken);
 
-        private void ValidateUpload(IFormFile file, string fileName)
+        private void ValidateUpload(IFormFile file, string fileName, string uploadCategory)
         {
             if (file is null || file.Length == 0)
             {
@@ -129,12 +135,13 @@ namespace kingsightapi.Services
             }
 
             var nameForExtensionCheck = CmhcFileNameHelper.SanitizeFileName(fileName);
+            var allowedExtensions = _options.GetAllowedExtensions(uploadCategory);
 
-            if (!CmhcFileNameHelper.HasAllowedExtension(nameForExtensionCheck, _options.AllowedExtensions))
+            if (!CmhcFileNameHelper.HasAllowedExtension(nameForExtensionCheck, allowedExtensions))
             {
                 throw new CmhcUploadValidationException(
                     "File extension is not allowed. Allowed types: "
-                    + string.Join(", ", _options.AllowedExtensions));
+                    + string.Join(", ", allowedExtensions));
             }
         }
 

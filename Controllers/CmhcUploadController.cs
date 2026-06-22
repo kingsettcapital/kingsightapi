@@ -40,17 +40,21 @@ namespace kingsightapi.Controllers
 
         // POST: api/CmhcUpload — uploadedBy must be a user GUID (maps to UNIQUEIDENTIFIER)
         [HttpPost]
-        [RequestSizeLimit(52_428_800)]
-        [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
+        [Consumes("multipart/form-data")]
+        [RequestSizeLimit(62_914_560)]
+        [RequestFormLimits(MultipartBodyLengthLimit = 62_914_560)]
         public async Task<ActionResult<CmhcUploadHistoryDto>> Upload(
-            IFormFile? file,
-            [FromForm] string? fileName,
-            [FromForm] string? uploadedBy,
+            [FromForm] CmhcUploadFormRequest request,
+            [FromQuery] string? fileType,
             CancellationToken cancellationToken)
         {
-            var resolvedFileName = string.IsNullOrWhiteSpace(fileName)
+            var file = request.File;
+            var resolvedFileName = string.IsNullOrWhiteSpace(request.FileName)
                 ? file?.FileName
-                : fileName;
+                : request.FileName;
+            var resolvedFileType = CmhcUploadFileTypes.Resolve(
+                string.IsNullOrWhiteSpace(request.FileType) ? fileType : request.FileType,
+                resolvedFileName);
 
             try
             {
@@ -59,10 +63,16 @@ namespace kingsightapi.Controllers
                     return BadRequest("Upload file is required.");
                 }
 
+                if (!CmhcUploadFileTypes.IsSupported(request.FileType ?? fileType, resolvedFileName))
+                {
+                    return BadRequest("fileType must be 'cmhc' or 'qr-slides'.");
+                }
+
                 var result = await _service.UploadAsync(
                     file,
                     resolvedFileName ?? string.Empty,
-                    uploadedBy ?? string.Empty,
+                    request.UploadedBy ?? string.Empty,
+                    resolvedFileType,
                     cancellationToken);
 
                 return Created("/api/CmhcUpload/history", result);

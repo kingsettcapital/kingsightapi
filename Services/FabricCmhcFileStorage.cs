@@ -6,8 +6,8 @@ using Microsoft.Extensions.Options;
 namespace kingsightapi.Services;
 
 /// <summary>
-/// Stores CMHC uploads in Fabric OneLake under
-/// <c>Files/{FabricFilesPath}</c> on the configured lakehouse.
+/// Stores uploads in Fabric OneLake under
+/// <c>Files/Uploaded files/excel files</c> and <c>Files/Uploaded files/QR Slides Files</c>.
 /// </summary>
 public sealed class FabricCmhcFileStorage : ICmhcFileStorage
 {
@@ -30,18 +30,23 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
 
     public void EnsureStorageReady()
     {
-        var directory = GetUploadDirectoryClient();
+        EnsureDirectoryReady(GetUploadDirectoryClient(CmhcUploadFileTypes.CmhcExcel));
+        EnsureDirectoryReady(GetUploadDirectoryClient(CmhcUploadFileTypes.QrSlides));
+    }
+
+    private void EnsureDirectoryReady(DataLakeDirectoryClient directory)
+    {
         if (directory.Exists())
         {
             _logger.LogInformation(
-                "CMHC upload storage verified on Fabric OneLake at {Uri}",
+                "File upload storage verified on Fabric OneLake at {Uri}",
                 directory.Uri);
             return;
         }
 
         var created = directory.CreateIfNotExists();
         _logger.LogInformation(
-            "CMHC upload storage ready on Fabric OneLake at {Uri} (created={Created})",
+            "File upload storage ready on Fabric OneLake at {Uri} (created={Created})",
             directory.Uri,
             created is not null);
     }
@@ -49,9 +54,10 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
     public async Task<string> SaveUploadAsync(
         Stream content,
         string sanitizedFileName,
+        string uploadCategory,
         CancellationToken cancellationToken)
     {
-        var directory = GetUploadDirectoryClient();
+        var directory = GetUploadDirectoryClient(uploadCategory);
         await directory.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
 
         var existingNames = await ListUploadFileNamesAsync(directory, cancellationToken);
@@ -66,9 +72,9 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
         await fileClient.UploadAsync(content, overwrite: false, cancellationToken: cancellationToken);
 
         _logger.LogInformation(
-            "Saved CMHC upload file {FileName} to Fabric OneLake path {Path}",
+            "Saved file upload {FileName} to Fabric OneLake path {Path}",
             uniqueName,
-            _options.FabricUploadDirectoryPath);
+            _options.GetFabricUploadDirectoryPath(uploadCategory));
 
         return uniqueName;
     }
@@ -107,21 +113,27 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
         return (stream, _options.TemplateFileName);
     }
 
-    public async Task DeleteUploadAsync(string storedFileName, CancellationToken cancellationToken)
+    public async Task DeleteUploadAsync(
+        string storedFileName,
+        string uploadCategory,
+        CancellationToken cancellationToken)
     {
         var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
-        var fileClient = GetUploadDirectoryClient().GetFileClient(safeName);
+        var fileClient = GetUploadDirectoryClient(uploadCategory).GetFileClient(safeName);
         var deleted = await fileClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);
         if (deleted.Value)
         {
-            _logger.LogInformation("Deleted CMHC upload file {FileName} from Fabric OneLake", safeName);
+            _logger.LogInformation("Deleted file upload {FileName} from Fabric OneLake", safeName);
         }
     }
 
-    private DataLakeDirectoryClient GetUploadDirectoryClient()
+    private DataLakeDirectoryClient GetUploadDirectoryClient(string? uploadCategory = null)
     {
         var fileSystem = _serviceClient.GetFileSystemClient(_options.FabricFileSystemName);
-        return fileSystem.GetDirectoryClient(_options.FabricUploadDirectoryPath);
+        var directoryPath = uploadCategory is null
+            ? _options.FabricUploadDirectoryPath
+            : _options.GetFabricUploadDirectoryPath(CmhcUploadFileTypes.Normalize(uploadCategory));
+        return fileSystem.GetDirectoryClient(directoryPath);
     }
 
     private static async Task<IReadOnlyList<string>> ListUploadFileNamesAsync(
