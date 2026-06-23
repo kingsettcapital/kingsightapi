@@ -9,8 +9,8 @@ namespace kingsightapi.Services
     {
         Task<IReadOnlyList<LoanAliasDto>> GetAllAsync();
         Task<LoanAliasDto?> GetByIdAsync(long loanAliasId);
-        Task<long> SaveAsync(LoanAliasSaveRequest request);
-        Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request);
+        Task<long> SaveAsync(LoanAliasSaveRequest request, string auditDisplayName);
+        Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request, string auditDisplayName);
         Task<bool> DeleteAsync(long loanAliasId);
     }
 
@@ -45,8 +45,8 @@ namespace kingsightapi.Services
 
         private const string InsertSql = """
             insert into mort.loan_alias_master
-                (loan_alias_id, loan_alias_name, created_by, created_dtm)
-            values (@loan_alias_id, @loan_alias_name, @created_by, getutcdate())
+                (loan_alias_id, loan_alias_name, created_by, created_dtm, updated_by, updated_dtm)
+            values (@loan_alias_id, @loan_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
             """;
 
         private const string UpdateSql = """
@@ -117,7 +117,7 @@ namespace kingsightapi.Services
             return MapRow(reader, ordinals);
         }
 
-        public async Task<long> SaveAsync(LoanAliasSaveRequest request)
+        public async Task<long> SaveAsync(LoanAliasSaveRequest request, string auditDisplayName)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -133,7 +133,7 @@ namespace kingsightapi.Services
                 };
                 command.Parameters.AddWithValue("@loan_alias_id", newId);
                 command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-                command.Parameters.AddWithValue("@created_by", request.CreatedBy);
+                command.Parameters.AddWithValue("@audit_user", auditDisplayName);
 
                 await command.ExecuteNonQueryAsync();
                 await transaction.CommitAsync();
@@ -159,7 +159,7 @@ namespace kingsightapi.Services
             return Convert.ToInt64(result);
         }
 
-        public async Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request)
+        public async Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request, string auditDisplayName)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -170,7 +170,7 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
             command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-            command.Parameters.AddWithValue("@updated_by", request.UpdatedBy);
+            command.Parameters.AddWithValue("@updated_by", auditDisplayName);
 
             var affectedRows = await command.ExecuteNonQueryAsync();
             if (affectedRows > 0)

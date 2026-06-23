@@ -15,6 +15,7 @@ namespace kingsightapi.Services
 
         Task<bool> UpdateAsync(
             DefaultDateCaptureBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
@@ -108,6 +109,7 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             DefaultDateCaptureBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             var defaultDateColumn = await GetDefaultDateColumnAsync(cancellationToken);
@@ -138,7 +140,7 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue(
                     "@default_date",
                     loan.DefaultDate.HasValue ? loan.DefaultDate.Value.Date : DBNull.Value);
-                command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }

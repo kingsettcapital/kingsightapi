@@ -19,6 +19,7 @@ namespace kingsightapi.Services
 
         Task<bool> UpdateAsync(
             DefaultSubjectiveAnalyticsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
@@ -139,6 +140,7 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             DefaultSubjectiveAnalyticsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             await ResolveWritableColumnsAsync(cancellationToken);
@@ -199,7 +201,7 @@ namespace kingsightapi.Services
                     ToDbValue(string.IsNullOrWhiteSpace(loan.MaturityAdditionalDetail)
                         ? null
                         : loan.MaturityAdditionalDetail.Trim()));
-                command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }

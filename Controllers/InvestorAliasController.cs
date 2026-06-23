@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,13 +11,16 @@ namespace kingsightapi.Controllers
     public class InvestorAliasController : ControllerBase
     {
         private readonly IInvestorAliasService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<InvestorAliasController> _logger;
 
         public InvestorAliasController(
             IInvestorAliasService service,
+            ICurrentUserResolver currentUserResolver,
             ILogger<InvestorAliasController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -64,7 +68,9 @@ namespace kingsightapi.Controllers
 
         // POST: api/InvestorAlias
         [HttpPost]
-        public async Task<ActionResult<InvestorAliasDto>> Save([FromBody] InvestorAliasSaveRequest request)
+        public async Task<ActionResult<InvestorAliasDto>> Save(
+            [FromBody] InvestorAliasSaveRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
@@ -76,9 +82,18 @@ namespace kingsightapi.Controllers
                 return BadRequest("Investor alias name is required.");
             }
 
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.CreatedBy,
+                "createdBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var newId = await _service.SaveAsync(request);
+                var newId = await _service.SaveAsync(request, auditDisplayName!);
                 var created = await _service.GetByIdAsync(newId);
                 return CreatedAtAction(nameof(GetById), new { investorAliasId = newId }, created);
             }
@@ -96,7 +111,10 @@ namespace kingsightapi.Controllers
 
         // PUT: api/InvestorAlias/{investorAliasId}
         [HttpPut("{investorAliasId:long}")]
-        public async Task<IActionResult> Update(long investorAliasId, [FromBody] InvestorAliasUpdateRequest request)
+        public async Task<ActionResult<InvestorAliasDto>> Update(
+            long investorAliasId,
+            [FromBody] InvestorAliasUpdateRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
@@ -108,10 +126,25 @@ namespace kingsightapi.Controllers
                 return BadRequest("Investor alias name is required.");
             }
 
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.UpdatedBy,
+                "updatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var updated = await _service.UpdateAsync(investorAliasId, request);
-                return updated ? NoContent() : NotFound();
+                var updated = await _service.UpdateAsync(investorAliasId, request, auditDisplayName!);
+                if (!updated)
+                {
+                    return NotFound();
+                }
+
+                var result = await _service.GetByIdAsync(investorAliasId);
+                return Ok(result);
             }
             catch (OperationCanceledException)
             {

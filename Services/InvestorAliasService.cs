@@ -9,8 +9,8 @@ namespace kingsightapi.Services
     {
         Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync();
         Task<InvestorAliasDto?> GetByIdAsync(long investorAliasId);
-        Task<long> SaveAsync(InvestorAliasSaveRequest request);
-        Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request);
+        Task<long> SaveAsync(InvestorAliasSaveRequest request, string auditDisplayName);
+        Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request, string auditDisplayName);
         Task<bool> DeleteAsync(long investorAliasId);
     }
 
@@ -45,8 +45,8 @@ namespace kingsightapi.Services
 
         private const string InsertSql = """
             insert into mort.investor_alias_master
-                (investor_alias_id, investor_alias_name, created_by, created_dtm)
-            values (@investor_alias_id, @investor_alias_name, @created_by, getutcdate())
+                (investor_alias_id, investor_alias_name, created_by, created_dtm, updated_by, updated_dtm)
+            values (@investor_alias_id, @investor_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
             """;
 
         private const string UpdateSql = """
@@ -117,7 +117,7 @@ namespace kingsightapi.Services
             return MapRow(reader, ordinals);
         }
 
-        public async Task<long> SaveAsync(InvestorAliasSaveRequest request)
+        public async Task<long> SaveAsync(InvestorAliasSaveRequest request, string auditDisplayName)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -133,7 +133,7 @@ namespace kingsightapi.Services
                 };
                 command.Parameters.AddWithValue("@investor_alias_id", newId);
                 command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-                command.Parameters.AddWithValue("@created_by", request.CreatedBy);
+                command.Parameters.AddWithValue("@audit_user", auditDisplayName);
 
                 await command.ExecuteNonQueryAsync();
                 await transaction.CommitAsync();
@@ -159,7 +159,7 @@ namespace kingsightapi.Services
             return Convert.ToInt64(result);
         }
 
-        public async Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request)
+        public async Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request, string auditDisplayName)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -170,7 +170,7 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
             command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-            command.Parameters.AddWithValue("@updated_by", request.UpdatedBy);
+            command.Parameters.AddWithValue("@updated_by", auditDisplayName);
 
             var affectedRows = await command.ExecuteNonQueryAsync();
             if (affectedRows > 0)

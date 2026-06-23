@@ -2,7 +2,7 @@ namespace kingsightapi.Entities
 {
     /// <summary>
     /// Row from mort.CMHC_upload_historytbl.
-    /// uploadedBy is the UNIQUEIDENTIFIER user id as a string (camelCase JSON for SPA).
+    /// uploadedBy is the stored UNIQUEIDENTIFIER string; uploadedByUserId/uploadedByName are resolved from input.UserMst.
     /// </summary>
     public sealed class CmhcUploadHistoryDto
     {
@@ -10,5 +10,7 @@ namespace kingsightapi.Entities
         public string Filename { get; set; } = string.Empty;
         public DateTime UploadedDate { get; set; }
         public string UploadedBy { get; set; } = string.Empty;
+        public int? UploadedByUserId { get; set; }
+        public string? UploadedByName { get; set; }
     }
 }

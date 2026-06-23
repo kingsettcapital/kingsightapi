@@ -47,6 +47,8 @@ namespace kingsightapi
                 });
 
             builder.Services.AddEntraAuthentication(configuration);
+            builder.Services.AddHttpContextAccessor();
+            builder.Services.AddScoped<ICurrentUserResolver, CurrentUserResolver>();
 
             builder.Services.AddSingleton<IDBService, DBService>();
             //builder.Services.AddSingleton<IFundService, FundService>();
@@ -72,6 +74,8 @@ namespace kingsightapi
             builder.Services.AddSingleton<ILtvValidationService, LtvValidationService>();
             builder.Services.AddSingleton<INonKsServicedLoansService, NonKsServicedLoansService>();
             builder.Services.AddSingleton<IManagementSummaryService, ManagementSummaryService>();
+            builder.Services.AddSingleton<IRoleService, RoleService>();
+            builder.Services.AddSingleton<IUserService, UserService>();
 
             builder.Services.AddCmhcFileStorage(configuration);
             builder.Services.Configure<FormOptions>(options =>

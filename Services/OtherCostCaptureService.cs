@@ -15,6 +15,7 @@ namespace kingsightapi.Services
 
         Task<bool> UpdateAsync(
             OtherCostCaptureBatchUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
@@ -104,6 +105,7 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             OtherCostCaptureBatchUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             await using var connection = new SqlConnection(_connectionString);
@@ -123,7 +125,7 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue(
                     "@cost_to_complete_value",
                     loan.CostToComplete.HasValue ? loan.CostToComplete.Value : DBNull.Value);
-                command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }

@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,15 +11,18 @@ namespace kingsightapi.Controllers
     {
         private readonly IDefaultDateCaptureService _service;
         private readonly ILoanSecurityValueService _loanSecurityValueService;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<DefaultDateCaptureController> _logger;
 
         public DefaultDateCaptureController(
             IDefaultDateCaptureService service,
             ILoanSecurityValueService loanSecurityValueService,
+            ICurrentUserResolver currentUserResolver,
             ILogger<DefaultDateCaptureController> logger)
         {
             _service = service;
             _loanSecurityValueService = loanSecurityValueService;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -90,16 +94,21 @@ namespace kingsightapi.Controllers
                 {
                     return BadRequest("Loan key is required.");
                 }
+            }
 
-                if (string.IsNullOrWhiteSpace(loan.UserUpdatedBy))
-                {
-                    return BadRequest("User updated by is required.");
-                }
+            var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
             }
 
             try
             {
-                var updated = await _service.UpdateAsync(request, cancellationToken);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!, cancellationToken);
                 return updated ? NoContent() : NotFound();
             }
             catch (InvalidOperationException ex)

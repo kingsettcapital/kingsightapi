@@ -14,7 +14,7 @@ namespace kingsightapi.Services
 
         Task<IReadOnlyList<LoanSecurityValueStatusOptionDto>> GetStatusOptionsAsync();
 
-        Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request);
+        Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request, string auditDisplayName);
     }
 
     public sealed class LoanSecurityValueService : ILoanSecurityValueService
@@ -172,7 +172,7 @@ namespace kingsightapi.Services
             return options;
         }
 
-        public async Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request)
+        public async Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request, string auditDisplayName)
         {
             var useExtendedColumns = await GetExtendedColumnsAvailableAsync();
             var updateSql = useExtendedColumns ? UpdateSql : UpdateSqlFallback;
@@ -191,7 +191,7 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue(
                     "@security_value",
                     item.SecurityValue.HasValue ? item.SecurityValue.Value : DBNull.Value);
-                command.Parameters.AddWithValue("@updated_by", item.UpdatedBy);
+                command.Parameters.AddWithValue("@updated_by", auditDisplayName);
 
                 if (useExtendedColumns)
                 {
@@ -215,7 +215,7 @@ namespace kingsightapi.Services
                     _extendedColumnsAvailable = false;
                     _logger.LogWarning(
                         "loan_alias_master is missing units/square_feet/acres; retrying update without those columns.");
-                    return await UpdateAsync(request);
+                    return await UpdateAsync(request, auditDisplayName);
                 }
             }
 

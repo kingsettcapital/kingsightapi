@@ -8,7 +8,7 @@ namespace kingsightapi.Services
     public interface ILoanService
     {
         Task<IReadOnlyList<LoanDto>> GetAllAsync();
-        Task<bool> UpdateAsync(LoanUpdateBatchRequest request);
+        Task<bool> UpdateAsync(LoanUpdateBatchRequest request, string auditDisplayName);
     }
 
     public sealed class LoanService : ILoanService
@@ -121,7 +121,7 @@ namespace kingsightapi.Services
             return rows;
         }
 
-        public async Task<bool> UpdateAsync(LoanUpdateBatchRequest request)
+        public async Task<bool> UpdateAsync(LoanUpdateBatchRequest request, string auditDisplayName)
         {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -151,7 +151,7 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue(
                     "@late_interest_off_note",
                     string.IsNullOrEmpty(loan.LateInterestOffNote) ? DBNull.Value : loan.LateInterestOffNote);
-                command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync();
             }

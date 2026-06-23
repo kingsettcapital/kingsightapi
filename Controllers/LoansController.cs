@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,13 +11,16 @@ namespace kingsightapi.Controllers
     public class LoansController : ControllerBase
     {
         private readonly ILoanService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<LoansController> _logger;
 
         public LoansController(
             ILoanService service,
+            ICurrentUserResolver currentUserResolver,
             ILogger<LoansController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -43,7 +47,9 @@ namespace kingsightapi.Controllers
 
         // PUT: api/Loans
         [HttpPut]
-        public async Task<IActionResult> Update([FromBody] LoanUpdateBatchRequest request)
+        public async Task<IActionResult> Update(
+            [FromBody] LoanUpdateBatchRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
@@ -56,16 +62,21 @@ namespace kingsightapi.Controllers
                 {
                     return BadRequest("Loan alias key is required.");
                 }
+            }
 
-                if (string.IsNullOrWhiteSpace(loan.UserUpdatedBy))
-                {
-                    return BadRequest("User updated by is required.");
-                }
+            var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
             }
 
             try
             {
-                var updated = await _service.UpdateAsync(request);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!);
                 return updated ? NoContent() : NotFound();
             }
             catch (OperationCanceledException)

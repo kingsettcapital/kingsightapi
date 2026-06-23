@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -9,11 +10,16 @@ namespace kingsightapi.Controllers
     public class TaxArrearsController : ControllerBase
     {
         private readonly ITaxArrearsService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<TaxArrearsController> _logger;
 
-        public TaxArrearsController(ITaxArrearsService service, ILogger<TaxArrearsController> logger)
+        public TaxArrearsController(
+            ITaxArrearsService service,
+            ICurrentUserResolver currentUserResolver,
+            ILogger<TaxArrearsController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -67,9 +73,18 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body is required.");
             }
 
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.UserUpdatedBy,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var created = await _service.CreateAsync(request, cancellationToken);
+                var created = await _service.CreateAsync(request, auditDisplayName!, cancellationToken);
                 return StatusCode(StatusCodes.Status201Created, created);
             }
             catch (InvalidOperationException ex)
@@ -100,9 +115,19 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body must include at least one tax arrears row.");
             }
 
+            var clientAudit = request.TaxArrears.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var updated = await _service.UpdateAsync(request, cancellationToken);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!, cancellationToken);
                 return updated ? NoContent() : NotFound();
             }
             catch (InvalidOperationException ex)

@@ -16,6 +16,7 @@ namespace kingsightapi.Entities
     /// <summary>
     /// Body for creating a row in mort.loan_alias_master.
     /// loan_alias_id is assigned server-side as max(loan_alias_id) + 1.
+    /// created_by / updated_by are set server-side from the JWT user (client createdBy is ignored).
     /// </summary>
     public sealed class LoanAliasSaveRequest
     {
@@ -25,6 +26,7 @@ namespace kingsightapi.Entities
 
     /// <summary>
     /// Body for updating a row in mort.loan_alias_master.
+    /// updated_by is set server-side from the JWT user (client updatedBy is ignored).
     /// </summary>
     public sealed class LoanAliasUpdateRequest
     {

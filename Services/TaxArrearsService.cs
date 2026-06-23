@@ -17,10 +17,12 @@ namespace kingsightapi.Services
 
         Task<TaxArrearsRowDto> CreateAsync(
             TaxArrearsCreateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
 
         Task<bool> UpdateAsync(
             TaxArrearsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
@@ -181,6 +183,7 @@ namespace kingsightapi.Services
 
         public async Task<TaxArrearsRowDto> CreateAsync(
             TaxArrearsCreateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             ValidateCreateRequest(request);
@@ -199,7 +202,7 @@ namespace kingsightapi.Services
 
             await using (var insertCommand = new SqlCommand(InsertSql, connection))
             {
-                AddTaxArrearParameters(insertCommand, taxArrearKey, request);
+                AddTaxArrearParameters(insertCommand, taxArrearKey, request, auditDisplayName);
                 await insertCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -215,6 +218,7 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             TaxArrearsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             await EnsureTableAvailableAsync(cancellationToken);
@@ -237,7 +241,7 @@ namespace kingsightapi.Services
                     item.TaxArrears.HasValue ? item.TaxArrears.Value : DBNull.Value);
                 command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(item.TaxYear)));
                 command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(item.Notes)));
-                command.Parameters.AddWithValue("@user_updated_by", item.UserUpdatedBy);
+                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -347,7 +351,8 @@ namespace kingsightapi.Services
         private static void AddTaxArrearParameters(
             SqlCommand command,
             long taxArrearKey,
-            TaxArrearsCreateRequest request)
+            TaxArrearsCreateRequest request,
+            string auditDisplayName)
         {
             command.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
             command.Parameters.AddWithValue("@loan_key", request.LoanKey);
@@ -359,7 +364,7 @@ namespace kingsightapi.Services
                 request.TaxArrears.HasValue ? request.TaxArrears.Value : DBNull.Value);
             command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(request.TaxYear)));
             command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(request.Notes)));
-            command.Parameters.AddWithValue("@user_updated_by", request.UserUpdatedBy);
+            command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
         }
 
         private static void AddLoanAliasParameters(SqlCommand command, IReadOnlyList<int> loanAliasIds)
@@ -377,11 +382,6 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("Loan key is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.UserUpdatedBy))
-            {
-                throw new InvalidOperationException("User updated by is required.");
-            }
-
             if (request.Notes is { Length: > 500 })
             {
                 throw new InvalidOperationException("Notes must be 500 characters or fewer.");
@@ -393,11 +393,6 @@ namespace kingsightapi.Services
             if (item.TaxArrearKey <= 0)
             {
                 throw new InvalidOperationException("Tax arrear key is required.");
-            }
-
-            if (string.IsNullOrWhiteSpace(item.UserUpdatedBy))
-            {
-                throw new InvalidOperationException("User updated by is required.");
             }
 
             if (item.Notes is { Length: > 500 })

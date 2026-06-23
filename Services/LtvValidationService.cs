@@ -15,10 +15,12 @@ namespace kingsightapi.Services
 
         Task<bool> UpdateAsync(
             LtvValidationBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
 
         Task<bool> ConfirmAsync(
             LtvValidationConfirmRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
@@ -212,6 +214,7 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             LtvValidationBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             await EnsureLtvTableAvailableAsync(cancellationToken);
@@ -228,11 +231,6 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException("Loan key is required.");
                 }
 
-                if (string.IsNullOrWhiteSpace(loan.UserUpdatedBy))
-                {
-                    throw new InvalidOperationException("User updated by is required.");
-                }
-
                 if (!await IsLoanEligibleAsync(connection, loan.LoanKey, cancellationToken))
                 {
                     throw new InvalidOperationException(
@@ -244,7 +242,7 @@ namespace kingsightapi.Services
                 updateCommand.Parameters.AddWithValue(
                     "@ltv",
                     loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                updateCommand.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                updateCommand.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 var updated = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
                 if (updated == 0)
@@ -254,7 +252,7 @@ namespace kingsightapi.Services
                     insertCommand.Parameters.AddWithValue(
                         "@ltv",
                         loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                    insertCommand.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
                     updated = await insertCommand.ExecuteNonQueryAsync(cancellationToken);
                 }
 
@@ -273,16 +271,12 @@ namespace kingsightapi.Services
 
         public async Task<bool> ConfirmAsync(
             LtvValidationConfirmRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             if (request.LoanKeys.Count == 0)
             {
                 throw new InvalidOperationException("At least one loan key is required.");
-            }
-
-            if (string.IsNullOrWhiteSpace(request.UserUpdatedBy))
-            {
-                throw new InvalidOperationException("User updated by is required.");
             }
 
             await EnsureLtvTableAvailableAsync(cancellationToken);
@@ -308,7 +302,7 @@ namespace kingsightapi.Services
                 affectedRows += await ConfirmLoanAsync(
                     connection,
                     loanKey,
-                    request.UserUpdatedBy,
+                    auditDisplayName,
                     dimLoanLtvColumn,
                     cancellationToken);
             }

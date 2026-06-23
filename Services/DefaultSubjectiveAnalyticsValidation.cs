@@ -49,11 +49,6 @@ namespace kingsightapi.Services
                 return "Loan key is required.";
             }
 
-            if (string.IsNullOrWhiteSpace(item.UserUpdatedBy))
-            {
-                return "User updated by is required.";
-            }
-
             var defaultStatus = CanonicalizeDefaultStatus(item.ResolvedDefaultStatus);
             if (defaultStatus is not null && !DefaultStatusSet.Contains(defaultStatus))
             {

@@ -156,3 +156,96 @@ Content-Type: application/json
 }
 
 ###
+
+### Loan Alias — updatedBy/createdBy from JWT (client values ignored)
+
+GET {{api_HostAddress}}/api/LoanAlias/1
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/LoanAlias/1
+Content-Type: application/json
+
+{
+  "loanAliasName": "Example Alias",
+  "updatedBy": "system"
+}
+
+###
+
+### User Management — ids are sequential integers (userId 1, 2, 3…). JSON is camelCase.
+
+GET {{api_HostAddress}}/api/user-management/roles
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/roles/1
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/users
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/users/1
+Accept: application/json
+
+###
+
+POST {{api_HostAddress}}/api/user-management/roles
+Content-Type: application/json
+
+{
+  "roleName": "Administrator",
+  "status": "A"
+}
+
+###
+
+PUT {{api_HostAddress}}/api/user-management/roles/1
+Content-Type: application/json
+
+{
+  "roleName": "Administrator",
+  "status": "A"
+}
+
+###
+
+DELETE {{api_HostAddress}}/api/user-management/roles/3
+
+###
+
+POST {{api_HostAddress}}/api/user-management/users
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "isActive": true,
+  "roleId": 1
+}
+
+###
+
+PUT {{api_HostAddress}}/api/user-management/users/1
+Content-Type: application/json
+
+{
+  "email": "sgarikapati@kingsettcapital.com",
+  "firstName": "Sridevi",
+  "lastName": "Garikapati",
+  "isActive": true,
+  "roleId": 1
+}
+
+###
+
+DELETE {{api_HostAddress}}/api/user-management/users/5
+
+###

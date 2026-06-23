@@ -9,7 +9,7 @@ namespace kingsightapi.Services
         Task<CmhcUploadHistoryDto> UploadAsync(
             IFormFile file,
             string fileName,
-            string uploadedBy,
+            int uploadedByUserId,
             string fileType,
             CancellationToken cancellationToken);
 
