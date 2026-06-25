@@ -31,11 +31,13 @@ public sealed class PortalFilterService : IPortalFilterService
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
+            var dimInvestor = WarehouseTables.DimInvestor;
+
             var investorTypes = await ReadDistinctOptionsAsync(
                 connection,
-                """
+                $"""
                 select distinct isnull(investor_type_name, '') as option_value
-                from dbo.dim_investor
+                from {dimInvestor}
                 where isnull(is_current, 1) = 1
                   and isnull(investor_type_name, '') <> ''
                 order by option_value
@@ -43,9 +45,9 @@ public sealed class PortalFilterService : IPortalFilterService
 
             var relationships = await ReadDistinctOptionsAsync(
                 connection,
-                """
+                $"""
                 select distinct isnull(relationship_name, '') as option_value
-                from dbo.dim_investor
+                from {dimInvestor}
                 where isnull(is_current, 1) = 1
                   and isnull(relationship_name, '') <> ''
                 order by option_value
@@ -195,13 +197,13 @@ public sealed class PortalFilterService : IPortalFilterService
     private static async Task<IReadOnlyList<PortalQuarterPeriodOptionDto>> ReadQuarterlyPeriodOptionsAsync(
         SqlConnection connection)
     {
-        const string sql = """
+        var sql = $"""
             select
                 d.quarter_year,
                 d.calendar_year,
                 date_key = max(d.date_key)
-            from dbo.fact_investor_portfolio_quarterly q
-            inner join dbo.dim_date d on d.quarter_year = q.quarter_year
+            from {WarehouseTables.FactInvestorPortfolioQuarterly} q
+            inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year
             group by d.quarter_year, d.calendar_year
             order by d.calendar_year desc, d.quarter_year desc
             """;

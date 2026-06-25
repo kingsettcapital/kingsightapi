@@ -370,7 +370,7 @@ namespace kingsightapi.Services
         private Task<string?> FindColumnAsync(
             IReadOnlyList<string> candidates,
             CancellationToken cancellationToken) =>
-            DimLoanColumnProbe.FindFirstAsync(_connectionString, candidates, cancellationToken);
+            DimLoanColumnProbe.FindFirstAsync(_connectionString, _tblDimLoan, candidates, cancellationToken);
 
         private async Task<IReadOnlyList<LoanSnapshotRow>> LoadLoanSnapshotRowsAsync(
             DateOnly asOfDate,
@@ -503,7 +503,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine(" order by m.loan_alias_name, l.loan_code");
@@ -520,7 +520,7 @@ namespace kingsightapi.Services
             var fundingJoin = !string.IsNullOrEmpty(columns.FundingStatusKey)
                 ? $"""
 
-                  left join mort.dim_status fs
+                  left join {_tblDimStatus} fs
                       on l.{columns.FundingStatusKey} = fs.status_key
 
                   """
@@ -529,7 +529,7 @@ namespace kingsightapi.Services
             var loanStatusJoin = !string.IsNullOrEmpty(loanStatusKeyColumn)
                 ? $"""
 
-                  left join mort.dim_status ls
+                  left join {_tblDimStatus} ls
                       on l.{loanStatusKeyColumn} = ls.status_key
 
                   """
@@ -539,18 +539,18 @@ namespace kingsightapi.Services
             {
                 return $"""
 
-                    from mort.dim_loan l
-                    left join mort.dim_loan parent
+                    from {_tblDimLoan} l
+                    left join {_tblDimLoan} parent
                         on l.{parentLoanKeyColumn} = parent.loan_key
                        and parent.is_current = 1
-                    left join mort.loan_alias_master m
+                    left join {_tblLoanAliasMaster} m
                         on l.loan_alias_key = m.loan_alias_id
-                    left join mort.dim_investor inv
+                    left join {_tblDimInvestor} inv
                         on l.investor_key = inv.investor_key
                        and inv.is_current = 1
-                    left join mort.investor_alias_master iam
+                    left join {_tblInvestorAliasMaster} iam
                         on inv.investor_alias_key = iam.investor_alias_id
-                    left join mort.ltv_validation lv
+                    left join {_tblLtvValidation} lv
                         on l.loan_key = lv.loan_key
                     {fundingJoin}
                     {loanStatusJoin}
@@ -561,15 +561,15 @@ namespace kingsightapi.Services
 
             return $"""
 
-                from mort.dim_loan l
-                left join mort.loan_alias_master m
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
                     on l.loan_alias_key = m.loan_alias_id
-                left join mort.dim_investor inv
+                left join {_tblDimInvestor} inv
                     on l.investor_key = inv.investor_key
                    and inv.is_current = 1
-                left join mort.investor_alias_master iam
+                left join {_tblInvestorAliasMaster} iam
                     on inv.investor_alias_key = iam.investor_alias_id
-                left join mort.ltv_validation lv
+                left join {_tblLtvValidation} lv
                     on l.loan_key = lv.loan_key
                 {fundingJoin}
                 {loanStatusJoin}
@@ -593,15 +593,15 @@ namespace kingsightapi.Services
                     """;
             }
 
-            return """
+            return $"""
 
                 left join (
                     select ta.loan_key,
                            sum(ta.tax_arrears) as tax_arrears
-                    from mort.tax_arrears ta
+                    from {_tblTaxArrears} ta
                     inner join (
                         select loan_key, max(tax_memo_date) as max_memo
-                        from mort.tax_arrears
+                        from {_tblTaxArrears}
                         group by loan_key
                     ) latest
                         on ta.loan_key = latest.loan_key
@@ -1028,7 +1028,7 @@ namespace kingsightapi.Services
             {
                 var sponsorSql = $"""
                     select distinct l.{columns.Sponsor}
-                    from mort.dim_loan l
+                    from {_tblDimLoan} l
                     where l.is_current = 1
                       and (l.is_leaf = 1 or l.is_leaf is null)
                       and l.loan_alias_key is not null
@@ -1056,10 +1056,10 @@ namespace kingsightapi.Services
                 }
             }
 
-            const string investorSql = """
+            var investorSql = $"""
                 select distinct iam.investor_alias_name
-                from mort.dim_investor inv
-                inner join mort.investor_alias_master iam
+                from {_tblDimInvestor} inv
+                inner join {_tblInvestorAliasMaster} iam
                     on inv.investor_alias_key = iam.investor_alias_id
                 where inv.is_current = 1
                   and iam.investor_alias_name is not null
@@ -1076,9 +1076,9 @@ namespace kingsightapi.Services
                 }
             }
 
-            const string statusSql = """
+            var statusSql = $"""
                 select s.status_name
-                from mort.dim_status s
+                from {_tblDimStatus} s
                 where s.status_name is not null
                   and s.status_name <> ''
                 order by s.status_name
@@ -1130,7 +1130,7 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            const string probe = "select top 0 loan_key from mort.cmhc_default_watchlist";
+            var probe = $"select top 0 loan_key from {_tblCmhcDefaultWatchlist}";
             try
             {
                 await using var connection = new SqlConnection(_connectionString);
@@ -1160,10 +1160,10 @@ namespace kingsightapi.Services
                        w.status_update,
                        w.conclusion,
                        w.status
-                from mort.cmhc_default_watchlist w
-                inner join mort.dim_loan l on w.loan_key = l.loan_key
-                left join mort.dim_investor inv on l.investor_key = inv.investor_key and inv.is_current = 1
-                left join mort.investor_alias_master iam on inv.investor_alias_key = iam.investor_alias_id
+                from {_tblCmhcDefaultWatchlist} w
+                inner join {_tblDimLoan} l on w.loan_key = l.loan_key
+                left join {_tblDimInvestor} inv on l.investor_key = inv.investor_key and inv.is_current = 1
+                left join {_tblInvestorAliasMaster} iam on inv.investor_alias_key = iam.investor_alias_id
                 where l.is_current = 1
                 """);
 
@@ -1287,23 +1287,23 @@ namespace kingsightapi.Services
                 return (null, []);
             }
 
-            const string sql = """
+            var sql = $"""
                 with alias_loans as (
                     select l.loan_key
-                    from mort.dim_loan l
+                    from {_tblDimLoan} l
                     where l.is_current = 1
                       and (l.is_leaf = 1 or l.is_leaf is null)
                       and l.loan_alias_key = @loan_alias_key
                 ),
                 latest_memo as (
                     select max(ta.tax_memo_date) as tax_memo_date
-                    from mort.tax_arrears ta
+                    from {_tblTaxArrears} ta
                     inner join alias_loans al on ta.loan_key = al.loan_key
                 )
                 select ta.tax_year,
                        sum(ta.tax_arrears) as tax_arrears,
                        max(ta.tax_memo_date) as tax_memo_date
-                from mort.tax_arrears ta
+                from {_tblTaxArrears} ta
                 inner join alias_loans al on ta.loan_key = al.loan_key
                 cross join latest_memo lm
                 where ta.tax_memo_date = lm.tax_memo_date
@@ -1339,7 +1339,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probe = "select top 0 loan_key from mort.tax_arrears";
+            var probe = $"select top 0 loan_key from {_tblTaxArrears}";
             try
             {
                 await using var connection = new SqlConnection(_connectionString);

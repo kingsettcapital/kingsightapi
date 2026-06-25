@@ -15,6 +15,7 @@ namespace kingsightapi.Services
 
         public static async Task<string> ResolveAsync(
             string connectionString,
+            string dimLoanTable,
             CancellationToken cancellationToken = default)
         {
             await using var connection = new SqlConnection(connectionString);
@@ -22,7 +23,7 @@ namespace kingsightapi.Services
 
             foreach (var column in ColumnCandidates)
             {
-                var probeSql = $"select top 0 [{column}] from mort.dim_loan";
+                var probeSql = $"select top 0 [{column}] from {dimLoanTable}";
 
                 try
                 {

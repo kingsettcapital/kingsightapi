@@ -35,114 +35,23 @@ namespace kingsightapi.Services
         private static readonly string[] DimLoanLtvColumnCandidates =
             ["ai_ltv", "loan_ltv", "ltv", "ltv_percent"];
 
-        private const string ListSqlFrom = """
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            left join mort.dim_investor inv
-                on l.investor_key = inv.investor_key
-               and inv.is_current = 1
-            left join mort.investor_alias_master iam
-                on inv.investor_alias_key = iam.investor_alias_id
-            left join mort.ltv_validation lv
-                on l.loan_key = lv.loan_key
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
-
-        private const string UpsertOverrideSql = """
-            update mort.ltv_validation
-            set ltv = @ltv,
-                is_user_overridden = 1,
-                is_ai_confirmed = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-            """;
-
-        private const string InsertOverrideSql = """
-            insert into mort.ltv_validation (
-                loan_key,
-                ai_ltv,
-                ltv,
-                ai_commentary,
-                is_ai_confirmed,
-                is_user_overridden,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @loan_key,
-                null,
-                @ltv,
-                null,
-                0,
-                1,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string ConfirmAiLtvSql = """
-            update mort.ltv_validation
-            set ltv = ai_ltv,
-                is_ai_confirmed = 1,
-                is_user_overridden = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-              and ai_ltv is not null
-            """;
-
-        private const string ConfirmPendingLtvSql = """
-            update mort.ltv_validation
-            set ai_ltv = coalesce(ai_ltv, ltv),
-                ltv = coalesce(ltv, ai_ltv),
-                is_ai_confirmed = 1,
-                is_user_overridden = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-              and ltv is not null
-              and (is_user_overridden is null or is_user_overridden = 0)
-            """;
-
-        private const string InsertConfirmedSql = """
-            insert into mort.ltv_validation (
-                loan_key,
-                ai_ltv,
-                ltv,
-                ai_commentary,
-                is_ai_confirmed,
-                is_user_overridden,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @loan_key,
-                @ai_ltv,
-                @ai_ltv,
-                null,
-                1,
-                0,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string ReadValidationStateSql = """
-            select ai_ltv,
-                   ltv,
-                   is_user_overridden
-            from mort.ltv_validation
-            where loan_key = @loan_key
-            """;
-
-        private const string LoanEligibleSql = """
-            select 1
-            from mort.dim_loan
-            where loan_key = @loan_key
-              and is_current = 1
-              and (is_leaf = 1 or is_leaf is null)
-            """;
+        private readonly string _listSqlFrom;
+        private readonly string _upsertOverrideSql;
+        private readonly string _insertOverrideSql;
+        private readonly string _confirmAiLtvSql;
+        private readonly string _confirmPendingLtvSql;
+        private readonly string _insertConfirmedSql;
+        private readonly string _readValidationStateSql;
+        private readonly string _loanEligibleSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimInvestor;
+        private readonly string _tblInvestorAliasMaster;
+        private readonly string _tblDimStatus;
+        private readonly string _tblLtvValidation;
         private readonly ILogger<LtvValidationService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -153,11 +62,128 @@ namespace kingsightapi.Services
         private bool? _dimLoanLtvColumnResolved;
         private bool? _ltvTableAvailable;
 
-        public LtvValidationService(IConfiguration configuration, ILogger<LtvValidationService> logger)
+        public LtvValidationService(
+            IConfiguration configuration,
+            ILogger<LtvValidationService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimInvestor = tables.Mort("dim_investor");
+            _tblInvestorAliasMaster = tables.Mort("investor_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+            _tblLtvValidation = tables.Mort("ltv_validation");
+
+            _listSqlFrom = $"""
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                left join {_tblDimInvestor} inv
+                    on l.investor_key = inv.investor_key
+                   and inv.is_current = 1
+                left join {_tblInvestorAliasMaster} iam
+                    on inv.investor_alias_key = iam.investor_alias_id
+                left join {_tblLtvValidation} lv
+                    on l.loan_key = lv.loan_key
+                where l.is_current = 1
+                  and (l.is_leaf = 1 or l.is_leaf is null)
+                """;
+
+            _upsertOverrideSql = $"""
+                update {_tblLtvValidation}
+                set ltv = @ltv,
+                    is_user_overridden = 1,
+                    is_ai_confirmed = 0,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where loan_key = @loan_key
+                """;
+
+            _insertOverrideSql = $"""
+                insert into {_tblLtvValidation} (
+                    loan_key,
+                    ai_ltv,
+                    ltv,
+                    ai_commentary,
+                    is_ai_confirmed,
+                    is_user_overridden,
+                    user_updated_by,
+                    user_updated_date)
+                values (
+                    @loan_key,
+                    null,
+                    @ltv,
+                    null,
+                    0,
+                    1,
+                    @user_updated_by,
+                    sysutcdatetime())
+                """;
+
+            _confirmAiLtvSql = $"""
+                update {_tblLtvValidation}
+                set ltv = ai_ltv,
+                    is_ai_confirmed = 1,
+                    is_user_overridden = 0,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where loan_key = @loan_key
+                  and ai_ltv is not null
+                """;
+
+            _confirmPendingLtvSql = $"""
+                update {_tblLtvValidation}
+                set ai_ltv = coalesce(ai_ltv, ltv),
+                    ltv = coalesce(ltv, ai_ltv),
+                    is_ai_confirmed = 1,
+                    is_user_overridden = 0,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where loan_key = @loan_key
+                  and ltv is not null
+                  and (is_user_overridden is null or is_user_overridden = 0)
+                """;
+
+            _insertConfirmedSql = $"""
+                insert into {_tblLtvValidation} (
+                    loan_key,
+                    ai_ltv,
+                    ltv,
+                    ai_commentary,
+                    is_ai_confirmed,
+                    is_user_overridden,
+                    user_updated_by,
+                    user_updated_date)
+                values (
+                    @loan_key,
+                    @ai_ltv,
+                    @ai_ltv,
+                    null,
+                    1,
+                    0,
+                    @user_updated_by,
+                    sysutcdatetime())
+                """;
+
+            _readValidationStateSql = $"""
+                select ai_ltv,
+                       ltv,
+                       is_user_overridden
+                from {_tblLtvValidation}
+                where loan_key = @loan_key
+                """;
+
+            _loanEligibleSql = $"""
+                select 1
+                from {_tblDimLoan}
+                where loan_key = @loan_key
+                  and is_current = 1
+                  and (is_leaf = 1 or is_leaf is null)
+                """;
         }
 
         public async Task<IReadOnlyList<LtvValidationRowDto>> GetAsync(
@@ -237,7 +263,7 @@ namespace kingsightapi.Services
                         $"Loan {loan.LoanKey} is not eligible (must be current and leaf).");
                 }
 
-                await using var updateCommand = new SqlCommand(UpsertOverrideSql, connection);
+                await using var updateCommand = new SqlCommand(_upsertOverrideSql, connection);
                 updateCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
                 updateCommand.Parameters.AddWithValue(
                     "@ltv",
@@ -247,7 +273,7 @@ namespace kingsightapi.Services
                 var updated = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
                 if (updated == 0)
                 {
-                    await using var insertCommand = new SqlCommand(InsertOverrideSql, connection);
+                    await using var insertCommand = new SqlCommand(_insertOverrideSql, connection);
                     insertCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
                     insertCommand.Parameters.AddWithValue(
                         "@ltv",
@@ -330,7 +356,7 @@ namespace kingsightapi.Services
                 {
                     return await ExecuteConfirmCommandAsync(
                         connection,
-                        ConfirmAiLtvSql,
+                        _confirmAiLtvSql,
                         loanKey,
                         userUpdatedBy,
                         cancellationToken);
@@ -340,7 +366,7 @@ namespace kingsightapi.Services
                 {
                     return await ExecuteConfirmCommandAsync(
                         connection,
-                        ConfirmPendingLtvSql,
+                        _confirmPendingLtvSql,
                         loanKey,
                         userUpdatedBy,
                         cancellationToken);
@@ -357,11 +383,12 @@ namespace kingsightapi.Services
                 connection,
                 loanKey,
                 dimLoanLtvColumn,
+                _tblDimLoan,
                 cancellationToken);
 
             if (dimLoanLtv.HasValue)
             {
-                await using var insertCommand = new SqlCommand(InsertConfirmedSql, connection);
+                await using var insertCommand = new SqlCommand(_insertConfirmedSql, connection);
                 insertCommand.Parameters.AddWithValue("@loan_key", loanKey);
                 insertCommand.Parameters.AddWithValue("@ai_ltv", dimLoanLtv.Value);
                 insertCommand.Parameters.AddWithValue("@user_updated_by", userUpdatedBy);
@@ -385,12 +412,12 @@ namespace kingsightapi.Services
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        private static async Task<ValidationState?> ReadValidationStateAsync(
+        private async Task<ValidationState?> ReadValidationStateAsync(
             SqlConnection connection,
             long loanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(ReadValidationStateSql, connection);
+            await using var command = new SqlCommand(_readValidationStateSql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -411,6 +438,7 @@ namespace kingsightapi.Services
             SqlConnection connection,
             long loanKey,
             string? dimLoanLtvColumn,
+            string dimLoanTable,
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrEmpty(dimLoanLtvColumn))
@@ -418,7 +446,7 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            var sql = $"select [{dimLoanLtvColumn}] from mort.dim_loan where loan_key = @loan_key and is_current = 1";
+            var sql = $"select [{dimLoanLtvColumn}] from {dimLoanTable} where loan_key = @loan_key and is_current = 1";
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
 
@@ -474,21 +502,23 @@ namespace kingsightapi.Services
 
             if (!string.IsNullOrEmpty(parentLoanKeyColumn))
             {
-                sql.AppendLine("""
-                    from mort.dim_loan l
-                    left join mort.dim_loan parent
+                sql.AppendLine($"""
+                    from {_tblDimLoan} l
+                    left join {_tblDimLoan} parent
                 """);
                 sql.AppendLine($"       on l.{parentLoanKeyColumn} = parent.loan_key");
                 sql.AppendLine("""
                           and parent.is_current = 1
-                    left join mort.loan_alias_master m
+                    """);
+                sql.AppendLine($"""
+                    left join {_tblLoanAliasMaster} m
                         on l.loan_alias_key = m.loan_alias_id
-                    left join mort.dim_investor inv
+                    left join {_tblDimInvestor} inv
                         on l.investor_key = inv.investor_key
                        and inv.is_current = 1
-                    left join mort.investor_alias_master iam
+                    left join {_tblInvestorAliasMaster} iam
                         on inv.investor_alias_key = iam.investor_alias_id
-                    left join mort.ltv_validation lv
+                    left join {_tblLtvValidation} lv
                         on l.loan_key = lv.loan_key
                     where l.is_current = 1
                       and (l.is_leaf = 1 or l.is_leaf is null)
@@ -496,7 +526,7 @@ namespace kingsightapi.Services
             }
             else
             {
-                sql.Append(ListSqlFrom);
+                sql.Append(_listSqlFrom);
             }
 
             sql.Append(" and l.loan_alias_key in (");
@@ -505,7 +535,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -520,7 +550,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probeSql = "select top 0 loan_key from mort.ltv_validation";
+            var probeSql = $"select top 0 loan_key from {_tblLtvValidation}";
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -547,6 +577,7 @@ namespace kingsightapi.Services
 
             _parentLoanKeyColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 ParentLoanKeyColumnCandidates,
                 cancellationToken);
 
@@ -570,6 +601,7 @@ namespace kingsightapi.Services
 
             _exposureColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 ExposureColumnCandidates,
                 cancellationToken);
 
@@ -593,6 +625,7 @@ namespace kingsightapi.Services
 
             _dimLoanLtvColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 DimLoanLtvColumnCandidates,
                 cancellationToken);
 
@@ -616,17 +649,18 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;
         }
 
-        private static async Task<bool> IsLoanEligibleAsync(
+        private async Task<bool> IsLoanEligibleAsync(
             SqlConnection connection,
             long loanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(LoanEligibleSql, connection);
+            await using var command = new SqlCommand(_loanEligibleSql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;

@@ -16,60 +16,69 @@ namespace kingsightapi.Services
 
     public sealed class LoanAliasService : ILoanAliasService
     {
-        private const string ListSql = """
-            select loan_alias_id,
-                   loan_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.loan_alias_master
-            order by loan_alias_id
-            """;
-
-        private const string GetByIdSql = """
-            select loan_alias_id,
-                   loan_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.loan_alias_master
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string NextIdSql = """
-            select isnull(max(loan_alias_id), 0) + 1
-            from mort.loan_alias_master
-            """;
-
-        private const string InsertSql = """
-            insert into mort.loan_alias_master
-                (loan_alias_id, loan_alias_name, created_by, created_dtm, updated_by, updated_dtm)
-            values (@loan_alias_id, @loan_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
-            """;
-
-        private const string UpdateSql = """
-            update mort.loan_alias_master
-            set loan_alias_name = @loan_alias_name,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string DeleteSql = """
-            delete from mort.loan_alias_master
-            where loan_alias_id = @loan_alias_id
-            """;
+        private readonly string ListSql;
+        private readonly string GetByIdSql;
+        private readonly string NextIdSql;
+        private readonly string InsertSql;
+        private readonly string UpdateSql;
+        private readonly string DeleteSql;
 
         private readonly string _connectionString;
         private readonly ILogger<LoanAliasService> _logger;
 
-        public LoanAliasService(IConfiguration configuration, ILogger<LoanAliasService> logger)
+        public LoanAliasService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<LoanAliasService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+
+            var loanAliasMaster = tables.Mort("loan_alias_master");
+
+            ListSql = $"""
+                select loan_alias_id,
+                       loan_alias_name,
+                       created_by,
+                       created_dtm,
+                       updated_by,
+                       updated_dtm
+                from {loanAliasMaster}
+                order by loan_alias_id
+                """;
+
+            GetByIdSql = $"""
+                select loan_alias_id,
+                       loan_alias_name,
+                       created_by,
+                       created_dtm,
+                       updated_by,
+                       updated_dtm
+                from {loanAliasMaster}
+                where loan_alias_id = @loan_alias_id
+                """;
+
+            NextIdSql = $"""
+                select isnull(max(loan_alias_id), 0) + 1
+                from {loanAliasMaster}
+                """;
+
+            InsertSql = $"""
+                insert into {loanAliasMaster}
+                    (loan_alias_id, loan_alias_name, created_by, created_dtm, updated_by, updated_dtm)
+                values (@loan_alias_id, @loan_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
+                """;
+
+            UpdateSql = $"""
+                update {loanAliasMaster}
+                set loan_alias_name = @loan_alias_name,
+                    updated_by = @updated_by,
+                    updated_dtm = getutcdate()
+                where loan_alias_id = @loan_alias_id
+                """;
+
+            DeleteSql = $"""
+                delete from {loanAliasMaster}
+                where loan_alias_id = @loan_alias_id
+                """;
         }
 
         public async Task<IReadOnlyList<LoanAliasDto>> GetAllAsync()
@@ -148,7 +157,7 @@ namespace kingsightapi.Services
             }
         }
 
-        private static async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
+        private async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
         {
             await using var command = new SqlCommand(NextIdSql, connection, transaction)
             {

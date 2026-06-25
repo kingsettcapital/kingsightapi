@@ -28,102 +28,122 @@ namespace kingsightapi.Services
 
     public sealed class TaxArrearsService : ITaxArrearsService
     {
-        private const string ListSqlBase = """
-            select ta.tax_arrear_key,
-                   l.loan_key,
-                   l.loan_code,
-                   l.loan_desc,
-                   loan_alias_name = isnull(m.loan_alias_name, ''),
-                   ta.tax_memo_date,
-                   ta.tax_arrears,
-                   ta.tax_year,
-                   ta.notes,
-                   ta.user_updated_by,
-                   ta.user_updated_date
-            from mort.tax_arrears ta
-            inner join mort.dim_loan l
-                on ta.loan_key = l.loan_key
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
-
-        private const string NextTaxArrearKeySql = """
-            select isnull(max(tax_arrear_key), 0) + 1
-            from mort.tax_arrears
-            """;
-
-        private const string InsertSql = """
-            insert into mort.tax_arrears (
-                tax_arrear_key,
-                loan_key,
-                tax_memo_date,
-                tax_arrears,
-                tax_year,
-                notes,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @tax_arrear_key,
-                @loan_key,
-                @tax_memo_date,
-                @tax_arrears,
-                @tax_year,
-                @notes,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string SelectByKeySql = """
-            select ta.tax_arrear_key,
-                   l.loan_key,
-                   l.loan_code,
-                   l.loan_desc,
-                   loan_alias_name = isnull(m.loan_alias_name, ''),
-                   ta.tax_memo_date,
-                   ta.tax_arrears,
-                   ta.tax_year,
-                   ta.notes,
-                   ta.user_updated_by,
-                   ta.user_updated_date
-            from mort.tax_arrears ta
-            inner join mort.dim_loan l
-                on ta.loan_key = l.loan_key
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where ta.tax_arrear_key = @tax_arrear_key
-            """;
-
-        private const string UpdateSql = """
-            update mort.tax_arrears
-            set tax_memo_date = @tax_memo_date,
-                tax_arrears = @tax_arrears,
-                tax_year = @tax_year,
-                notes = @notes,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where tax_arrear_key = @tax_arrear_key
-            """;
-
-        private const string LoanEligibleSql = """
-            select 1
-            from mort.dim_loan
-            where loan_key = @loan_key
-              and is_current = 1
-              and (is_leaf = 1 or is_leaf is null)
-            """;
+        private readonly string _listSqlBase;
+        private readonly string _nextTaxArrearKeySql;
+        private readonly string _insertSql;
+        private readonly string _selectByKeySql;
+        private readonly string _updateSql;
+        private readonly string _loanEligibleSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimStatus;
+        private readonly string _tblTaxArrears;
         private readonly ILogger<TaxArrearsService> _logger;
         private string? _loanStatusKeyColumn;
         private bool? _tableAvailable;
 
-        public TaxArrearsService(IConfiguration configuration, ILogger<TaxArrearsService> logger)
+        public TaxArrearsService(
+            IConfiguration configuration,
+            ILogger<TaxArrearsService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+            _tblTaxArrears = tables.Mort("tax_arrears");
+
+            _listSqlBase = $"""
+                select ta.tax_arrear_key,
+                       l.loan_key,
+                       l.loan_code,
+                       l.loan_desc,
+                       loan_alias_name = isnull(m.loan_alias_name, ''),
+                       ta.tax_memo_date,
+                       ta.tax_arrears,
+                       ta.tax_year,
+                       ta.notes,
+                       ta.user_updated_by,
+                       ta.user_updated_date
+                from {_tblTaxArrears} ta
+                inner join {_tblDimLoan} l
+                    on ta.loan_key = l.loan_key
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                where l.is_current = 1
+                  and (l.is_leaf = 1 or l.is_leaf is null)
+                """;
+
+            _nextTaxArrearKeySql = $"""
+                select isnull(max(tax_arrear_key), 0) + 1
+                from {_tblTaxArrears}
+                """;
+
+            _insertSql = $"""
+                insert into {_tblTaxArrears} (
+                    tax_arrear_key,
+                    loan_key,
+                    tax_memo_date,
+                    tax_arrears,
+                    tax_year,
+                    notes,
+                    user_updated_by,
+                    user_updated_date)
+                values (
+                    @tax_arrear_key,
+                    @loan_key,
+                    @tax_memo_date,
+                    @tax_arrears,
+                    @tax_year,
+                    @notes,
+                    @user_updated_by,
+                    sysutcdatetime())
+                """;
+
+            _selectByKeySql = $"""
+                select ta.tax_arrear_key,
+                       l.loan_key,
+                       l.loan_code,
+                       l.loan_desc,
+                       loan_alias_name = isnull(m.loan_alias_name, ''),
+                       ta.tax_memo_date,
+                       ta.tax_arrears,
+                       ta.tax_year,
+                       ta.notes,
+                       ta.user_updated_by,
+                       ta.user_updated_date
+                from {_tblTaxArrears} ta
+                inner join {_tblDimLoan} l
+                    on ta.loan_key = l.loan_key
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                where ta.tax_arrear_key = @tax_arrear_key
+                """;
+
+            _updateSql = $"""
+                update {_tblTaxArrears}
+                set tax_memo_date = @tax_memo_date,
+                    tax_arrears = @tax_arrears,
+                    tax_year = @tax_year,
+                    notes = @notes,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where tax_arrear_key = @tax_arrear_key
+                """;
+
+            _loanEligibleSql = $"""
+                select 1
+                from {_tblDimLoan}
+                where loan_key = @loan_key
+                  and is_current = 1
+                  and (is_leaf = 1 or is_leaf is null)
+                """;
         }
 
         public TaxArrearsLookupsDto GetLookups()
@@ -200,7 +220,7 @@ namespace kingsightapi.Services
 
             var taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
 
-            await using (var insertCommand = new SqlCommand(InsertSql, connection))
+            await using (var insertCommand = new SqlCommand(_insertSql, connection))
             {
                 AddTaxArrearParameters(insertCommand, taxArrearKey, request, auditDisplayName);
                 await insertCommand.ExecuteNonQueryAsync(cancellationToken);
@@ -231,7 +251,7 @@ namespace kingsightapi.Services
             {
                 ValidateUpdateItem(item);
 
-                await using var command = new SqlCommand(UpdateSql, connection);
+                await using var command = new SqlCommand(_updateSql, connection);
                 command.Parameters.AddWithValue("@tax_arrear_key", item.TaxArrearKey);
                 command.Parameters.AddWithValue(
                     "@tax_memo_date",
@@ -256,12 +276,12 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static string BuildListSql(
+        private string BuildListSql(
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn)
         {
-            var sql = new StringBuilder(ListSqlBase);
+            var sql = new StringBuilder(_listSqlBase);
 
             sql.Append(" and l.loan_alias_key in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
@@ -269,7 +289,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -284,7 +304,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probeSql = "select top 0 tax_arrear_key from mort.tax_arrears";
+            var probeSql = $"select top 0 tax_arrear_key from {_tblTaxArrears}";
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -311,37 +331,38 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;
         }
 
-        private static async Task<bool> IsLoanEligibleAsync(
+        private async Task<bool> IsLoanEligibleAsync(
             SqlConnection connection,
             long loanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(LoanEligibleSql, connection);
+            await using var command = new SqlCommand(_loanEligibleSql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
         }
 
-        private static async Task<long> GetNextTaxArrearKeyAsync(
+        private async Task<long> GetNextTaxArrearKeyAsync(
             SqlConnection connection,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(NextTaxArrearKeySql, connection);
+            await using var command = new SqlCommand(_nextTaxArrearKeySql, connection);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt64(result);
         }
 
-        private static async Task<TaxArrearsRowDto?> ReadByKeyAsync(
+        private async Task<TaxArrearsRowDto?> ReadByKeyAsync(
             SqlConnection connection,
             long taxArrearKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(SelectByKeySql, connection);
+            await using var command = new SqlCommand(_selectByKeySql, connection);
             command.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);

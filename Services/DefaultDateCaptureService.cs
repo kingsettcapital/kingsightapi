@@ -34,15 +34,13 @@ namespace kingsightapi.Services
             "default_date_per_loan_terms"
         ];
 
-        private const string ListSqlFrom = """
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
+        private readonly string _listSqlFrom;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimStatus;
         private readonly ILogger<DefaultDateCaptureService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _defaultDateColumn;
@@ -50,11 +48,26 @@ namespace kingsightapi.Services
         private string? _loanTermDefaultDateColumn;
         private bool? _loanTermDefaultDateColumnResolved;
 
-        public DefaultDateCaptureService(IConfiguration configuration, ILogger<DefaultDateCaptureService> logger)
+        public DefaultDateCaptureService(
+            IConfiguration configuration,
+            ILogger<DefaultDateCaptureService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+
+            _listSqlFrom = $"""
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                where l.is_current = 1
+                  and (l.is_leaf = 1 or l.is_leaf is null)
+                """;
         }
 
         public async Task<IReadOnlyList<DefaultDateCaptureRowDto>> GetAsync(
@@ -120,7 +133,7 @@ namespace kingsightapi.Services
             }
 
             var updateSql = $"""
-                update mort.dim_loan
+                update {_tblDimLoan}
                 set {defaultDateColumn} = @default_date,
                     user_updated_by = @user_updated_by,
                     user_updated_date = sysutcdatetime()
@@ -155,7 +168,7 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static string BuildListSql(
+        private string BuildListSql(
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn,
@@ -183,7 +196,7 @@ namespace kingsightapi.Services
                        l.user_updated_by,
                        l.user_updated_date
                 """);
-            sql.Append(ListSqlFrom);
+            sql.Append(_listSqlFrom);
 
             sql.Append(" and l.loan_alias_key in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
@@ -191,7 +204,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -208,6 +221,7 @@ namespace kingsightapi.Services
 
             _defaultDateColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 DefaultDateColumnCandidates,
                 cancellationToken);
 
@@ -231,6 +245,7 @@ namespace kingsightapi.Services
 
             _loanTermDefaultDateColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 LoanTermDefaultDateColumnCandidates,
                 cancellationToken);
 
@@ -254,6 +269,7 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;

@@ -52,6 +52,15 @@ namespace kingsightapi.Services
             """;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimInvestor;
+        private readonly string _tblInvestorAliasMaster;
+        private readonly string _tblDimStatus;
+        private readonly string _tblLtvValidation;
+        private readonly string _tblTaxArrears;
+        private readonly string _tblCmhcDefaultWatchlist;
         private readonly ILogger<ManagementSummaryService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -66,11 +75,23 @@ namespace kingsightapi.Services
         private bool? _defaultStatusColumnResolved;
         private bool? _ltvTableAvailable;
 
-        public ManagementSummaryService(IConfiguration configuration, ILogger<ManagementSummaryService> logger)
+        public ManagementSummaryService(
+            IConfiguration configuration,
+            ILogger<ManagementSummaryService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimInvestor = tables.Mort("dim_investor");
+            _tblInvestorAliasMaster = tables.Mort("investor_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+            _tblLtvValidation = tables.Mort("ltv_validation");
+            _tblTaxArrears = tables.Mort("tax_arrears");
+            _tblCmhcDefaultWatchlist = tables.Mort("cmhc_default_watchlist");
         }
 
         public async Task<IReadOnlyList<ManagementSummaryRowDto>> GetSummaryAsync(
@@ -198,7 +219,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -251,7 +272,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -270,34 +291,34 @@ namespace kingsightapi.Services
             {
                 return $"""
 
-                    from mort.dim_loan l
-                    left join mort.dim_loan parent
+                    from {_tblDimLoan} l
+                    left join {_tblDimLoan} parent
                         on l.{parentLoanKeyColumn} = parent.loan_key
                        and parent.is_current = 1
-                    left join mort.loan_alias_master m
+                    left join {_tblLoanAliasMaster} m
                         on l.loan_alias_key = m.loan_alias_id
-                    left join mort.dim_investor inv
+                    left join {_tblDimInvestor} inv
                         on l.investor_key = inv.investor_key
                        and inv.is_current = 1
-                    left join mort.investor_alias_master iam
+                    left join {_tblInvestorAliasMaster} iam
                         on inv.investor_alias_key = iam.investor_alias_id
-                    left join mort.ltv_validation lv
+                    left join {_tblLtvValidation} lv
                         on l.loan_key = lv.loan_key
 
                     """;
             }
 
-            return """
+            return $"""
 
-                from mort.dim_loan l
-                left join mort.loan_alias_master m
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
                     on l.loan_alias_key = m.loan_alias_id
-                left join mort.dim_investor inv
+                left join {_tblDimInvestor} inv
                     on l.investor_key = inv.investor_key
                    and inv.is_current = 1
-                left join mort.investor_alias_master iam
+                left join {_tblInvestorAliasMaster} iam
                     on inv.investor_alias_key = iam.investor_alias_id
-                left join mort.ltv_validation lv
+                left join {_tblLtvValidation} lv
                     on l.loan_key = lv.loan_key
 
                 """;
@@ -350,7 +371,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probeSql = "select top 0 loan_key from mort.ltv_validation";
+            var probeSql = $"select top 0 loan_key from {_tblLtvValidation}";
             try
             {
                 await using var connection = new SqlConnection(_connectionString);
@@ -374,6 +395,7 @@ namespace kingsightapi.Services
 
             _parentLoanKeyColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 ParentLoanKeyColumnCandidates,
                 cancellationToken);
 
@@ -390,6 +412,7 @@ namespace kingsightapi.Services
 
             _exposureColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 ExposureColumnCandidates,
                 cancellationToken);
 
@@ -406,6 +429,7 @@ namespace kingsightapi.Services
 
             _dimLoanLtvColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 DimLoanLtvColumnCandidates,
                 cancellationToken);
 
@@ -422,6 +446,7 @@ namespace kingsightapi.Services
 
             _defaultDateColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 DefaultDateColumnCandidates,
                 cancellationToken);
 
@@ -438,6 +463,7 @@ namespace kingsightapi.Services
 
             _defaultStatusColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 DefaultStatusColumnCandidates,
                 cancellationToken);
 
@@ -454,6 +480,7 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;

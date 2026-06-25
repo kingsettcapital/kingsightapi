@@ -67,7 +67,8 @@ namespace kingsightapi.Services
             StringBuilder sql,
             string loanTableAlias,
             string loanStatusKeyColumn,
-            LoanStatusFilter filter)
+            LoanStatusFilter filter,
+            string dimStatusTable)
         {
             if (!filter.HasFilter)
             {
@@ -84,7 +85,7 @@ namespace kingsightapi.Services
             if (filter.StatusNames.Count > 0)
             {
                 sql.AppendLine();
-                sql.Append($"  left join mort.dim_status {statusAlias}");
+                sql.Append($"  left join {dimStatusTable} {statusAlias}");
                 sql.Append($" on {loanTableAlias}.{loanStatusKeyColumn} = {statusAlias}.status_key");
             }
 

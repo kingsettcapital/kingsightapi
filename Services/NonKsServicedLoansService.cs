@@ -21,185 +21,199 @@ namespace kingsightapi.Services
 
     public sealed class NonKsServicedLoansService : INonKsServicedLoansService
     {
-        private const string ListSql = """
-            select non_ks_serviced_loan_key,
-                   loan_name,
-                   as_at_date,
-                   loan_id,
-                   servicer_id,
-                   description,
-                   investor,
-                   date_of_default,
-                   maturity_date,
-                   interest_off_date,
-                   tax_memo_date,
-                   security_value,
-                   units,
-                   net_acres,
-                   square_feet,
-                   interest_rate,
-                   principal_balance,
-                   outstanding_interest,
-                   accrued_interest,
-                   late_interest,
-                   outstanding_invoices,
-                   est_realization_costs,
-                   cost_to_complete,
-                   tax_arrears,
-                   interest_as_of_tax_memo,
-                   interest_adjustment,
-                   user_updated_by,
-                   user_updated_date
-            from mort.non_ks_serviced_loan
-            order by loan_name, as_at_date, non_ks_serviced_loan_key
-            """;
-
-        private const string SelectByKeySql = """
-            select non_ks_serviced_loan_key,
-                   loan_name,
-                   as_at_date,
-                   loan_id,
-                   servicer_id,
-                   description,
-                   investor,
-                   date_of_default,
-                   maturity_date,
-                   interest_off_date,
-                   tax_memo_date,
-                   security_value,
-                   units,
-                   net_acres,
-                   square_feet,
-                   interest_rate,
-                   principal_balance,
-                   outstanding_interest,
-                   accrued_interest,
-                   late_interest,
-                   outstanding_invoices,
-                   est_realization_costs,
-                   cost_to_complete,
-                   tax_arrears,
-                   interest_as_of_tax_memo,
-                   interest_adjustment,
-                   user_updated_by,
-                   user_updated_date
-            from mort.non_ks_serviced_loan
-            where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
-            """;
-
-        private const string NextKeySql = """
-            select isnull(max(non_ks_serviced_loan_key), 0) + 1
-            from mort.non_ks_serviced_loan
-            """;
-
-        private const string LoanIdExistsSql = """
-            select 1
-            from mort.non_ks_serviced_loan
-            where loan_id = @loan_id
-            """;
-
-        private const string InsertSql = """
-            insert into mort.non_ks_serviced_loan (
-                non_ks_serviced_loan_key,
-                loan_name,
-                as_at_date,
-                loan_id,
-                servicer_id,
-                description,
-                investor,
-                date_of_default,
-                maturity_date,
-                interest_off_date,
-                tax_memo_date,
-                security_value,
-                units,
-                net_acres,
-                square_feet,
-                interest_rate,
-                principal_balance,
-                outstanding_interest,
-                accrued_interest,
-                late_interest,
-                outstanding_invoices,
-                est_realization_costs,
-                cost_to_complete,
-                tax_arrears,
-                interest_as_of_tax_memo,
-                interest_adjustment,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @non_ks_serviced_loan_key,
-                @loan_name,
-                @as_at_date,
-                @loan_id,
-                @servicer_id,
-                @description,
-                @investor,
-                @date_of_default,
-                @maturity_date,
-                @interest_off_date,
-                @tax_memo_date,
-                @security_value,
-                @units,
-                @net_acres,
-                @square_feet,
-                @interest_rate,
-                @principal_balance,
-                @outstanding_interest,
-                @accrued_interest,
-                @late_interest,
-                @outstanding_invoices,
-                @est_realization_costs,
-                @cost_to_complete,
-                @tax_arrears,
-                @interest_as_of_tax_memo,
-                @interest_adjustment,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string UpdateSql = """
-            update mort.non_ks_serviced_loan
-            set loan_name = @loan_name,
-                as_at_date = @as_at_date,
-                loan_id = @loan_id,
-                servicer_id = @servicer_id,
-                description = @description,
-                investor = @investor,
-                date_of_default = @date_of_default,
-                maturity_date = @maturity_date,
-                interest_off_date = @interest_off_date,
-                tax_memo_date = @tax_memo_date,
-                security_value = @security_value,
-                units = @units,
-                net_acres = @net_acres,
-                square_feet = @square_feet,
-                interest_rate = @interest_rate,
-                principal_balance = @principal_balance,
-                outstanding_interest = @outstanding_interest,
-                accrued_interest = @accrued_interest,
-                late_interest = @late_interest,
-                outstanding_invoices = @outstanding_invoices,
-                est_realization_costs = @est_realization_costs,
-                cost_to_complete = @cost_to_complete,
-                tax_arrears = @tax_arrears,
-                interest_as_of_tax_memo = @interest_as_of_tax_memo,
-                interest_adjustment = @interest_adjustment,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
-            """;
+        private readonly string _listSql;
+        private readonly string _selectByKeySql;
+        private readonly string _nextKeySql;
+        private readonly string _loanIdExistsSql;
+        private readonly string _insertSql;
+        private readonly string _updateSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblNonKsServicedLoan;
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private bool? _tableAvailable;
 
-        public NonKsServicedLoansService(IConfiguration configuration, ILogger<NonKsServicedLoansService> logger)
+        public NonKsServicedLoansService(
+            IConfiguration configuration,
+            ILogger<NonKsServicedLoansService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblNonKsServicedLoan = tables.Mort("non_ks_serviced_loan");
+
+            _listSql = $"""
+                select non_ks_serviced_loan_key,
+                       loan_name,
+                       as_at_date,
+                       loan_id,
+                       servicer_id,
+                       description,
+                       investor,
+                       date_of_default,
+                       maturity_date,
+                       interest_off_date,
+                       tax_memo_date,
+                       security_value,
+                       units,
+                       net_acres,
+                       square_feet,
+                       interest_rate,
+                       principal_balance,
+                       outstanding_interest,
+                       accrued_interest,
+                       late_interest,
+                       outstanding_invoices,
+                       est_realization_costs,
+                       cost_to_complete,
+                       tax_arrears,
+                       interest_as_of_tax_memo,
+                       interest_adjustment,
+                       user_updated_by,
+                       user_updated_date
+                from {_tblNonKsServicedLoan}
+                order by loan_name, as_at_date, non_ks_serviced_loan_key
+                """;
+
+            _selectByKeySql = $"""
+                select non_ks_serviced_loan_key,
+                       loan_name,
+                       as_at_date,
+                       loan_id,
+                       servicer_id,
+                       description,
+                       investor,
+                       date_of_default,
+                       maturity_date,
+                       interest_off_date,
+                       tax_memo_date,
+                       security_value,
+                       units,
+                       net_acres,
+                       square_feet,
+                       interest_rate,
+                       principal_balance,
+                       outstanding_interest,
+                       accrued_interest,
+                       late_interest,
+                       outstanding_invoices,
+                       est_realization_costs,
+                       cost_to_complete,
+                       tax_arrears,
+                       interest_as_of_tax_memo,
+                       interest_adjustment,
+                       user_updated_by,
+                       user_updated_date
+                from {_tblNonKsServicedLoan}
+                where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
+                """;
+
+            _nextKeySql = $"""
+                select isnull(max(non_ks_serviced_loan_key), 0) + 1
+                from {_tblNonKsServicedLoan}
+                """;
+
+            _loanIdExistsSql = $"""
+                select 1
+                from {_tblNonKsServicedLoan}
+                where loan_id = @loan_id
+                """;
+
+            _insertSql = $"""
+                insert into {_tblNonKsServicedLoan} (
+                    non_ks_serviced_loan_key,
+                    loan_name,
+                    as_at_date,
+                    loan_id,
+                    servicer_id,
+                    description,
+                    investor,
+                    date_of_default,
+                    maturity_date,
+                    interest_off_date,
+                    tax_memo_date,
+                    security_value,
+                    units,
+                    net_acres,
+                    square_feet,
+                    interest_rate,
+                    principal_balance,
+                    outstanding_interest,
+                    accrued_interest,
+                    late_interest,
+                    outstanding_invoices,
+                    est_realization_costs,
+                    cost_to_complete,
+                    tax_arrears,
+                    interest_as_of_tax_memo,
+                    interest_adjustment,
+                    user_updated_by,
+                    user_updated_date)
+                values (
+                    @non_ks_serviced_loan_key,
+                    @loan_name,
+                    @as_at_date,
+                    @loan_id,
+                    @servicer_id,
+                    @description,
+                    @investor,
+                    @date_of_default,
+                    @maturity_date,
+                    @interest_off_date,
+                    @tax_memo_date,
+                    @security_value,
+                    @units,
+                    @net_acres,
+                    @square_feet,
+                    @interest_rate,
+                    @principal_balance,
+                    @outstanding_interest,
+                    @accrued_interest,
+                    @late_interest,
+                    @outstanding_invoices,
+                    @est_realization_costs,
+                    @cost_to_complete,
+                    @tax_arrears,
+                    @interest_as_of_tax_memo,
+                    @interest_adjustment,
+                    @user_updated_by,
+                    sysutcdatetime())
+                """;
+
+            _updateSql = $"""
+                update {_tblNonKsServicedLoan}
+                set loan_name = @loan_name,
+                    as_at_date = @as_at_date,
+                    loan_id = @loan_id,
+                    servicer_id = @servicer_id,
+                    description = @description,
+                    investor = @investor,
+                    date_of_default = @date_of_default,
+                    maturity_date = @maturity_date,
+                    interest_off_date = @interest_off_date,
+                    tax_memo_date = @tax_memo_date,
+                    security_value = @security_value,
+                    units = @units,
+                    net_acres = @net_acres,
+                    square_feet = @square_feet,
+                    interest_rate = @interest_rate,
+                    principal_balance = @principal_balance,
+                    outstanding_interest = @outstanding_interest,
+                    accrued_interest = @accrued_interest,
+                    late_interest = @late_interest,
+                    outstanding_invoices = @outstanding_invoices,
+                    est_realization_costs = @est_realization_costs,
+                    cost_to_complete = @cost_to_complete,
+                    tax_arrears = @tax_arrears,
+                    interest_as_of_tax_memo = @interest_as_of_tax_memo,
+                    interest_adjustment = @interest_adjustment,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
+                """;
         }
 
         public async Task<IReadOnlyList<NonKsServicedLoanRowDto>> GetAllAsync(
@@ -210,7 +224,7 @@ namespace kingsightapi.Services
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            await using var command = new SqlCommand(ListSql, connection);
+            await using var command = new SqlCommand(_listSql, connection);
             var rows = new List<NonKsServicedLoanRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -259,7 +273,7 @@ namespace kingsightapi.Services
                     loanId = $"NKS-{key}";
                 }
 
-                await using var command = new SqlCommand(InsertSql, connection);
+                await using var command = new SqlCommand(_insertSql, connection);
                 command.Parameters.AddWithValue("@non_ks_serviced_loan_key", key);
                 AddCreateParameters(command, loan, loanId);
 
@@ -313,7 +327,7 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException($"Loan ID '{loanId}' already exists.");
                 }
 
-                await using var command = new SqlCommand(UpdateSql, connection);
+                await using var command = new SqlCommand(_updateSql, connection);
                 command.Parameters.AddWithValue("@non_ks_serviced_loan_key", loan.NonKsServicedLoanKey);
                 AddCreateParameters(command, loan, loanId);
 
@@ -337,7 +351,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probeSql = "select top 0 non_ks_serviced_loan_key from mort.non_ks_serviced_loan";
+            var probeSql = $"select top 0 non_ks_serviced_loan_key from {_tblNonKsServicedLoan}";
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -355,35 +369,35 @@ namespace kingsightapi.Services
             }
         }
 
-        private static async Task<long> GetNextKeyAsync(
+        private async Task<long> GetNextKeyAsync(
             SqlConnection connection,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(NextKeySql, connection);
+            await using var command = new SqlCommand(_nextKeySql, connection);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt64(result);
         }
 
-        private static async Task<bool> LoanIdExistsAsync(
+        private async Task<bool> LoanIdExistsAsync(
             SqlConnection connection,
             string loanId,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(LoanIdExistsSql, connection);
+            await using var command = new SqlCommand(_loanIdExistsSql, connection);
             command.Parameters.AddWithValue("@loan_id", loanId);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
         }
 
-        private static async Task<bool> LoanIdExistsForOtherKeyAsync(
+        private async Task<bool> LoanIdExistsForOtherKeyAsync(
             SqlConnection connection,
             string loanId,
             long nonKsServicedLoanKey,
             CancellationToken cancellationToken)
         {
-            const string sql = """
+            var sql = $"""
                 select 1
-                from mort.non_ks_serviced_loan
+                from {_tblNonKsServicedLoan}
                 where loan_id = @loan_id
                   and non_ks_serviced_loan_key <> @non_ks_serviced_loan_key
                 """;
@@ -395,12 +409,12 @@ namespace kingsightapi.Services
             return result is not null;
         }
 
-        private static async Task<NonKsServicedLoanRowDto?> ReadByKeyAsync(
+        private async Task<NonKsServicedLoanRowDto?> ReadByKeyAsync(
             SqlConnection connection,
             long nonKsServicedLoanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(SelectByKeySql, connection);
+            await using var command = new SqlCommand(_selectByKeySql, connection);
             command.Parameters.AddWithValue("@non_ks_serviced_loan_key", nonKsServicedLoanKey);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);

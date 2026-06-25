@@ -19,88 +19,98 @@ namespace kingsightapi.Services
 
     public sealed class LoanSecurityValueService : ILoanSecurityValueService
     {
-        private const string CollateralSubqueryBase = """
-            select l.loan_alias_key,
-                   sum(isnull(l.collateral, 0)) as collateral_per_yardi
-            from mort.dim_loan l
-            where l.is_current = 1
-              and l.loan_alias_key is not null
-            """;
-
-        private const string ListSqlBase = """
-            select m.loan_alias_id,
-                   m.loan_alias_name,
-                   isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
-                   m.security_value,
-                   m.units,
-                   m.square_feet,
-                   m.acres,
-                   isnull(m.updated_by, '') as updated_by,
-                   m.updated_dtm
-            from mort.loan_alias_master m
-            left join (
-            """;
-
-        private const string ListSqlFallback = """
-            select m.loan_alias_id,
-                   m.loan_alias_name,
-                   isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
-                   m.security_value,
-                   isnull(m.updated_by, '') as updated_by,
-                   m.updated_dtm
-            from mort.loan_alias_master m
-            left join (
-            """;
-
-        private const string ListSqlJoinEnd = """
-            ) c on m.loan_alias_id = c.loan_alias_key
-            """;
-
-        private const string UpdateSql = """
-            update mort.loan_alias_master
-            set security_value = @security_value,
-                units = @units,
-                square_feet = @square_feet,
-                acres = @acres,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string UpdateSqlFallback = """
-            update mort.loan_alias_master
-            set security_value = @security_value,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string StatusOptionsSql = """
-            select s.status_key,
-                   s.status_name
-            from mort.dim_status s
-            order by s.status_name
-            """;
-
-        private static readonly string[] LoanStatusKeyColumnCandidates =
-        [
-            "loan_status_key",
-            "status_key",
-            "loan_status_id",
-            "status_id",
-            "funding_status_key"
-        ];
+        private readonly string _collateralSubqueryBase;
+        private readonly string _listSqlBase;
+        private readonly string _listSqlFallback;
+        private readonly string _listSqlJoinEnd;
+        private readonly string _updateSql;
+        private readonly string _updateSqlFallback;
+        private readonly string _statusOptionsSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimStatus;
         private readonly ILogger<LoanSecurityValueService> _logger;
         private bool? _extendedColumnsAvailable;
         private string? _loanStatusKeyColumn;
 
-        public LoanSecurityValueService(IConfiguration configuration, ILogger<LoanSecurityValueService> logger)
+        public LoanSecurityValueService(
+            IConfiguration configuration,
+            ILogger<LoanSecurityValueService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+
+            _collateralSubqueryBase = $"""
+                select l.loan_alias_key,
+                       sum(isnull(l.collateral, 0)) as collateral_per_yardi
+                from {_tblDimLoan} l
+                where l.is_current = 1
+                  and l.loan_alias_key is not null
+                """;
+
+            _listSqlBase = $"""
+                select m.loan_alias_id,
+                       m.loan_alias_name,
+                       isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
+                       m.security_value,
+                       m.units,
+                       m.square_feet,
+                       m.acres,
+                       isnull(m.updated_by, '') as updated_by,
+                       m.updated_dtm
+                from {_tblLoanAliasMaster} m
+                left join (
+                """;
+
+            _listSqlFallback = $"""
+                select m.loan_alias_id,
+                       m.loan_alias_name,
+                       isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
+                       m.security_value,
+                       isnull(m.updated_by, '') as updated_by,
+                       m.updated_dtm
+                from {_tblLoanAliasMaster} m
+                left join (
+                """;
+
+            _listSqlJoinEnd = """
+                ) c on m.loan_alias_id = c.loan_alias_key
+                """;
+
+            _updateSql = $"""
+                update {_tblLoanAliasMaster}
+                set security_value = @security_value,
+                    units = @units,
+                    square_feet = @square_feet,
+                    acres = @acres,
+                    updated_by = @updated_by,
+                    updated_dtm = getutcdate()
+                where loan_alias_id = @loan_alias_id
+                """;
+
+            _updateSqlFallback = $"""
+                update {_tblLoanAliasMaster}
+                set security_value = @security_value,
+                    updated_by = @updated_by,
+                    updated_dtm = getutcdate()
+                where loan_alias_id = @loan_alias_id
+                """;
+
+            _statusOptionsSql = $"""
+                select s.status_key,
+                       s.status_name
+                from {_tblDimStatus} s
+                order by s.status_name
+                """;
         }
 
         public async Task<IReadOnlyList<LoanSecurityValueDto>> GetAllAsync(
@@ -150,7 +160,7 @@ namespace kingsightapi.Services
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
-            await using var command = new SqlCommand(StatusOptionsSql, connection);
+            await using var command = new SqlCommand(_statusOptionsSql, connection);
             await using var reader = await command.ExecuteReaderAsync();
             while (await reader.ReadAsync())
             {
@@ -175,7 +185,7 @@ namespace kingsightapi.Services
         public async Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request, string auditDisplayName)
         {
             var useExtendedColumns = await GetExtendedColumnsAvailableAsync();
-            var updateSql = useExtendedColumns ? UpdateSql : UpdateSqlFallback;
+            var updateSql = useExtendedColumns ? _updateSql : _updateSqlFallback;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
@@ -236,32 +246,15 @@ namespace kingsightapi.Services
                 return _loanStatusKeyColumn;
             }
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+                _connectionString,
+                _tblDimLoan);
 
-            foreach (var column in LoanStatusKeyColumnCandidates)
-            {
-                var probeSql = $"select top 0 [{column}] from mort.dim_loan";
+            _logger.LogInformation(
+                "Using mort.dim_loan.{Column} for loan status filter.",
+                _loanStatusKeyColumn);
 
-                try
-                {
-                    await using var command = new SqlCommand(probeSql, connection);
-                    await using var reader = await command.ExecuteReaderAsync();
-                    _loanStatusKeyColumn = column;
-                    _logger.LogInformation(
-                        "Using mort.dim_loan.{Column} for loan status filter.",
-                        column);
-                    return column;
-                }
-                catch (SqlException ex) when (ex.Number == 207)
-                {
-                    // Try next candidate column name.
-                }
-            }
-
-            throw new InvalidOperationException(
-                "mort.dim_loan does not have a recognized status foreign key column. "
-                + $"Expected one of: {string.Join(", ", LoanStatusKeyColumnCandidates)}.");
+            return _loanStatusKeyColumn;
         }
 
         private async Task<bool> GetExtendedColumnsAvailableAsync()
@@ -271,9 +264,9 @@ namespace kingsightapi.Services
                 return _extendedColumnsAvailable.Value;
             }
 
-            const string probeSql = """
+            var probeSql = $"""
                 select top 0 units, square_feet, acres
-                from mort.loan_alias_master
+                from {_tblLoanAliasMaster}
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
@@ -309,28 +302,29 @@ namespace kingsightapi.Services
             return rows;
         }
 
-        private static string BuildListSql(
+        private string BuildListSql(
             IReadOnlyList<long>? loanAliasIds,
             LoanStatusFilter statusFilter,
             bool useExtendedColumns,
             string? loanStatusKeyColumn)
         {
-            var collateralSql = new StringBuilder(CollateralSubqueryBase);
+            var collateralSql = new StringBuilder(_collateralSubqueryBase);
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
                 LoanStatusFilterParser.AppendSqlCondition(
                     collateralSql,
                     "l",
                     loanStatusKeyColumn,
-                    statusFilter);
+                    statusFilter,
+                    _tblDimStatus);
             }
 
             collateralSql.AppendLine();
             collateralSql.Append(" group by l.loan_alias_key");
 
-            var sql = new StringBuilder(useExtendedColumns ? ListSqlBase : ListSqlFallback);
+            var sql = new StringBuilder(useExtendedColumns ? _listSqlBase : _listSqlFallback);
             sql.Append(collateralSql);
-            sql.Append(ListSqlJoinEnd);
+            sql.Append(_listSqlJoinEnd);
 
             var whereClauses = new List<string>();
             if (loanAliasIds is { Count: > 0 })
@@ -345,14 +339,15 @@ namespace kingsightapi.Services
             {
                 var existsSql = new StringBuilder();
                 existsSql.Append("exists (");
-                existsSql.Append("select 1 from mort.dim_loan lf");
+                existsSql.Append($"select 1 from {_tblDimLoan} lf");
                 existsSql.Append(" where lf.is_current = 1");
                 existsSql.Append(" and lf.loan_alias_key = m.loan_alias_id");
                 LoanStatusFilterParser.AppendSqlCondition(
                     existsSql,
                     "lf",
                     loanStatusKeyColumn,
-                    statusFilter);
+                    statusFilter,
+                    _tblDimStatus);
                 existsSql.Append(')');
                 whereClauses.Add(existsSql.ToString());
             }

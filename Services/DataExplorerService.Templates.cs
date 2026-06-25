@@ -86,7 +86,7 @@ public sealed partial class DataExplorerService
         {
             await DeleteTemplateChildrenAsync(connection, transaction, templateId);
 
-            const string updateSql =
+            string updateSql =
                 " update " + WarehouseTables.DataExplorerTemplate + " set " +
                 " template_name = @templateName, " +
                 " description = @description, " +
@@ -211,7 +211,7 @@ public sealed partial class DataExplorerService
     {
         var modifiedByValue = string.IsNullOrWhiteSpace(modifiedBy) ? null : modifiedBy.Trim();
 
-        const string sql =
+        string sql =
             " update " + WarehouseTables.DataExplorerTemplate + " set " +
             " is_active = 0, modified_by = @modifiedBy, modified_at = @modifiedAt " +
             " where template_id = @templateId and is_active = 1 ";
@@ -321,7 +321,7 @@ public sealed partial class DataExplorerService
         string sourceView,
         long? excludeTemplateId)
     {
-        const string sql =
+        string sql =
             " select count(*) from " + WarehouseTables.DataExplorerTemplate +
             " where is_active = 1 and template_name = @templateName and source_view = @sourceView " +
             " and (@excludeTemplateId is null or template_id <> @excludeTemplateId) ";
@@ -339,7 +339,7 @@ public sealed partial class DataExplorerService
 
     private static async Task<bool> TemplateExistsAsync(SqlConnection connection, long templateId)
     {
-        const string sql =
+        string sql =
             " select count(*) from " + WarehouseTables.DataExplorerTemplate +
             " where template_id = @templateId and is_active = 1 ";
 
@@ -368,7 +368,7 @@ public sealed partial class DataExplorerService
     {
         // Fabric Warehouse does not support OUTPUT or SCOPE_IDENTITY() on INSERT.
         // template_id is resolved after insert via unique template_name (enforced before insert).
-        const string insertSql =
+        string insertSql =
             " insert into " + WarehouseTables.DataExplorerTemplate + " ( " +
             " template_name, description, source_view, match_type, group_by_field, " +
             " created_by, created_at, modified_by, modified_at, is_active " +
@@ -395,7 +395,7 @@ public sealed partial class DataExplorerService
         }
 
         // Fabric does not support OUTPUT or SCOPE_IDENTITY() — resolve id by unique template_name per source_view.
-        const string lookupSql =
+        string lookupSql =
             " select template_id from " + WarehouseTables.DataExplorerTemplate +
             " where template_name = @templateName and source_view = @sourceView and is_active = 1 ";
 
@@ -420,7 +420,7 @@ public sealed partial class DataExplorerService
         long templateId,
         IReadOnlyList<DataExplorerColumnDto> columns)
     {
-        const string sql =
+        string sql =
             " insert into " + WarehouseTables.DataExplorerTemplateColumn +
             " (template_id, column_name, display_order) values (@templateId, @columnName, @displayOrder) ";
 
@@ -444,7 +444,7 @@ public sealed partial class DataExplorerService
         IReadOnlyList<ResolvedDataExplorerFilter> filters)
     {
         // filter_id is BIGINT IDENTITY — omit on insert.
-        const string sql =
+        string sql =
             " insert into " + WarehouseTables.DataExplorerTemplateFilter +
             " (template_id, column_name, [operator], filter_value, filter_order) " +
             " values (@templateId, @columnName, @operator, @filterValue, @filterOrder) ";
@@ -470,7 +470,7 @@ public sealed partial class DataExplorerService
         SqlTransaction transaction,
         long templateId)
     {
-        const string deleteFilters =
+        string deleteFilters =
             " delete from " + WarehouseTables.DataExplorerTemplateFilter + " where template_id = @templateId ";
         await using (var command = new SqlCommand(deleteFilters, connection, transaction))
         {
@@ -478,7 +478,7 @@ public sealed partial class DataExplorerService
             await command.ExecuteNonQueryAsync();
         }
 
-        const string deleteColumns =
+        string deleteColumns =
             " delete from " + WarehouseTables.DataExplorerTemplateColumn + " where template_id = @templateId ";
         await using (var command = new SqlCommand(deleteColumns, connection, transaction))
         {
@@ -489,7 +489,7 @@ public sealed partial class DataExplorerService
 
     private static async Task<DataExplorerTemplateDto?> LoadTemplateAsync(SqlConnection connection, long templateId)
     {
-        const string headerSql =
+        string headerSql =
             " select template_id, template_name, description, source_view, match_type, group_by_field, " +
             " created_by, created_at, modified_by, modified_at " +
             " from " + WarehouseTables.DataExplorerTemplate +
@@ -527,7 +527,7 @@ public sealed partial class DataExplorerService
         }
 
         var columns = new List<string>();
-        const string columnsSql =
+        string columnsSql =
             " select column_name from " + WarehouseTables.DataExplorerTemplateColumn +
             " where template_id = @templateId order by display_order ";
         await using (var columnsCommand = new SqlCommand(columnsSql, connection))
@@ -541,7 +541,7 @@ public sealed partial class DataExplorerService
         }
 
         var filters = new List<DataExplorerFilterDto>();
-        const string filtersSql =
+        string filtersSql =
             " select column_name, [operator], filter_value from " + WarehouseTables.DataExplorerTemplateFilter +
             " where template_id = @templateId order by filter_order ";
         await using (var filtersCommand = new SqlCommand(filtersSql, connection))

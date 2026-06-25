@@ -23,6 +23,14 @@
     <None Remove="kingsightapi.Tests/**" />
   </ItemGroup>
 
+  <!-- Exclude local tool build output (SchemaProbe obj/*.cs was picked up by **/*.cs glob) -->
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <Content Remove="tools/**" />
+    <None Remove="tools/**" />
+    <EmbeddedResource Remove="tools/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="log4net.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

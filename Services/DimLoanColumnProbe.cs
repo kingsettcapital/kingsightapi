@@ -6,6 +6,7 @@ namespace kingsightapi.Services
     {
         public static async Task<string?> FindFirstAsync(
             string connectionString,
+            string dimLoanTable,
             IReadOnlyList<string> columnCandidates,
             CancellationToken cancellationToken = default)
         {
@@ -14,7 +15,7 @@ namespace kingsightapi.Services
 
             foreach (var column in columnCandidates)
             {
-                var probeSql = $"select top 0 [{column}] from mort.dim_loan";
+                var probeSql = $"select top 0 [{column}] from {dimLoanTable}";
 
                 try
                 {

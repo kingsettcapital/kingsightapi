@@ -47,6 +47,9 @@ namespace kingsightapi
                 });
 
             builder.Services.AddEntraAuthentication(configuration);
+            builder.Services.Configure<FabricWarehouseOptions>(
+                configuration.GetSection(FabricWarehouseOptions.SectionName));
+            builder.Services.AddSingleton<FabricWarehouseTables>();
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddScoped<ICurrentUserResolver, CurrentUserResolver>();
 
@@ -98,6 +101,10 @@ namespace kingsightapi
             builder.Services.AddAngularCors(configuration, builder.Environment);
 
             var fabricConnectionString = configuration.GetConnectionString("FabricConnectionString");
+            var warehouseOptions = configuration
+                .GetSection(FabricWarehouseOptions.SectionName)
+                .Get<FabricWarehouseOptions>() ?? new FabricWarehouseOptions();
+            WarehouseTables.Configure(warehouseOptions);
 
             var app = builder.Build();
 

@@ -21,45 +21,59 @@ namespace kingsightapi.Services
 
     public sealed class OtherCostCaptureService : IOtherCostCaptureService
     {
-        private const string ListSqlBase = """
-            select l.loan_key,
-                   l.loan_code,
-                   l.loan_desc,
-                   loan_alias_name = isnull(m.loan_alias_name, ''),
-                   l.outstanding_invoice_value,
-                   l.estimated_realization_value,
-                   l.cost_to_complete_value,
-                   l.user_updated_by,
-                   l.user_updated_date
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-              and l.loan_alias_key = @loan_alias_id
-            """;
-
-        private const string UpdateSql = """
-            update mort.dim_loan
-            set outstanding_invoice_value = @outstanding_invoice_value,
-                estimated_realization_value = @estimated_realization_value,
-                cost_to_complete_value = @cost_to_complete_value,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-              and is_current = 1
-              and (is_leaf = 1 or is_leaf is null)
-            """;
+        private readonly string _listSqlBase;
+        private readonly string _updateSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimStatus;
         private readonly ILogger<OtherCostCaptureService> _logger;
         private string? _loanStatusKeyColumn;
 
-        public OtherCostCaptureService(IConfiguration configuration, ILogger<OtherCostCaptureService> logger)
+        public OtherCostCaptureService(
+            IConfiguration configuration,
+            ILogger<OtherCostCaptureService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+
+            _listSqlBase = $"""
+                select l.loan_key,
+                       l.loan_code,
+                       l.loan_desc,
+                       loan_alias_name = isnull(m.loan_alias_name, ''),
+                       l.outstanding_invoice_value,
+                       l.estimated_realization_value,
+                       l.cost_to_complete_value,
+                       l.user_updated_by,
+                       l.user_updated_date
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                where l.is_current = 1
+                  and (l.is_leaf = 1 or l.is_leaf is null)
+                  and l.loan_alias_key = @loan_alias_id
+                """;
+
+            _updateSql = $"""
+                update {_tblDimLoan}
+                set outstanding_invoice_value = @outstanding_invoice_value,
+                    estimated_realization_value = @estimated_realization_value,
+                    cost_to_complete_value = @cost_to_complete_value,
+                    user_updated_by = @user_updated_by,
+                    user_updated_date = sysutcdatetime()
+                where loan_key = @loan_key
+                  and is_current = 1
+                  and (is_leaf = 1 or is_leaf is null)
+                """;
         }
 
         public async Task<IReadOnlyList<OtherCostCaptureDto>> GetAsync(
@@ -68,12 +82,12 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken = default)
         {
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
-            var sql = new StringBuilder(ListSqlBase);
+            var sql = new StringBuilder(_listSqlBase);
 
             if (statusFilter.HasFilter)
             {
                 var loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
@@ -114,7 +128,7 @@ namespace kingsightapi.Services
             var affectedRows = 0;
             foreach (var loan in request.Loans)
             {
-                await using var command = new SqlCommand(UpdateSql, connection);
+                await using var command = new SqlCommand(_updateSql, connection);
                 command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
                 command.Parameters.AddWithValue(
                     "@outstanding_invoice_value",
@@ -149,6 +163,7 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             _logger.LogInformation(

@@ -16,60 +16,69 @@ namespace kingsightapi.Services
 
     public sealed class InvestorAliasService : IInvestorAliasService
     {
-        private const string ListSql = """
-            select investor_alias_id,
-                   investor_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.investor_alias_master
-            order by investor_alias_id
-            """;
-
-        private const string GetByIdSql = """
-            select investor_alias_id,
-                   investor_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.investor_alias_master
-            where investor_alias_id = @investor_alias_id
-            """;
-
-        private const string NextIdSql = """
-            select isnull(max(investor_alias_id), 0) + 1
-            from mort.investor_alias_master
-            """;
-
-        private const string InsertSql = """
-            insert into mort.investor_alias_master
-                (investor_alias_id, investor_alias_name, created_by, created_dtm, updated_by, updated_dtm)
-            values (@investor_alias_id, @investor_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
-            """;
-
-        private const string UpdateSql = """
-            update mort.investor_alias_master
-            set investor_alias_name = @investor_alias_name,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where investor_alias_id = @investor_alias_id
-            """;
-
-        private const string DeleteSql = """
-            delete from mort.investor_alias_master
-            where investor_alias_id = @investor_alias_id
-            """;
+        private readonly string ListSql;
+        private readonly string GetByIdSql;
+        private readonly string NextIdSql;
+        private readonly string InsertSql;
+        private readonly string UpdateSql;
+        private readonly string DeleteSql;
 
         private readonly string _connectionString;
         private readonly ILogger<InvestorAliasService> _logger;
 
-        public InvestorAliasService(IConfiguration configuration, ILogger<InvestorAliasService> logger)
+        public InvestorAliasService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<InvestorAliasService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+
+            var investorAliasMaster = tables.Mort("investor_alias_master");
+
+            ListSql = $"""
+                select investor_alias_id,
+                       investor_alias_name,
+                       created_by,
+                       created_dtm,
+                       updated_by,
+                       updated_dtm
+                from {investorAliasMaster}
+                order by investor_alias_id
+                """;
+
+            GetByIdSql = $"""
+                select investor_alias_id,
+                       investor_alias_name,
+                       created_by,
+                       created_dtm,
+                       updated_by,
+                       updated_dtm
+                from {investorAliasMaster}
+                where investor_alias_id = @investor_alias_id
+                """;
+
+            NextIdSql = $"""
+                select isnull(max(investor_alias_id), 0) + 1
+                from {investorAliasMaster}
+                """;
+
+            InsertSql = $"""
+                insert into {investorAliasMaster}
+                    (investor_alias_id, investor_alias_name, created_by, created_dtm, updated_by, updated_dtm)
+                values (@investor_alias_id, @investor_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
+                """;
+
+            UpdateSql = $"""
+                update {investorAliasMaster}
+                set investor_alias_name = @investor_alias_name,
+                    updated_by = @updated_by,
+                    updated_dtm = getutcdate()
+                where investor_alias_id = @investor_alias_id
+                """;
+
+            DeleteSql = $"""
+                delete from {investorAliasMaster}
+                where investor_alias_id = @investor_alias_id
+                """;
         }
 
         public async Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync()
@@ -148,7 +157,7 @@ namespace kingsightapi.Services
             }
         }
 
-        private static async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
+        private async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
         {
             await using var command = new SqlCommand(NextIdSql, connection, transaction)
             {

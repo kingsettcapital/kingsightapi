@@ -8,33 +8,10 @@ namespace kingsightapi.Services
 {
     public sealed class CmhcUploadService : ICmhcUploadService
     {
-        private const string HistorySql = """
-            select file_id,
-                   filename,
-                   uploaded_date,
-                   uploaded_by
-            from mort.CMHC_upload_historytbl
-            order by uploaded_date desc
-            """;
-
-        private const string NextFileIdSql = """
-            select isnull(max(file_id), 0) + 1
-            from mort.CMHC_upload_historytbl
-            """;
-
-        private const string InsertSql = """
-            insert into mort.CMHC_upload_historytbl (file_id, filename, uploaded_date, uploaded_by)
-            values (@file_id, @filename, sysutcdatetime(), @uploaded_by)
-            """;
-
-        private const string GetInsertedRowSql = """
-            select file_id,
-                   filename,
-                   uploaded_date,
-                   uploaded_by
-            from mort.CMHC_upload_historytbl
-            where file_id = @file_id
-            """;
+        private readonly string HistorySql;
+        private readonly string NextFileIdSql;
+        private readonly string InsertSql;
+        private readonly string GetInsertedRowSql;
 
         private readonly string _connectionString;
         private readonly ICmhcFileStorage _fileStorage;
@@ -44,6 +21,7 @@ namespace kingsightapi.Services
 
         public CmhcUploadService(
             IConfiguration configuration,
+            FabricWarehouseTables tables,
             ICmhcFileStorage fileStorage,
             IUserService userService,
             IOptions<CmhcUploadOptions> options,
@@ -51,6 +29,37 @@ namespace kingsightapi.Services
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+
+            var cmhcUploadHistory = tables.Mort("CMHC_upload_historytbl");
+
+            HistorySql = $"""
+                select file_id,
+                       filename,
+                       uploaded_date,
+                       uploaded_by
+                from {cmhcUploadHistory}
+                order by uploaded_date desc
+                """;
+
+            NextFileIdSql = $"""
+                select isnull(max(file_id), 0) + 1
+                from {cmhcUploadHistory}
+                """;
+
+            InsertSql = $"""
+                insert into {cmhcUploadHistory} (file_id, filename, uploaded_date, uploaded_by)
+                values (@file_id, @filename, sysutcdatetime(), @uploaded_by)
+                """;
+
+            GetInsertedRowSql = $"""
+                select file_id,
+                       filename,
+                       uploaded_date,
+                       uploaded_by
+                from {cmhcUploadHistory}
+                where file_id = @file_id
+                """;
+
             _fileStorage = fileStorage;
             _userService = userService;
             _options = options.Value;

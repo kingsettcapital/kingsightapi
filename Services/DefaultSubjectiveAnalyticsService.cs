@@ -35,15 +35,13 @@ namespace kingsightapi.Services
         private static readonly string[] MaturityDetailColumnCandidates =
             ["maturity_additional_detail", "maturity_detail", "maturity_addl_detail"];
 
-        private const string ListSqlFrom = """
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
+        private readonly string _listSqlFrom;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblDimStatus;
         private readonly ILogger<DefaultSubjectiveAnalyticsService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _maturityDateColumn;
@@ -59,11 +57,24 @@ namespace kingsightapi.Services
 
         public DefaultSubjectiveAnalyticsService(
             IConfiguration configuration,
-            ILogger<DefaultSubjectiveAnalyticsService> logger)
+            ILogger<DefaultSubjectiveAnalyticsService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _tables = tables;
+            _tblDimLoan = tables.Mort("dim_loan");
+            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
+            _tblDimStatus = tables.Mort("dim_status");
+
+            _listSqlFrom = $"""
+                from {_tblDimLoan} l
+                left join {_tblLoanAliasMaster} m
+                    on l.loan_alias_key = m.loan_alias_id
+                where l.is_current = 1
+                  and (l.is_leaf = 1 or l.is_leaf is null)
+                """;
         }
 
         public IReadOnlyList<DefaultSubjectiveAnalyticsOptionDto> GetDefaultStatusOptions() =>
@@ -166,7 +177,7 @@ namespace kingsightapi.Services
                 });
 
             var updateSql = $"""
-                update mort.dim_loan
+                update {_tblDimLoan}
                 set {setClause}
                 where loan_key = @loan_key
                   and is_current = 1
@@ -322,6 +333,7 @@ namespace kingsightapi.Services
 
             var column = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
+                _tblDimLoan,
                 candidates,
                 cancellationToken);
 
@@ -348,12 +360,13 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
+                _tblDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;
         }
 
-        private static string BuildListSql(
+        private string BuildListSql(
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn,
@@ -379,7 +392,7 @@ namespace kingsightapi.Services
                        l.user_updated_by,
                        l.user_updated_date
                 """);
-            sql.Append(ListSqlFrom);
+            sql.Append(_listSqlFrom);
 
             sql.Append(" and l.loan_alias_key in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
@@ -387,7 +400,7 @@ namespace kingsightapi.Services
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
