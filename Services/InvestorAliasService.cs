@@ -7,24 +7,24 @@ namespace kingsightapi.Services
 {
     public interface IInvestorAliasService
     {
-        Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync();
-        Task<InvestorAliasDto?> GetByIdAsync(long investorAliasId);
-        Task<long> SaveAsync(InvestorAliasSaveRequest request, string auditDisplayName);
-        Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request, string auditDisplayName);
-        Task<bool> DeleteAsync(long investorAliasId);
+        Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync(CancellationToken cancellationToken = default);
+        Task<InvestorAliasDto?> GetByIdAsync(long investorAliasId, CancellationToken cancellationToken = default);
+        Task<long> SaveAsync(InvestorAliasSaveRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
+        Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
+        Task<bool> DeleteAsync(long investorAliasId, CancellationToken cancellationToken = default);
     }
 
     public sealed class InvestorAliasService : IInvestorAliasService
     {
-        private readonly string ListSql;
-        private readonly string GetByIdSql;
         private readonly string NextIdSql;
-        private readonly string InsertSql;
-        private readonly string UpdateSql;
         private readonly string DeleteSql;
 
         private readonly string _connectionString;
+        private readonly string _investorAliasMasterTable;
         private readonly ILogger<InvestorAliasService> _logger;
+
+        private bool _schemaProbed;
+        private SubjectiveInputMasterAuditColumns _auditColumns = new();
 
         public InvestorAliasService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<InvestorAliasService> logger)
         {
@@ -32,161 +32,134 @@ namespace kingsightapi.Services
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
 
-            var investorAliasMaster = tables.Mort("investor_alias_master");
-
-            ListSql = $"""
-                select investor_alias_id,
-                       investor_alias_name,
-                       created_by,
-                       created_dtm,
-                       updated_by,
-                       updated_dtm
-                from {investorAliasMaster}
-                order by investor_alias_id
-                """;
-
-            GetByIdSql = $"""
-                select investor_alias_id,
-                       investor_alias_name,
-                       created_by,
-                       created_dtm,
-                       updated_by,
-                       updated_dtm
-                from {investorAliasMaster}
-                where investor_alias_id = @investor_alias_id
-                """;
+            _investorAliasMasterTable = tables.SubjectiveInput("investor_alias_master");
 
             NextIdSql = $"""
                 select isnull(max(investor_alias_id), 0) + 1
-                from {investorAliasMaster}
-                """;
-
-            InsertSql = $"""
-                insert into {investorAliasMaster}
-                    (investor_alias_id, investor_alias_name, created_by, created_dtm, updated_by, updated_dtm)
-                values (@investor_alias_id, @investor_alias_name, @audit_user, getutcdate(), @audit_user, getutcdate())
-                """;
-
-            UpdateSql = $"""
-                update {investorAliasMaster}
-                set investor_alias_name = @investor_alias_name,
-                    updated_by = @updated_by,
-                    updated_dtm = getutcdate()
-                where investor_alias_id = @investor_alias_id
+                from {_investorAliasMasterTable}
                 """;
 
             DeleteSql = $"""
-                delete from {investorAliasMaster}
+                delete from {_investorAliasMasterTable}
                 where investor_alias_id = @investor_alias_id
                 """;
         }
 
-        public async Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync()
+        public async Task<IReadOnlyList<InvestorAliasDto>> GetAllAsync(CancellationToken cancellationToken = default)
         {
+            await EnsureSchemaAsync(cancellationToken);
+
             var rows = new List<InvestorAliasDto>();
 
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
 
-            await using var command = new SqlCommand(ListSql, connection)
+            await using var command = new SqlCommand(BuildListSql(), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
 
-            await using var reader = await command.ExecuteReaderAsync();
-            var ordinals = GetOrdinals(reader);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            while (await reader.ReadAsync())
+            while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add(MapRow(reader, ordinals));
+                rows.Add(MapRow(reader));
             }
 
             _logger.LogInformation("Retrieved {Count} investor alias rows.", rows.Count);
             return rows;
         }
 
-        public async Task<InvestorAliasDto?> GetByIdAsync(long investorAliasId)
+        public async Task<InvestorAliasDto?> GetByIdAsync(long investorAliasId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await EnsureSchemaAsync(cancellationToken);
 
-            await using var command = new SqlCommand(GetByIdSql, connection)
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(BuildGetByIdSql(), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
             command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
 
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
             {
                 return null;
             }
 
-            var ordinals = GetOrdinals(reader);
-            return MapRow(reader, ordinals);
+            return MapRow(reader);
         }
 
-        public async Task<long> SaveAsync(InvestorAliasSaveRequest request, string auditDisplayName)
+        public async Task<long> SaveAsync(
+            InvestorAliasSaveRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
         {
+            await EnsureSchemaAsync(cancellationToken);
+
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var newId = await GetNextIdAsync(connection, transaction);
+                var newId = await GetNextIdAsync(connection, transaction, cancellationToken);
+                var auditUtc = DateTime.UtcNow;
 
-                await using var command = new SqlCommand(InsertSql, connection, transaction)
+                await using var command = new SqlCommand(BuildInsertSql(), connection, transaction)
                 {
                     CommandType = System.Data.CommandType.Text
                 };
+
                 command.Parameters.AddWithValue("@investor_alias_id", newId);
                 command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-                command.Parameters.AddWithValue("@audit_user", auditDisplayName);
+                _auditColumns.AddInsertParameters(command, auditDisplayName, auditUtc);
 
-                await command.ExecuteNonQueryAsync();
-                await transaction.CommitAsync();
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
 
-                _logger.LogInformation("Created investor alias row with id {InvestorAliasId}.", newId);
+                _logger.LogInformation(
+                    "Created investor alias row with id {InvestorAliasId} by {AuditUser}.",
+                    newId,
+                    auditDisplayName);
                 return newId;
             }
             catch
             {
-                await transaction.RollbackAsync();
+                await transaction.RollbackAsync(cancellationToken);
                 throw;
             }
         }
 
-        private async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
+        public async Task<bool> UpdateAsync(
+            long investorAliasId,
+            InvestorAliasUpdateRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
         {
-            await using var command = new SqlCommand(NextIdSql, connection, transaction)
-            {
-                CommandType = System.Data.CommandType.Text
-            };
+            await EnsureSchemaAsync(cancellationToken);
 
-            var result = await command.ExecuteScalarAsync();
-            return Convert.ToInt64(result);
-        }
-
-        public async Task<bool> UpdateAsync(long investorAliasId, InvestorAliasUpdateRequest request, string auditDisplayName)
-        {
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
 
-            await using var command = new SqlCommand(UpdateSql, connection)
+            await using var command = new SqlCommand(BuildUpdateSql(), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
+
             command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
             command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-            command.Parameters.AddWithValue("@updated_by", auditDisplayName);
+            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
-            var affectedRows = await command.ExecuteNonQueryAsync();
+            var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
             if (affectedRows > 0)
             {
                 _logger.LogInformation(
-                    "Updated investor alias row {InvestorAliasId}. Rows affected: {AffectedRows}",
+                    "Updated investor alias row {InvestorAliasId} by {AuditUser}. Rows affected: {AffectedRows}",
                     investorAliasId,
+                    auditDisplayName,
                     affectedRows);
                 return true;
             }
@@ -195,10 +168,10 @@ namespace kingsightapi.Services
             return false;
         }
 
-        public async Task<bool> DeleteAsync(long investorAliasId)
+        public async Task<bool> DeleteAsync(long investorAliasId, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
 
             await using var command = new SqlCommand(DeleteSql, connection)
             {
@@ -206,7 +179,7 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
 
-            var affectedRows = await command.ExecuteNonQueryAsync();
+            var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
             if (affectedRows > 0)
             {
                 _logger.LogInformation(
@@ -220,29 +193,114 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) GetOrdinals(SqlDataReader reader)
+        private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
         {
-            return (
-                reader.GetOrdinal("investor_alias_id"),
-                reader.GetOrdinal("investor_alias_name"),
-                reader.GetOrdinal("created_by"),
-                reader.GetOrdinal("created_dtm"),
-                reader.GetOrdinal("updated_by"),
-                reader.GetOrdinal("updated_dtm"));
+            if (_schemaProbed)
+            {
+                return;
+            }
+
+            _auditColumns = await SubjectiveInputMasterAuditColumns.ProbeAsync(
+                _connectionString,
+                _investorAliasMasterTable,
+                cancellationToken);
+            _schemaProbed = true;
         }
 
-        private static InvestorAliasDto MapRow(
-            SqlDataReader reader,
-            (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) ordinals)
+        private string BuildSelectColumns()
         {
+            var auditColumns = _auditColumns.SelectListColumns()
+                .Select(column => column.Trim('[', ']'));
+            return string.Join(
+                ",\n                       ",
+                new[] { "investor_alias_id", "investor_alias_name" }.Concat(auditColumns));
+        }
+
+        private string BuildListSql() =>
+            $"""
+                select {BuildSelectColumns()}
+                from {_investorAliasMasterTable}
+                order by investor_alias_id
+                """;
+
+        private string BuildGetByIdSql() =>
+            $"""
+                select {BuildSelectColumns()}
+                from {_investorAliasMasterTable}
+                where investor_alias_id = @investor_alias_id
+                """;
+
+        private string BuildInsertSql() =>
+            $"""
+                insert into {_investorAliasMasterTable} (
+                    investor_alias_id,
+                    investor_alias_name{_auditColumns.BuildInsertColumnList()})
+                values (
+                    @investor_alias_id,
+                    @investor_alias_name{_auditColumns.BuildInsertValueList()})
+                """;
+
+        private string BuildUpdateSql() =>
+            $"""
+                update {_investorAliasMasterTable}
+                set investor_alias_name = @investor_alias_name{_auditColumns.BuildUpdateSetClause()}
+                where investor_alias_id = @investor_alias_id
+                """;
+
+        private async Task<long> GetNextIdAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(NextIdSql, connection, transaction)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt64(result);
+        }
+
+        private InvestorAliasDto MapRow(SqlDataReader reader)
+        {
+            DateTime? ReadAuditDate(string? column)
+            {
+                if (string.IsNullOrWhiteSpace(column))
+                {
+                    return null;
+                }
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+                {
+                    return null;
+                }
+
+                return DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
+            }
+
+            string ReadAuditUser(string? column)
+            {
+                if (string.IsNullOrWhiteSpace(column))
+                {
+                    return string.Empty;
+                }
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+                {
+                    return string.Empty;
+                }
+
+                return reader.GetString(ordinal);
+            }
+
             return new InvestorAliasDto
             {
-                InvestorAliasId = reader.IsDBNull(ordinals.Id) ? 0L : Convert.ToInt64(reader.GetValue(ordinals.Id)),
-                InvestorAliasName = reader.IsDBNull(ordinals.Name) ? string.Empty : reader.GetString(ordinals.Name),
-                CreatedBy = reader.IsDBNull(ordinals.CreatedBy) ? string.Empty : reader.GetString(ordinals.CreatedBy),
-                CreatedDtm = reader.IsDBNull(ordinals.CreatedDtm) ? null : reader.GetDateTime(ordinals.CreatedDtm),
-                UpdatedBy = reader.IsDBNull(ordinals.UpdatedBy) ? string.Empty : reader.GetString(ordinals.UpdatedBy),
-                UpdatedDtm = reader.IsDBNull(ordinals.UpdatedDtm) ? null : reader.GetDateTime(ordinals.UpdatedDtm)
+                InvestorAliasId = reader.GetInt64OrDefault("investor_alias_id"),
+                InvestorAliasName = reader.GetStringOrEmpty("investor_alias_name"),
+                CreatedBy = ReadAuditUser(_auditColumns.ReadCreatedByColumn),
+                CreatedDtm = ReadAuditDate(_auditColumns.ReadCreatedDtmColumn),
+                UpdatedBy = ReadAuditUser(_auditColumns.ReadUpdatedByColumn),
+                UpdatedDtm = ReadAuditDate(_auditColumns.ReadUpdatedDtmColumn)
             };
         }
     }

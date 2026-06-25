@@ -21,32 +21,17 @@ namespace kingsightapi.Services
 
     public sealed class DefaultDateCaptureService : IDefaultDateCaptureService
     {
-        private static readonly string[] DefaultDateColumnCandidates =
-        [
-            "default_date",
-            "loan_default_date"
-        ];
-
-        private static readonly string[] LoanTermDefaultDateColumnCandidates =
-        [
-            "loan_term_default_date",
-            "term_default_date",
-            "default_date_per_loan_terms"
-        ];
-
         private readonly string _listSqlFrom;
+        private readonly string _updateSql;
 
         private readonly string _connectionString;
         private readonly FabricWarehouseTables _tables;
         private readonly string _tblDimLoan;
         private readonly string _tblLoanAliasMaster;
+        private readonly string _tblLoanAliasRelationship;
         private readonly string _tblDimStatus;
         private readonly ILogger<DefaultDateCaptureService> _logger;
         private string? _loanStatusKeyColumn;
-        private string? _defaultDateColumn;
-        private bool? _defaultDateColumnResolved;
-        private string? _loanTermDefaultDateColumn;
-        private bool? _loanTermDefaultDateColumnResolved;
 
         public DefaultDateCaptureService(
             IConfiguration configuration,
@@ -57,16 +42,27 @@ namespace kingsightapi.Services
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
             _tables = tables;
-            _tblDimLoan = tables.Mort("dim_loan");
-            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
-            _tblDimStatus = tables.Mort("dim_status");
+            var subjective = new SubjectiveInputSql(tables);
+            _tblDimLoan = subjective.SharedDimLoan;
+            _tblLoanAliasMaster = subjective.LoanAliasMaster;
+            _tblLoanAliasRelationship = subjective.LoanAliasRelationship;
+            _tblDimStatus = subjective.DimStatus;
 
             _listSqlFrom = $"""
-                from {_tblDimLoan} l
-                left join {_tblLoanAliasMaster} m
-                    on l.loan_alias_key = m.loan_alias_id
-                where l.is_current = 1
-                  and (l.is_leaf = 1 or l.is_leaf is null)
+                from {_tblLoanAliasRelationship} r
+                inner join {_tblLoanAliasMaster} m
+                    on r.loan_alias_name = m.loan_alias_name
+                {subjective.SharedDimLoanJoinOnLoanCode()}
+                """;
+
+            _updateSql = $"""
+                update r
+                set default_date = @default_date
+                from {_tblLoanAliasRelationship} r
+                inner join {_tblDimLoan} l
+                    on l.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
                 """;
         }
 
@@ -75,9 +71,6 @@ namespace kingsightapi.Services
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default)
         {
-            var defaultDateColumn = await GetDefaultDateColumnAsync(cancellationToken);
-            var loanTermDefaultDateColumn = await GetLoanTermDefaultDateColumnAsync(cancellationToken);
-
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
             if (statusFilter.HasFilter)
@@ -85,23 +78,17 @@ namespace kingsightapi.Services
                 loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
                 if (string.IsNullOrEmpty(loanStatusKeyColumn))
                 {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
+                    throw new InvalidOperationException("Status filter requires loan_status_key on shared.dim_loan.");
                 }
             }
 
-            var sql = BuildListSql(
-                loanAliasIds,
-                statusFilter,
-                loanStatusKeyColumn,
-                defaultDateColumn,
-                loanTermDefaultDateColumn);
+            var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             await using var command = new SqlCommand(sql, connection);
             AddLoanAliasParameters(command, loanAliasIds);
-
             LoanStatusFilterParser.AddParameters(command, statusFilter);
 
             var rows = new List<DefaultDateCaptureRowDto>();
@@ -125,35 +112,17 @@ namespace kingsightapi.Services
             string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            var defaultDateColumn = await GetDefaultDateColumnAsync(cancellationToken);
-            if (string.IsNullOrEmpty(defaultDateColumn))
-            {
-                throw new InvalidOperationException(
-                    "mort.dim_loan is missing default_date. Run DDL to add the column before saving.");
-            }
-
-            var updateSql = $"""
-                update {_tblDimLoan}
-                set {defaultDateColumn} = @default_date,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
-                where loan_key = @loan_key
-                  and is_current = 1
-                  and (is_leaf = 1 or is_leaf is null)
-                """;
-
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             var affectedRows = 0;
             foreach (var loan in request.Loans)
             {
-                await using var command = new SqlCommand(updateSql, connection);
+                await using var command = new SqlCommand(_updateSql, connection);
                 command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
                 command.Parameters.AddWithValue(
                     "@default_date",
                     loan.DefaultDate.HasValue ? loan.DefaultDate.Value.Date : DBNull.Value);
-                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -171,34 +140,20 @@ namespace kingsightapi.Services
         private string BuildListSql(
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
-            string? loanStatusKeyColumn,
-            string? defaultDateColumn,
-            string? loanTermDefaultDateColumn)
+            string? loanStatusKeyColumn)
         {
-            var defaultDateSelect = string.IsNullOrEmpty(defaultDateColumn)
-                ? "cast(null as date) as default_date"
-                : $"l.{defaultDateColumn} as default_date";
-
-            var loanTermDefaultDateSelect = string.IsNullOrEmpty(loanTermDefaultDateColumn)
-                ? "cast(null as date) as loan_term_default_date"
-                : $"l.{loanTermDefaultDateColumn} as loan_term_default_date";
-
             var sql = new StringBuilder();
-            sql.AppendLine("""
-                select l.loan_key,
-                       l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                """);
-            sql.AppendLine($"       {loanTermDefaultDateSelect},");
-            sql.AppendLine($"       {defaultDateSelect},");
-            sql.AppendLine("""
-                       l.user_updated_by,
-                       l.user_updated_date
+            sql.AppendLine($"""
+                select {SubjectiveInputSql.LoanKeySelect()},
+                       r.loan_code,
+                       r.loan_description,
+                       r.loan_alias_name,
+                       r.loan_term_default_date,
+                       r.default_date
                 """);
             sql.Append(_listSqlFrom);
 
-            sql.Append(" and l.loan_alias_key in (");
+            sql.Append(" where m.loan_alias_id in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
             sql.Append(')');
 
@@ -208,56 +163,8 @@ namespace kingsightapi.Services
             }
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code");
+            sql.Append(" order by r.loan_alias_name, r.loan_code");
             return sql.ToString();
-        }
-
-        private async Task<string?> GetDefaultDateColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_defaultDateColumnResolved == true)
-            {
-                return _defaultDateColumn;
-            }
-
-            _defaultDateColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _tblDimLoan,
-                DefaultDateColumnCandidates,
-                cancellationToken);
-
-            _defaultDateColumnResolved = true;
-            if (!string.IsNullOrEmpty(_defaultDateColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for default date capture.",
-                    _defaultDateColumn);
-            }
-
-            return _defaultDateColumn;
-        }
-
-        private async Task<string?> GetLoanTermDefaultDateColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_loanTermDefaultDateColumnResolved == true)
-            {
-                return _loanTermDefaultDateColumn;
-            }
-
-            _loanTermDefaultDateColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _tblDimLoan,
-                LoanTermDefaultDateColumnCandidates,
-                cancellationToken);
-
-            _loanTermDefaultDateColumnResolved = true;
-            if (!string.IsNullOrEmpty(_loanTermDefaultDateColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for loan term default date.",
-                    _loanTermDefaultDateColumn);
-            }
-
-            return _loanTermDefaultDateColumn;
         }
 
         private async Task<string> GetLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
@@ -289,12 +196,10 @@ namespace kingsightapi.Services
             {
                 LoanKey = GetInt64(reader, "loan_key"),
                 LoanId = GetString(reader, "loan_code"),
-                Description = GetString(reader, "loan_desc"),
+                Description = GetString(reader, "loan_description"),
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 LoanTermDefaultDate = GetNullableDate(reader, "loan_term_default_date"),
-                DefaultDate = GetNullableDate(reader, "default_date"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                DefaultDate = GetNullableDate(reader, "default_date")
             };
         }
 

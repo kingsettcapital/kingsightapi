@@ -3,10 +3,10 @@ namespace kingsightapi.Entities
     // Single item received from Angular
     public sealed class InvestorUpdateRequestDto
     {
-        // Use long to match your existing InvestorDto.InvestorKey
         public long InvestorKey { get; init; }
 
-        // Previously InvestorAliasName; now use a nullable int Id (alias key)
+        public string InvestorCode { get; init; } = string.Empty;
+
         public int? InvestorAliasKey { get; init; }
 
         public string UserUpdatedBy { get; init; } = string.Empty;

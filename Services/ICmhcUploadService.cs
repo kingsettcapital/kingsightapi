@@ -11,6 +11,7 @@ namespace kingsightapi.Services
             string fileName,
             int uploadedByUserId,
             string fileType,
+            DateOnly asOfDate,
             CancellationToken cancellationToken);
 
         Task<(Stream Stream, string FileName)> GetTemplateAsync(CancellationToken cancellationToken);

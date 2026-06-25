@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,13 +11,16 @@ namespace kingsightapi.Controllers
     public class InvestorsController : ControllerBase
     {
         private readonly IInvestorService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<InvestorsController> _logger;
 
         public InvestorsController(
             IInvestorService service,
+            ICurrentUserResolver currentUserResolver,
             ILogger<InvestorsController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -41,27 +45,43 @@ namespace kingsightapi.Controllers
             }
         }
 
-        // PUT: api/Investors/{investorKey}
-        //[HttpPut("{investorKey:long}")]
+        // PUT: api/Investors
         [HttpPut]
-        public async Task<IActionResult> Update([FromBody] InvestorUpdateBatchRequest request)
+        public async Task<IActionResult> Update(
+            [FromBody] InvestorUpdateBatchRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
                 return BadRequest("Request body is required.");
             }
+
             foreach (var investor in request.Investors)
             {
                 if (!investor.InvestorAliasKey.HasValue)
                 {
-                    return BadRequest("Investor alias name is required.");
+                    return BadRequest("Investor alias key is required.");
+                }
+
+                if (string.IsNullOrWhiteSpace(investor.InvestorCode))
+                {
+                    return BadRequest("Investor code is required.");
                 }
             }
-                
+
+            var clientAudit = request.Investors.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
 
             try
             {
-                var updated = await _service.UpdateAsync(request);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!);
                 return updated ? NoContent() : NotFound();
             }
             catch (OperationCanceledException)

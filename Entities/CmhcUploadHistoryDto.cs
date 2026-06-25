@@ -12,5 +12,6 @@ namespace kingsightapi.Entities
         public string UploadedBy { get; set; } = string.Empty;
         public int? UploadedByUserId { get; set; }
         public string? UploadedByName { get; set; }
+        public DateTime? AsOfDate { get; set; }
     }
 }

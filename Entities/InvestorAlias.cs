@@ -1,7 +1,7 @@
 namespace kingsightapi.Entities
 {
     /// <summary>
-    /// Row from mort.investor_alias_master for API responses.
+    /// Row from wh_gold1.subjective_input.investor_alias_master for API responses.
     /// </summary>
     public sealed class InvestorAliasDto
     {

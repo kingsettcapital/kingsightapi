@@ -3,7 +3,7 @@ namespace kingsightapi.Services
     /// <summary>
     /// CMHC upload file storage abstraction.
     /// Production: <see cref="FabricCmhcFileStorage"/> writes to Fabric OneLake
-    /// (<c>Files/Uploaded files/...</c> per <see cref="CmhcUploadOptions"/>).
+    /// (<c>Files/external_files/...</c> per <see cref="CmhcUploadOptions"/>).
     /// Dev fallback: <see cref="LocalCmhcFileStorage"/> when <c>StorageProvider</c> is <c>Local</c>.
     /// </summary>
     public interface ICmhcFileStorage

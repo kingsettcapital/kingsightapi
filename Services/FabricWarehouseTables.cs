@@ -18,4 +18,12 @@ public sealed class FabricWarehouseTables
     public string Mort(string table) => $"{Database}.mort.{table}";
 
     public string Input(string table) => $"{Database}.input.{table}";
+
+    /// <summary>Mortgage subjective input tables in <c>wh_gold1.subjective_input</c>.</summary>
+    public string SubjectiveInput(string table) =>
+        $"{_options.SubjectiveInputDatabase}.subjective_input.{table}";
+
+    /// <summary>Shared dimension tables in <c>wh_gold1.shared</c>.</summary>
+    public string Shared(string table) =>
+        $"{_options.SubjectiveInputDatabase}.shared.{table}";
 }

@@ -7,7 +7,7 @@ namespace kingsightapi.Services;
 
 /// <summary>
 /// Stores uploads in Fabric OneLake under
-/// <c>Files/Uploaded files/excel files</c> and <c>Files/Uploaded files/QR Slides Files</c>.
+/// <c>Files/external_files/cmhc_file</c> and <c>Files/external_files/qr_slides</c>.
 /// </summary>
 public sealed class FabricCmhcFileStorage : ICmhcFileStorage
 {

@@ -3,6 +3,7 @@ namespace kingsightapi.Entities
     public sealed class LoanUpdateRequestDto
     {
         public long LoanKey { get; init; }
+        public string LoanCode { get; init; } = string.Empty;
         public int? LoanAliasKey { get; init; }
         public short? LoanRanking { get; init; }
         public string DummyLoanLink { get; init; } = string.Empty;

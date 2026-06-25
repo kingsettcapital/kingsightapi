@@ -26,41 +26,16 @@ namespace kingsightapi.Services
 
     public sealed class LtvValidationService : ILtvValidationService
     {
-        private static readonly string[] ParentLoanKeyColumnCandidates =
-            ["parent_loan_key", "loan_parent_key", "parent_key"];
-
-        private static readonly string[] ExposureColumnCandidates =
-            ["exposure", "loan_exposure", "outstanding_balance", "collateral"];
-
-        private static readonly string[] DimLoanLtvColumnCandidates =
-            ["ai_ltv", "loan_ltv", "ltv", "ltv_percent"];
-
-        private readonly string _listSqlFrom;
-        private readonly string _upsertOverrideSql;
-        private readonly string _insertOverrideSql;
-        private readonly string _confirmAiLtvSql;
-        private readonly string _confirmPendingLtvSql;
-        private readonly string _insertConfirmedSql;
-        private readonly string _readValidationStateSql;
+        private readonly string _listSqlBase;
+        private readonly string _updateLtvSql;
+        private readonly string _confirmLtvSql;
         private readonly string _loanEligibleSql;
 
         private readonly string _connectionString;
-        private readonly FabricWarehouseTables _tables;
-        private readonly string _tblDimLoan;
-        private readonly string _tblLoanAliasMaster;
-        private readonly string _tblDimInvestor;
-        private readonly string _tblInvestorAliasMaster;
+        private readonly string _tblSharedDimLoan;
         private readonly string _tblDimStatus;
-        private readonly string _tblLtvValidation;
         private readonly ILogger<LtvValidationService> _logger;
         private string? _loanStatusKeyColumn;
-        private string? _parentLoanKeyColumn;
-        private bool? _parentLoanKeyColumnResolved;
-        private string? _exposureColumn;
-        private bool? _exposureColumnResolved;
-        private string? _dimLoanLtvColumn;
-        private bool? _dimLoanLtvColumnResolved;
-        private bool? _ltvTableAvailable;
 
         public LtvValidationService(
             IConfiguration configuration,
@@ -70,119 +45,64 @@ namespace kingsightapi.Services
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
-            _tables = tables;
-            _tblDimLoan = tables.Mort("dim_loan");
-            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
-            _tblDimInvestor = tables.Mort("dim_investor");
-            _tblInvestorAliasMaster = tables.Mort("investor_alias_master");
-            _tblDimStatus = tables.Mort("dim_status");
-            _tblLtvValidation = tables.Mort("ltv_validation");
 
-            _listSqlFrom = $"""
-                from {_tblDimLoan} l
-                left join {_tblLoanAliasMaster} m
-                    on l.loan_alias_key = m.loan_alias_id
-                left join {_tblDimInvestor} inv
-                    on l.investor_key = inv.investor_key
-                   and inv.is_current = 1
-                left join {_tblInvestorAliasMaster} iam
-                    on inv.investor_alias_key = iam.investor_alias_id
-                left join {_tblLtvValidation} lv
-                    on l.loan_key = lv.loan_key
-                where l.is_current = 1
-                  and (l.is_leaf = 1 or l.is_leaf is null)
+            var subjective = new SubjectiveInputSql(tables);
+            _tblSharedDimLoan = subjective.SharedDimLoan;
+            _tblDimStatus = subjective.DimStatus;
+
+            var loanAliasRelationship = subjective.LoanAliasRelationship;
+            var loanAliasMaster = subjective.LoanAliasMaster;
+
+            // wh_gold1.subjective_input.loan_alias_relationship + shared.dim_loan (LTV Validation grid)
+            _listSqlBase = $"""
+                select loan_key = isnull(c.loan_key, 0),
+                       parent_loan_id = isnull(c.parent_loan_code, ''),
+                       child_loan_id = a.loan_code,
+                       loan_desc = isnull(a.loan_description, ''),
+                       loan_alias_name = isnull(a.loan_alias_name, ''),
+                       investor_alias_name = isnull(d.investor_alias_name, ''),
+                       b.security_value,
+                       a.exposure,
+                       a.ranking,
+                       ltv = a.loan_to_value,
+                       ai_commentary = a.ai_comments,
+                       qr_slide_link = a.qr_slide_link
+                from {loanAliasRelationship} a
+                left join {loanAliasMaster} b
+                    on a.loan_alias_name = b.loan_alias_name
+                left join {_tblSharedDimLoan} c
+                    on {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                {subjective.InvestorAliasRelationshipJoinOnInvestorCode("c", "d")}
                 """;
 
-            _upsertOverrideSql = $"""
-                update {_tblLtvValidation}
-                set ltv = @ltv,
-                    is_user_overridden = 1,
-                    is_ai_confirmed = 0,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
-                where loan_key = @loan_key
+            _updateLtvSql = $"""
+                update a
+                set loan_to_value = @ltv
+                from {loanAliasRelationship} a
+                inner join {_tblSharedDimLoan} c
+                    on c.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
                 """;
 
-            _insertOverrideSql = $"""
-                insert into {_tblLtvValidation} (
-                    loan_key,
-                    ai_ltv,
-                    ltv,
-                    ai_commentary,
-                    is_ai_confirmed,
-                    is_user_overridden,
-                    user_updated_by,
-                    user_updated_date)
-                values (
-                    @loan_key,
-                    null,
-                    @ltv,
-                    null,
-                    0,
-                    1,
-                    @user_updated_by,
-                    sysutcdatetime())
-                """;
-
-            _confirmAiLtvSql = $"""
-                update {_tblLtvValidation}
-                set ltv = ai_ltv,
-                    is_ai_confirmed = 1,
-                    is_user_overridden = 0,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
-                where loan_key = @loan_key
-                  and ai_ltv is not null
-                """;
-
-            _confirmPendingLtvSql = $"""
-                update {_tblLtvValidation}
-                set ai_ltv = coalesce(ai_ltv, ltv),
-                    ltv = coalesce(ltv, ai_ltv),
-                    is_ai_confirmed = 1,
-                    is_user_overridden = 0,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
-                where loan_key = @loan_key
-                  and ltv is not null
-                  and (is_user_overridden is null or is_user_overridden = 0)
-                """;
-
-            _insertConfirmedSql = $"""
-                insert into {_tblLtvValidation} (
-                    loan_key,
-                    ai_ltv,
-                    ltv,
-                    ai_commentary,
-                    is_ai_confirmed,
-                    is_user_overridden,
-                    user_updated_by,
-                    user_updated_date)
-                values (
-                    @loan_key,
-                    @ai_ltv,
-                    @ai_ltv,
-                    null,
-                    1,
-                    0,
-                    @user_updated_by,
-                    sysutcdatetime())
-                """;
-
-            _readValidationStateSql = $"""
-                select ai_ltv,
-                       ltv,
-                       is_user_overridden
-                from {_tblLtvValidation}
-                where loan_key = @loan_key
+            _confirmLtvSql = $"""
+                select 1
+                from {loanAliasRelationship} a
+                inner join {_tblSharedDimLoan} c
+                    on c.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                where a.loan_to_value is not null
                 """;
 
             _loanEligibleSql = $"""
                 select 1
-                from {_tblDimLoan}
-                where loan_key = @loan_key
-                  and is_current = 1
-                  and (is_leaf = 1 or is_leaf is null)
+                from {loanAliasRelationship} a
+                inner join {_tblSharedDimLoan} c
+                    on c.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
                 """;
         }
 
@@ -191,11 +111,6 @@ namespace kingsightapi.Services
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default)
         {
-            await EnsureLtvTableAvailableAsync(cancellationToken);
-            var parentLoanKeyColumn = await GetParentLoanKeyColumnAsync(cancellationToken);
-            var exposureColumn = await GetExposureColumnAsync(cancellationToken);
-            var dimLoanLtvColumn = await GetDimLoanLtvColumnAsync(cancellationToken);
-
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
             if (statusFilter.HasFilter)
@@ -203,17 +118,11 @@ namespace kingsightapi.Services
                 loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
                 if (string.IsNullOrEmpty(loanStatusKeyColumn))
                 {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
+                    throw new InvalidOperationException("Status filter requires loan_status_key on shared.dim_loan.");
                 }
             }
 
-            var sql = BuildListSql(
-                loanAliasIds,
-                statusFilter,
-                loanStatusKeyColumn,
-                parentLoanKeyColumn,
-                exposureColumn,
-                dimLoanLtvColumn);
+            var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -243,8 +152,6 @@ namespace kingsightapi.Services
             string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            await EnsureLtvTableAvailableAsync(cancellationToken);
-
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
@@ -260,29 +167,16 @@ namespace kingsightapi.Services
                 if (!await IsLoanEligibleAsync(connection, loan.LoanKey, cancellationToken))
                 {
                     throw new InvalidOperationException(
-                        $"Loan {loan.LoanKey} is not eligible (must be current and leaf).");
+                        $"Loan {loan.LoanKey} is not eligible for LTV validation.");
                 }
 
-                await using var updateCommand = new SqlCommand(_upsertOverrideSql, connection);
-                updateCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
-                updateCommand.Parameters.AddWithValue(
+                await using var command = new SqlCommand(_updateLtvSql, connection);
+                command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+                command.Parameters.AddWithValue(
                     "@ltv",
                     loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                updateCommand.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
-                var updated = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
-                if (updated == 0)
-                {
-                    await using var insertCommand = new SqlCommand(_insertOverrideSql, connection);
-                    insertCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
-                    insertCommand.Parameters.AddWithValue(
-                        "@ltv",
-                        loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
-                    updated = await insertCommand.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                affectedRows += updated;
+                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
             if (affectedRows > 0)
@@ -305,9 +199,6 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("At least one loan key is required.");
             }
 
-            await EnsureLtvTableAvailableAsync(cancellationToken);
-            var dimLoanLtvColumn = await GetDimLoanLtvColumnAsync(cancellationToken);
-
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
@@ -322,15 +213,20 @@ namespace kingsightapi.Services
                 if (!await IsLoanEligibleAsync(connection, loanKey, cancellationToken))
                 {
                     throw new InvalidOperationException(
-                        $"Loan {loanKey} is not eligible (must be current and leaf).");
+                        $"Loan {loanKey} is not eligible for LTV validation.");
                 }
 
-                affectedRows += await ConfirmLoanAsync(
-                    connection,
-                    loanKey,
-                    auditDisplayName,
-                    dimLoanLtvColumn,
-                    cancellationToken);
+                await using var command = new SqlCommand(_confirmLtvSql, connection);
+                command.Parameters.AddWithValue("@loan_key", loanKey);
+
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                if (result is null)
+                {
+                    throw new InvalidOperationException(
+                        $"Loan {loanKey} has no AI-extracted LTV (loan_to_value) to confirm.");
+                }
+
+                affectedRows++;
             }
 
             if (affectedRows > 0)
@@ -342,302 +238,25 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private async Task<int> ConfirmLoanAsync(
-            SqlConnection connection,
-            long loanKey,
-            string userUpdatedBy,
-            string? dimLoanLtvColumn,
-            CancellationToken cancellationToken)
-        {
-            var state = await ReadValidationStateAsync(connection, loanKey, cancellationToken);
-            if (state is not null)
-            {
-                if (state.AiLtv.HasValue)
-                {
-                    return await ExecuteConfirmCommandAsync(
-                        connection,
-                        _confirmAiLtvSql,
-                        loanKey,
-                        userUpdatedBy,
-                        cancellationToken);
-                }
-
-                if (state.Ltv.HasValue && state.IsUserOverridden != true)
-                {
-                    return await ExecuteConfirmCommandAsync(
-                        connection,
-                        _confirmPendingLtvSql,
-                        loanKey,
-                        userUpdatedBy,
-                        cancellationToken);
-                }
-
-                if (state.Ltv.HasValue && state.IsUserOverridden == true)
-                {
-                    throw new InvalidOperationException(
-                        $"Loan {loanKey} has a manual LTV override. Use Save Changes instead of Confirm AI LTV.");
-                }
-            }
-
-            var dimLoanLtv = await ReadDimLoanLtvAsync(
-                connection,
-                loanKey,
-                dimLoanLtvColumn,
-                _tblDimLoan,
-                cancellationToken);
-
-            if (dimLoanLtv.HasValue)
-            {
-                await using var insertCommand = new SqlCommand(_insertConfirmedSql, connection);
-                insertCommand.Parameters.AddWithValue("@loan_key", loanKey);
-                insertCommand.Parameters.AddWithValue("@ai_ltv", dimLoanLtv.Value);
-                insertCommand.Parameters.AddWithValue("@user_updated_by", userUpdatedBy);
-                return await insertCommand.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            throw new InvalidOperationException(
-                $"Loan {loanKey} has no AI LTV to confirm. Import AI data into mort.ltv_validation or dim_loan first.");
-        }
-
-        private static async Task<int> ExecuteConfirmCommandAsync(
-            SqlConnection connection,
-            string sql,
-            long loanKey,
-            string userUpdatedBy,
-            CancellationToken cancellationToken)
-        {
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-            command.Parameters.AddWithValue("@user_updated_by", userUpdatedBy);
-            return await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        private async Task<ValidationState?> ReadValidationStateAsync(
-            SqlConnection connection,
-            long loanKey,
-            CancellationToken cancellationToken)
-        {
-            await using var command = new SqlCommand(_readValidationStateSql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return null;
-            }
-
-            return new ValidationState
-            {
-                AiLtv = GetNullableDecimal(reader, "ai_ltv"),
-                Ltv = GetNullableDecimal(reader, "ltv"),
-                IsUserOverridden = GetNullableBoolean(reader, "is_user_overridden")
-            };
-        }
-
-        private static async Task<decimal?> ReadDimLoanLtvAsync(
-            SqlConnection connection,
-            long loanKey,
-            string? dimLoanLtvColumn,
-            string dimLoanTable,
-            CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrEmpty(dimLoanLtvColumn))
-            {
-                return null;
-            }
-
-            var sql = $"select [{dimLoanLtvColumn}] from {dimLoanTable} where loan_key = @loan_key and is_current = 1";
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            if (result is null or DBNull)
-            {
-                return null;
-            }
-
-            var value = Convert.ToDecimal(result);
-            ValidateLtv(value);
-            return value;
-        }
-
         private string BuildListSql(
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
-            string? loanStatusKeyColumn,
-            string? parentLoanKeyColumn,
-            string? exposureColumn,
-            string? dimLoanLtvColumn)
+            string? loanStatusKeyColumn)
         {
-            var parentLoanIdSelect = string.IsNullOrEmpty(parentLoanKeyColumn)
-                ? "parent_loan_id = isnull(l.dummy_loan_link, '')"
-                : "parent_loan_id = isnull(parent.loan_code, isnull(l.dummy_loan_link, ''))";
+            var sql = new StringBuilder(_listSqlBase);
 
-            var exposureSelect = string.IsNullOrEmpty(exposureColumn)
-                ? "cast(null as decimal(18, 2)) as exposure"
-                : $"l.{exposureColumn} as exposure";
-
-            var sql = new StringBuilder();
-            sql.AppendLine("select l.loan_key,");
-            sql.AppendLine($"       {parentLoanIdSelect},");
-            sql.AppendLine("""
-                       child_loan_id = l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                       investor_alias_name = isnull(iam.investor_alias_name, ''),
-                       m.security_value,
-                """);
-            sql.AppendLine($"       {exposureSelect},");
-            var ltvSelect = string.IsNullOrEmpty(dimLoanLtvColumn)
-                ? "ltv = coalesce(lv.ltv, lv.ai_ltv)"
-                : $"ltv = coalesce(lv.ltv, lv.ai_ltv, l.{dimLoanLtvColumn})";
-
-            sql.AppendLine("       l.loan_ranking as ranking,");
-            sql.AppendLine($"       {ltvSelect},");
-            sql.AppendLine("""
-                       lv.ai_commentary,
-                       user_updated_by = coalesce(lv.user_updated_by, l.user_updated_by),
-                       user_updated_date = coalesce(lv.user_updated_date, l.user_updated_date)
-                """);
-
-            if (!string.IsNullOrEmpty(parentLoanKeyColumn))
-            {
-                sql.AppendLine($"""
-                    from {_tblDimLoan} l
-                    left join {_tblDimLoan} parent
-                """);
-                sql.AppendLine($"       on l.{parentLoanKeyColumn} = parent.loan_key");
-                sql.AppendLine("""
-                          and parent.is_current = 1
-                    """);
-                sql.AppendLine($"""
-                    left join {_tblLoanAliasMaster} m
-                        on l.loan_alias_key = m.loan_alias_id
-                    left join {_tblDimInvestor} inv
-                        on l.investor_key = inv.investor_key
-                       and inv.is_current = 1
-                    left join {_tblInvestorAliasMaster} iam
-                        on inv.investor_alias_key = iam.investor_alias_id
-                    left join {_tblLtvValidation} lv
-                        on l.loan_key = lv.loan_key
-                    where l.is_current = 1
-                      and (l.is_leaf = 1 or l.is_leaf is null)
-                    """);
-            }
-            else
-            {
-                sql.Append(_listSqlFrom);
-            }
-
-            sql.Append(" and l.loan_alias_key in (");
+            sql.Append(" where b.loan_alias_id in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
             sql.Append(')');
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter, _tblDimStatus);
+                LoanStatusFilterParser.AppendSqlCondition(sql, "c", loanStatusKeyColumn, statusFilter, _tblDimStatus);
             }
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code");
+            sql.Append(" order by b.loan_alias_name, a.loan_code");
             return sql.ToString();
-        }
-
-        private async Task EnsureLtvTableAvailableAsync(CancellationToken cancellationToken)
-        {
-            if (_ltvTableAvailable == true)
-            {
-                return;
-            }
-
-            var probeSql = $"select top 0 loan_key from {_tblLtvValidation}";
-
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
-            try
-            {
-                await using var command = new SqlCommand(probeSql, connection);
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                _ltvTableAvailable = true;
-            }
-            catch (SqlException ex) when (ex.Number is 208 or 3701)
-            {
-                throw new InvalidOperationException(
-                    "mort.ltv_validation does not exist. Run Scripts/Create_mort_ltv_validation.sql.");
-            }
-        }
-
-        private async Task<string?> GetParentLoanKeyColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_parentLoanKeyColumnResolved == true)
-            {
-                return _parentLoanKeyColumn;
-            }
-
-            _parentLoanKeyColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _tblDimLoan,
-                ParentLoanKeyColumnCandidates,
-                cancellationToken);
-
-            _parentLoanKeyColumnResolved = true;
-            if (!string.IsNullOrEmpty(_parentLoanKeyColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation parent loan join.",
-                    _parentLoanKeyColumn);
-            }
-
-            return _parentLoanKeyColumn;
-        }
-
-        private async Task<string?> GetExposureColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_exposureColumnResolved == true)
-            {
-                return _exposureColumn;
-            }
-
-            _exposureColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _tblDimLoan,
-                ExposureColumnCandidates,
-                cancellationToken);
-
-            _exposureColumnResolved = true;
-            if (!string.IsNullOrEmpty(_exposureColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation exposure.",
-                    _exposureColumn);
-            }
-
-            return _exposureColumn;
-        }
-
-        private async Task<string?> GetDimLoanLtvColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_dimLoanLtvColumnResolved == true)
-            {
-                return _dimLoanLtvColumn;
-            }
-
-            _dimLoanLtvColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _tblDimLoan,
-                DimLoanLtvColumnCandidates,
-                cancellationToken);
-
-            _dimLoanLtvColumnResolved = true;
-            if (!string.IsNullOrEmpty(_dimLoanLtvColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation fallback LTV.",
-                    _dimLoanLtvColumn);
-            }
-
-            return _dimLoanLtvColumn;
         }
 
         private async Task<string> GetLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
@@ -649,7 +268,7 @@ namespace kingsightapi.Services
 
             _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
                 _connectionString,
-                _tblDimLoan,
+                _tblSharedDimLoan,
                 cancellationToken);
 
             return _loanStatusKeyColumn;
@@ -695,9 +314,7 @@ namespace kingsightapi.Services
                 Exposure = GetNullableDecimal(reader, "exposure"),
                 Ranking = GetNullableInt32(reader, "ranking"),
                 Ltv = GetNullableDecimal(reader, "ltv"),
-                AiCommentary = GetNullableString(reader, "ai_commentary"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                AiCommentary = GetNullableString(reader, "ai_commentary")
             };
 
         private static long GetInt64(SqlDataReader reader, string name) =>
@@ -746,24 +363,6 @@ namespace kingsightapi.Services
         {
             var ordinal = reader.GetOrdinal(name);
             return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
-        }
-
-        private static bool? GetNullableBoolean(SqlDataReader reader, string name)
-        {
-            var ordinal = reader.GetOrdinal(name);
-            if (reader.IsDBNull(ordinal))
-            {
-                return null;
-            }
-
-            return Convert.ToBoolean(reader.GetValue(ordinal));
-        }
-
-        private sealed class ValidationState
-        {
-            public decimal? AiLtv { get; init; }
-            public decimal? Ltv { get; init; }
-            public bool? IsUserOverridden { get; init; }
         }
     }
 }

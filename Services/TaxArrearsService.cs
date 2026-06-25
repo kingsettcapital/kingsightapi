@@ -54,30 +54,30 @@ namespace kingsightapi.Services
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
             _tables = tables;
-            _tblDimLoan = tables.Mort("dim_loan");
-            _tblLoanAliasMaster = tables.Mort("loan_alias_master");
-            _tblDimStatus = tables.Mort("dim_status");
-            _tblTaxArrears = tables.Mort("tax_arrears");
+            var subjective = new SubjectiveInputSql(tables);
+            _tblDimLoan = subjective.SharedDimLoan;
+            _tblLoanAliasMaster = subjective.LoanAliasMaster;
+            _tblDimStatus = subjective.DimStatus;
+            _tblTaxArrears = subjective.LoanTaxDetails;
+            var loanAliasRelationship = subjective.LoanAliasRelationship;
 
             _listSqlBase = $"""
-                select ta.tax_arrear_key,
-                       l.loan_key,
-                       l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                       ta.tax_memo_date,
-                       ta.tax_arrears,
-                       ta.tax_year,
-                       ta.notes,
-                       ta.user_updated_by,
-                       ta.user_updated_date
-                from {_tblTaxArrears} ta
-                inner join {_tblDimLoan} l
-                    on ta.loan_key = l.loan_key
+                select a.tax_arrear_key,
+                       {SubjectiveInputSql.LoanKeySelect(relationshipAlias: "b", dimLoanAlias: "l")},
+                       a.loan_code,
+                       b.loan_description,
+                       b.loan_alias_name,
+                       a.tax_memo_date,
+                       a.tax_year,
+                       a.tax_arrears,
+                       a.tax_notes
+                from {_tblTaxArrears} a
+                inner join {loanAliasRelationship} b
+                    on a.loan_code = b.loan_code
                 left join {_tblLoanAliasMaster} m
-                    on l.loan_alias_key = m.loan_alias_id
-                where l.is_current = 1
-                  and (l.is_leaf = 1 or l.is_leaf is null)
+                    on b.loan_alias_name = m.loan_alias_name
+                {subjective.SharedDimLoanJoinOnLoanCode("b", "l")}
+                where 1 = 1
                 """;
 
             _nextTaxArrearKeySql = $"""
@@ -88,42 +88,37 @@ namespace kingsightapi.Services
             _insertSql = $"""
                 insert into {_tblTaxArrears} (
                     tax_arrear_key,
-                    loan_key,
+                    loan_code,
                     tax_memo_date,
                     tax_arrears,
                     tax_year,
-                    notes,
-                    user_updated_by,
-                    user_updated_date)
+                    tax_notes)
                 values (
                     @tax_arrear_key,
-                    @loan_key,
+                    @loan_code,
                     @tax_memo_date,
                     @tax_arrears,
                     @tax_year,
-                    @notes,
-                    @user_updated_by,
-                    sysutcdatetime())
+                    @notes)
                 """;
 
             _selectByKeySql = $"""
-                select ta.tax_arrear_key,
-                       l.loan_key,
-                       l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                       ta.tax_memo_date,
-                       ta.tax_arrears,
-                       ta.tax_year,
-                       ta.notes,
-                       ta.user_updated_by,
-                       ta.user_updated_date
-                from {_tblTaxArrears} ta
-                inner join {_tblDimLoan} l
-                    on ta.loan_key = l.loan_key
+                select a.tax_arrear_key,
+                       {SubjectiveInputSql.LoanKeySelect(relationshipAlias: "b", dimLoanAlias: "l")},
+                       a.loan_code,
+                       b.loan_description,
+                       b.loan_alias_name,
+                       a.tax_memo_date,
+                       a.tax_year,
+                       a.tax_arrears,
+                       a.tax_notes
+                from {_tblTaxArrears} a
+                inner join {loanAliasRelationship} b
+                    on a.loan_code = b.loan_code
                 left join {_tblLoanAliasMaster} m
-                    on l.loan_alias_key = m.loan_alias_id
-                where ta.tax_arrear_key = @tax_arrear_key
+                    on b.loan_alias_name = m.loan_alias_name
+                {subjective.SharedDimLoanJoinOnLoanCode("b", "l")}
+                where a.tax_arrear_key = @tax_arrear_key
                 """;
 
             _updateSql = $"""
@@ -131,18 +126,17 @@ namespace kingsightapi.Services
                 set tax_memo_date = @tax_memo_date,
                     tax_arrears = @tax_arrears,
                     tax_year = @tax_year,
-                    notes = @notes,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
+                    tax_notes = @notes
                 where tax_arrear_key = @tax_arrear_key
                 """;
 
             _loanEligibleSql = $"""
-                select 1
-                from {_tblDimLoan}
-                where loan_key = @loan_key
-                  and is_current = 1
-                  and (is_leaf = 1 or is_leaf is null)
+                select r.loan_code
+                from {loanAliasRelationship} r
+                inner join {_tblDimLoan} l
+                    on {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
+                   and l.loan_key = @loan_key
+                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
                 """;
         }
 
@@ -172,7 +166,7 @@ namespace kingsightapi.Services
                 loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
                 if (string.IsNullOrEmpty(loanStatusKeyColumn))
                 {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
+                    throw new InvalidOperationException("Status filter requires loan_status_key on shared.dim_loan.");
                 }
             }
 
@@ -218,11 +212,17 @@ namespace kingsightapi.Services
                     $"Loan {request.LoanKey} is not eligible (must be current and leaf; is_leaf may be unset until ETL).");
             }
 
+            var loanCode = await GetLoanCodeAsync(connection, request.LoanKey, cancellationToken);
+            if (string.IsNullOrWhiteSpace(loanCode))
+            {
+                throw new InvalidOperationException($"Loan {request.LoanKey} could not be resolved to loan_code.");
+            }
+
             var taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
 
             await using (var insertCommand = new SqlCommand(_insertSql, connection))
             {
-                AddTaxArrearParameters(insertCommand, taxArrearKey, request, auditDisplayName);
+                AddTaxArrearParameters(insertCommand, taxArrearKey, loanCode, request, auditDisplayName);
                 await insertCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -261,7 +261,6 @@ namespace kingsightapi.Services
                     item.TaxArrears.HasValue ? item.TaxArrears.Value : DBNull.Value);
                 command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(item.TaxYear)));
                 command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(item.Notes)));
-                command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -283,7 +282,7 @@ namespace kingsightapi.Services
         {
             var sql = new StringBuilder(_listSqlBase);
 
-            sql.Append(" and l.loan_alias_key in (");
+            sql.Append(" and m.loan_alias_id in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
             sql.Append(')');
 
@@ -293,7 +292,7 @@ namespace kingsightapi.Services
             }
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code, ta.tax_year, ta.tax_memo_date, ta.tax_arrear_key");
+            sql.Append(" order by b.loan_alias_name, a.loan_code, a.tax_year, a.tax_memo_date, a.tax_arrear_key");
             return sql.ToString();
         }
 
@@ -318,7 +317,7 @@ namespace kingsightapi.Services
             catch (SqlException ex) when (ex.Number is 208 or 3701)
             {
                 throw new InvalidOperationException(
-                    "mort.tax_arrears does not exist. Run Scripts/Create_mort_tax_arrears.sql.");
+                    "subjective_input.loan_tax_details does not exist. Verify wh_gold1 subjective_input schema.");
             }
         }
 
@@ -335,6 +334,18 @@ namespace kingsightapi.Services
                 cancellationToken);
 
             return _loanStatusKeyColumn;
+        }
+
+        private async Task<string?> GetLoanCodeAsync(
+            SqlConnection connection,
+            long loanKey,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"select loan_code from {_tblDimLoan} where loan_key = @loan_key and cast(scd_cur_ind as varchar(10)) in ('1', 'Y')";
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_key", loanKey);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
         }
 
         private async Task<bool> IsLoanEligibleAsync(
@@ -372,11 +383,12 @@ namespace kingsightapi.Services
         private static void AddTaxArrearParameters(
             SqlCommand command,
             long taxArrearKey,
+            string loanCode,
             TaxArrearsCreateRequest request,
             string auditDisplayName)
         {
             command.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
-            command.Parameters.AddWithValue("@loan_key", request.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loanCode);
             command.Parameters.AddWithValue(
                 "@tax_memo_date",
                 request.TaxMemoDate.HasValue ? request.TaxMemoDate.Value.Date : DBNull.Value);
@@ -385,7 +397,6 @@ namespace kingsightapi.Services
                 request.TaxArrears.HasValue ? request.TaxArrears.Value : DBNull.Value);
             command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(request.TaxYear)));
             command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(request.Notes)));
-            command.Parameters.AddWithValue("@user_updated_by", auditDisplayName);
         }
 
         private static void AddLoanAliasParameters(SqlCommand command, IReadOnlyList<int> loanAliasIds)
@@ -428,14 +439,12 @@ namespace kingsightapi.Services
                 TaxArrearKey = GetInt64(reader, "tax_arrear_key"),
                 LoanKey = GetInt64(reader, "loan_key"),
                 LoanId = GetString(reader, "loan_code"),
-                Description = GetString(reader, "loan_desc"),
+                Description = GetString(reader, "loan_description"),
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 TaxMemoDate = GetNullableDate(reader, "tax_memo_date"),
                 TaxArrears = GetNullableDecimal(reader, "tax_arrears"),
                 TaxYear = GetNullableString(reader, "tax_year"),
-                Notes = GetNullableString(reader, "notes"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                Notes = GetNullableString(reader, "tax_notes")
             };
 
         private static object ToDbValue(string? value) =>

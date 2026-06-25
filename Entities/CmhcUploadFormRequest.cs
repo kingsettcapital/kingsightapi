@@ -13,4 +13,7 @@ public sealed class CmhcUploadFormRequest
     public int? UploadedByUserId { get; set; }
 
     public string? FileType { get; set; }
+
+    /// <summary>Document as-of / period date (yyyy-MM-dd).</summary>
+    public string? AsOfDate { get; set; }
 }

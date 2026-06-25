@@ -16,6 +16,7 @@ namespace kingsightapi.Entities
     public sealed class OtherCostCaptureUpdateDto
     {
         public long LoanKey { get; init; }
+        public string LoanCode { get; init; } = string.Empty;
         public decimal? OutstandingInvoices { get; init; }
         public decimal? EstRealizationCosts { get; init; }
         public decimal? CostToComplete { get; init; }

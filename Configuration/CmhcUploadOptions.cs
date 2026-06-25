@@ -17,16 +17,16 @@ public sealed class CmhcUploadOptions
     public string FabricWorkspaceId { get; set; } = "e9c14968-68a1-48d8-8bc8-b81663f54ce3";
 
     /// <summary>Fabric lakehouse item id.</summary>
-    public string FabricLakehouseId { get; set; } = "cc29573e-7312-4261-8c99-212d2c3a0e17";
+    public string FabricLakehouseId { get; set; } = "b94eb6e4-ea19-46e1-926c-b5711f33f2ff";
 
     /// <summary>Parent folder under lakehouse <c>Files/</c> and local storage root.</summary>
-    public string UploadParentDirectory { get; set; } = "Uploaded files";
+    public string UploadParentDirectory { get; set; } = "external_files";
 
     /// <summary>Child folder for CMHC Excel uploads.</summary>
-    public string ExcelFilesDirectory { get; set; } = "excel files";
+    public string ExcelFilesDirectory { get; set; } = "cmhc_file";
 
     /// <summary>Child folder for QR slide deck uploads.</summary>
-    public string QrSlidesFilesDirectory { get; set; } = "QR Slides Files";
+    public string QrSlidesFilesDirectory { get; set; } = "qr_slides";
 
     public long MaxFileSizeBytes { get; set; } = 62_914_560;
 
@@ -49,7 +49,7 @@ public sealed class CmhcUploadOptions
     public string GetFabricUploadDirectoryPath(string fileType) =>
         BuildFabricUploadDirectoryPath(GetUploadRelativePath(fileType));
 
-    /// <summary>Relative path under storage root: <c>Uploaded files/excel files</c> or QR folder.</summary>
+    /// <summary>Relative path under storage root: <c>external_files/cmhc_file</c> or QR folder.</summary>
     public string GetUploadRelativePath(string? fileType)
     {
         var child = IsQrSlidesUpload(fileType)

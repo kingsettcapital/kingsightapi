@@ -29,18 +29,16 @@ namespace kingsightapi.Controllers
         // GET: api/OtherCostCapture?loanAliasId=1&statuses=2
         [HttpGet]
         public async Task<ActionResult<List<OtherCostCaptureDto>>> Get(
-            [FromQuery] int loanAliasId,
+            [FromQuery] int? loanAliasId,
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasId <= 0)
-            {
-                return BadRequest("loanAliasId is required.");
-            }
-
             try
             {
-                var result = await _service.GetAsync(loanAliasId, statuses, cancellationToken);
+                var result = await _service.GetAsync(
+                    loanAliasId is > 0 ? loanAliasId : null,
+                    statuses,
+                    cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)
@@ -90,9 +88,9 @@ namespace kingsightapi.Controllers
 
             foreach (var loan in request.Loans)
             {
-                if (loan.LoanKey <= 0)
+                if (loan.LoanKey <= 0 && string.IsNullOrWhiteSpace(loan.LoanCode))
                 {
-                    return BadRequest("Loan key is required.");
+                    return BadRequest("Loan key or loan code is required.");
                 }
             }
 
