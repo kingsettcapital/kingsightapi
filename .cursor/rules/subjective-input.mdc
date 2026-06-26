@@ -17,7 +17,7 @@ globs:
 
 # Subjective input schema (`wh_gold1.subjective_input`)
 
-Mortgage capture screens read/write **`wh_gold1.subjective_input`** tables. Dimension lookups (`mort.dim_loan`, `mort.dim_status`) remain on **`wh_gold`** for status filters and stable `loan_key` / `investor_key` mapping.
+Mortgage capture screens read/write **`wh_gold1.subjective_input`** tables. Status lookups use **`wh_gold1.shared.dim_status`**. Loan keys resolve via **`wh_gold1.shared.dim_loan`**.
 
 **Do not** retarget Capital dashboard services, `ManagementSummaryService`, or `CapitalInvestorService` unless explicitly requested.
 

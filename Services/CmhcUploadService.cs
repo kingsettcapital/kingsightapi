@@ -122,6 +122,76 @@ namespace kingsightapi.Services
         public Task<(Stream Stream, string FileName)> GetTemplateAsync(CancellationToken cancellationToken) =>
             _fileStorage.GetTemplateAsync(cancellationToken);
 
+        public async Task<(Stream Stream, string FileName)> GetQrSlidePreviewAsync(
+            string link,
+            CancellationToken cancellationToken = default)
+        {
+            var fabricReference = QrSlideLinkParser.TryExtractFabricQrSlide(link);
+            if (fabricReference is not null)
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Serving QR slide preview for link '{Link}' from lakehouse {LakehouseId}/Files/{Path}.",
+                        link,
+                        fabricReference.LakehouseId,
+                        fabricReference.FilesRelativePath);
+
+                    return await _fileStorage.GetLakehouseFilesPathAsync(
+                        fabricReference.FilesRelativePath,
+                        fabricReference.LakehouseId,
+                        cancellationToken);
+                }
+                catch (FileNotFoundException ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Lakehouse QR slide path {LakehouseId}/Files/{Path} was not found; falling back to qr_slides storage.",
+                        fabricReference.LakehouseId,
+                        fabricReference.FilesRelativePath);
+                }
+            }
+
+            var fabricPath = fabricReference?.FilesRelativePath;
+
+            var fileName = QrSlideLinkParser.TryExtractFileName(link);
+            if (fileName is null)
+            {
+                throw new FileNotFoundException(
+                    "Could not determine a QR slide file name from the link. " +
+                    "Store a Fabric selectedPath URL, a .pdf/.png file name, or upload to QR Slides.");
+            }
+
+            var candidates = QrSlideLinkParser.BuildFileNameCandidates(fileName);
+            FileNotFoundException? lastError = null;
+
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Serving QR slide preview for link '{Link}' as qr_slides file '{FileName}'.",
+                        link,
+                        candidate);
+
+                    return await _fileStorage.GetQrSlideAsync(candidate, cancellationToken);
+                }
+                catch (FileNotFoundException ex)
+                {
+                    lastError = ex;
+                    _logger.LogDebug(ex, "QR slide candidate '{Candidate}' was not found.", candidate);
+                }
+            }
+
+            throw new FileNotFoundException(
+                fabricPath is not null
+                    ? $"QR slide was not found at lakehouse Files/{fabricPath} or in qr_slides storage."
+                    : $"QR slide file '{fileName}' was not found in qr_slides storage. " +
+                      "Upload the matching PDF or PNG via Mortgage → File Upload → QR Slides.",
+                fileName,
+                lastError);
+        }
+
         private void ValidateUpload(IFormFile file, string fileName, string uploadCategory)
         {
             if (file is null || file.Length == 0)

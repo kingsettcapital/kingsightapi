@@ -200,15 +200,11 @@ namespace kingsightapi.Services
 
 
                 var statusOptionsSql = $"""
-
                     select s.status_key,
-
                            s.status_name
-
                     from {_tblDimStatus} s
-
-                    order by s.status_name
-
+                    where isnull(s.is_active, 1) = 1
+                    order by isnull(s.sort_order, 999999), s.status_name
                     """;
 
 

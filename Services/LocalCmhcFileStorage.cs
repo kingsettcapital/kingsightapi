@@ -103,6 +103,100 @@ namespace kingsightapi.Services
             return Task.CompletedTask;
         }
 
+        public Task<(Stream Stream, string FileName)> GetQrSlideAsync(
+            string fileName,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var safeName = CmhcFileNameHelper.SanitizeFileName(fileName);
+            var storagePath = GetStoragePath(CmhcUploadFileTypes.QrSlides);
+            var fullPath = ResolveQrSlidePath(storagePath, safeName);
+            if (fullPath is null)
+            {
+                throw new FileNotFoundException(
+                    $"QR slide file '{safeName}' was not found in local qr_slides storage.",
+                    safeName);
+            }
+
+            Stream stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                useAsync: true);
+
+            return Task.FromResult((stream, Path.GetFileName(fullPath)!));
+        }
+
+        public Task<(Stream Stream, string FileName)> GetLakehouseFilesPathAsync(
+            string filesRelativePath,
+            string? lakehouseId = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var normalizedPath = filesRelativePath.Trim().Replace('\\', '/').Trim('/');
+            if (normalizedPath.Contains("..", StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Lakehouse file path is invalid.", nameof(filesRelativePath));
+            }
+
+            var localRoot = Path.GetFullPath(Path.Combine(_contentRoot, "CmhcUploads", "Files"));
+            var fullPath = Path.GetFullPath(Path.Combine(localRoot, normalizedPath.Replace('/', Path.DirectorySeparatorChar)));
+            if (!fullPath.StartsWith(localRoot, StringComparison.OrdinalIgnoreCase) || !File.Exists(fullPath))
+            {
+                throw new FileNotFoundException(
+                    $"Lakehouse file '{normalizedPath}' was not found in local Files mirror.",
+                    normalizedPath);
+            }
+
+            Stream stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                useAsync: true);
+
+            return Task.FromResult((stream, Path.GetFileName(fullPath)!));
+        }
+
+        private static string? ResolveQrSlidePath(string storagePath, string safeName)
+        {
+            var exactPath = Path.Combine(storagePath, safeName);
+            if (File.Exists(exactPath))
+            {
+                return exactPath;
+            }
+
+            if (!Directory.Exists(storagePath))
+            {
+                return null;
+            }
+
+            var match = Directory
+                .EnumerateFiles(storagePath)
+                .FirstOrDefault(path =>
+                {
+                    var name = Path.GetFileName(path);
+                    return name.Equals(safeName, StringComparison.OrdinalIgnoreCase)
+                        && HasQrSlideExtension(name);
+                });
+
+            return match;
+        }
+
+        private static bool HasQrSlideExtension(string fileName)
+        {
+            var extension = Path.GetExtension(fileName);
+            return extension.Equals(".pdf", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".png", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+                || extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase);
+        }
+
         private string GetStoragePath(string? uploadCategory = null)
         {
             if (_resolvedStoragePaths.TryGetValue(CmhcUploadFileTypes.Normalize(uploadCategory), out var cached))

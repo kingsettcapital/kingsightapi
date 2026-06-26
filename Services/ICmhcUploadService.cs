@@ -15,5 +15,12 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken);
 
         Task<(Stream Stream, string FileName)> GetTemplateAsync(CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Streams a QR slide PDF for LTV Validation preview. Resolves file name from portal URL or path.
+        /// </summary>
+        Task<(Stream Stream, string FileName)> GetQrSlidePreviewAsync(
+            string link,
+            CancellationToken cancellationToken = default);
     }
 }

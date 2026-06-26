@@ -27,5 +27,20 @@ namespace kingsightapi.Services
             string storedFileName,
             string uploadCategory,
             CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Opens a QR slide from <c>Files/external_files/qr_slides</c> (or local equivalent).
+        /// </summary>
+        Task<(Stream Stream, string FileName)> GetQrSlideAsync(
+            string fileName,
+            CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Opens a file under the lakehouse <c>Files/</c> tree (e.g. AI-rendered QR pages).
+        /// </summary>
+        Task<(Stream Stream, string FileName)> GetLakehouseFilesPathAsync(
+            string filesRelativePath,
+            string? lakehouseId = null,
+            CancellationToken cancellationToken = default);
     }
 }

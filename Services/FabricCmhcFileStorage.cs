@@ -127,6 +127,78 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
         }
     }
 
+    public async Task<(Stream Stream, string FileName)> GetQrSlideAsync(
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        var directory = GetUploadDirectoryClient(CmhcUploadFileTypes.QrSlides);
+        var safeName = CmhcFileNameHelper.SanitizeFileName(fileName);
+        var resolvedName = await ResolveQrSlideFileNameAsync(directory, safeName, cancellationToken);
+        var fileClient = directory.GetFileClient(resolvedName);
+        var response = await fileClient.ReadAsync(cancellationToken: cancellationToken);
+        return (response.Value.Content, resolvedName);
+    }
+
+    public async Task<(Stream Stream, string FileName)> GetLakehouseFilesPathAsync(
+        string filesRelativePath,
+        string? lakehouseId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedPath = filesRelativePath.Trim().Replace('\\', '/').Trim('/');
+        if (normalizedPath.Contains("..", StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Lakehouse file path is invalid.", nameof(filesRelativePath));
+        }
+
+        var resolvedLakehouseId = NormalizeLakehouseId(lakehouseId ?? _options.FabricLakehouseId);
+        var filePath = $"{resolvedLakehouseId}/Files/{normalizedPath}";
+        var fileSystem = _serviceClient.GetFileSystemClient(_options.FabricFileSystemName);
+        var fileClient = fileSystem.GetFileClient(filePath);
+        if (!await fileClient.ExistsAsync(cancellationToken))
+        {
+            throw new FileNotFoundException(
+                $"Lakehouse file '{normalizedPath}' was not found at {filePath}.",
+                normalizedPath);
+        }
+
+        _logger.LogInformation("Opened lakehouse QR slide at {FilePath}", filePath);
+
+        var response = await fileClient.ReadAsync(cancellationToken: cancellationToken);
+        return (response.Value.Content, Path.GetFileName(normalizedPath));
+    }
+
+    private static string NormalizeLakehouseId(string lakehouseId)
+    {
+        var trimmed = lakehouseId.Trim();
+        return trimmed.EndsWith(".Lakehouse", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^".Lakehouse".Length]
+            : trimmed;
+    }
+
+    private static async Task<string> ResolveQrSlideFileNameAsync(
+        DataLakeDirectoryClient directory,
+        string safeName,
+        CancellationToken cancellationToken)
+    {
+        var fileClient = directory.GetFileClient(safeName);
+        if (await fileClient.ExistsAsync(cancellationToken))
+        {
+            return safeName;
+        }
+
+        var available = await ListUploadFileNamesAsync(directory, cancellationToken);
+        var match = available.FirstOrDefault(
+            name => name.Equals(safeName, StringComparison.OrdinalIgnoreCase));
+        if (match is not null)
+        {
+            return match;
+        }
+
+        throw new FileNotFoundException(
+            $"QR slide file '{safeName}' was not found in Fabric OneLake qr_slides storage.",
+            safeName);
+    }
+
     private DataLakeDirectoryClient GetUploadDirectoryClient(string? uploadCategory = null)
     {
         var fileSystem = _serviceClient.GetFileSystemClient(_options.FabricFileSystemName);

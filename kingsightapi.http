@@ -6,6 +6,11 @@ Accept: application/json
 
 ###
 
+GET {{api_HostAddress}}/api/CmhcUpload/qr-slides/preview?fileName=Baytree%20Condo%20Portfolio.pdf
+Accept: application/pdf
+
+###
+
 GET {{api_HostAddress}}/api/NonKsServicedLoans
 Accept: application/json
 

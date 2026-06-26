@@ -38,7 +38,7 @@ namespace kingsightapi.Services
             }
 
             throw new InvalidOperationException(
-                "mort.dim_loan does not have a recognized status foreign key column. "
+                $"{dimLoanTable} does not have a recognized status foreign key column. "
                 + $"Expected one of: {string.Join(", ", ColumnCandidates)}.");
         }
     }

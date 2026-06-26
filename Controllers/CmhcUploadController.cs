@@ -2,6 +2,7 @@ using System.Security.Claims;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
 
 namespace kingsightapi.Controllers
 {
@@ -11,15 +12,18 @@ namespace kingsightapi.Controllers
     {
         private readonly ICmhcUploadService _service;
         private readonly IUserService _userService;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<CmhcUploadController> _logger;
 
         public CmhcUploadController(
             ICmhcUploadService service,
             IUserService userService,
+            IConfiguration configuration,
             ILogger<CmhcUploadController> logger)
         {
             _service = service;
             _userService = userService;
+            _configuration = configuration;
             _logger = logger;
         }
 
@@ -141,6 +145,77 @@ namespace kingsightapi.Controllers
             }
         }
 
+        // GET: api/CmhcUpload/qr-slides/preview?link=...  (or ?fileName=Baytree.pdf)
+        [HttpGet("qr-slides/preview")]
+        public async Task<IActionResult> PreviewQrSlide(
+            [FromQuery] string? link,
+            [FromQuery] string? fileName,
+            CancellationToken cancellationToken)
+        {
+            var resolvedLink = !string.IsNullOrWhiteSpace(fileName) ? fileName : link;
+            if (string.IsNullOrWhiteSpace(resolvedLink))
+            {
+                return BadRequest("Query parameter 'link' or 'fileName' is required.");
+            }
+
+            try
+            {
+                var (stream, storedFileName) = await _service.GetQrSlidePreviewAsync(
+                    resolvedLink,
+                    cancellationToken);
+
+                AllowSpaIframeEmbedding();
+
+                return new FileStreamResult(stream, ResolveQrSlideContentType(storedFileName))
+                {
+                    EnableRangeProcessing = true,
+                    FileDownloadName = storedFileName,
+                };
+            }
+            catch (FileNotFoundException ex)
+            {
+                _logger.LogWarning(ex, "QR slide preview not found for link {Link}", resolvedLink);
+                return NotFound(ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("QR slide preview cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error streaming QR slide preview for {Link}", resolvedLink);
+                return StatusCode(500, "An error occurred while loading the QR slide preview.");
+            }
+        }
+
+        private void AllowSpaIframeEmbedding()
+        {
+            var origins = _configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+                ?? ["http://localhost:4200", "https://localhost:4200"];
+
+            var ancestors = string.Join(
+                ' ',
+                origins
+                    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+                    .Select(origin => origin.Trim())
+                    .Append("'self'")
+                    .Distinct(StringComparer.OrdinalIgnoreCase));
+
+            Response.Headers["Content-Security-Policy"] = $"frame-ancestors {ancestors}";
+            Response.Headers.Remove("X-Frame-Options");
+        }
+
+        private static string ResolveQrSlideContentType(string fileName) =>
+            Path.GetExtension(fileName).ToLowerInvariant() switch
+            {
+                ".pdf" => "application/pdf",
+                ".png" => "image/png",
+                ".jpg" => "image/jpeg",
+                ".jpeg" => "image/jpeg",
+                _ => "application/octet-stream",
+            };
+
         private async Task<int?> ResolveUploadedByUserIdAsync(
             CmhcUploadFormRequest request,
             CancellationToken cancellationToken)
@@ -181,4 +256,4 @@ namespace kingsightapi.Controllers
             ?? User.Identity?.Name;
     }
 }
-
+

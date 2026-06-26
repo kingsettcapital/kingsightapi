@@ -16,7 +16,7 @@ public sealed class SubjectiveInputSql
         SharedDimLoan = tables.Shared("dim_loan");
         MortgageDimInvestor = tables.Mortgage("dim_investor");
         LegacyDimInvestor = tables.Mort("dim_investor");
-        DimStatus = tables.Mort("dim_status");
+        DimStatus = tables.Shared("dim_status");
     }
 
     public string LoanAliasMaster { get; }

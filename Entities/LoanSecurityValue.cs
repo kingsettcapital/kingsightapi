@@ -33,7 +33,7 @@ namespace kingsightapi.Entities
     }
 
     /// <summary>
-    /// Filter option from mort.dim_status (value = status_key; label = status_name).
+    /// Filter option from shared.dim_status (value = status_key; label = status_name).
     /// Use <see cref="LoanSecurityValueStatusTokens.NullValue"/> to filter loans with no status FK on dim_loan.
     /// </summary>
     public sealed class LoanSecurityValueStatusOptionDto
