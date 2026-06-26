@@ -71,7 +71,7 @@ namespace kingsightapi.Services
             _loanEligibleSql = $"""
                 select 1
                 from {_loanAliasRelationship} a
-                where {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "@loan_code", "loan_code")}
+                where {SubjectiveInputSql.EqualsVarcharParam("a", "loan_code", "@loan_code")}
                 """;
 
             _loanEligibleByKeySql = $"""
@@ -397,7 +397,7 @@ namespace kingsightapi.Services
                 update a
                 set loan_to_value = @ltv{optionalSet}{auditSet}
                 from {_loanAliasRelationship} a
-                where {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "@loan_code", "loan_code")}
+                where {SubjectiveInputSql.EqualsVarcharParam("a", "loan_code", "@loan_code")}
                 """;
         }
 
@@ -607,7 +607,9 @@ namespace kingsightapi.Services
         private static DateTime? GetNullableDateTime(SqlDataReader reader, string name)
         {
             var ordinal = reader.GetOrdinal(name);
-            return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+            return reader.IsDBNull(ordinal)
+                ? null
+                : DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
         }
 
         private sealed class LtvValidationSchema

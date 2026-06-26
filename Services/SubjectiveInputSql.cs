@@ -63,4 +63,8 @@ public sealed class SubjectiveInputSql
     /// <summary>Collation-safe varchar compare for cross-table code joins.</summary>
     public static string EqualsVarchar(string leftAlias, string leftColumn, string rightAlias, string rightColumn) =>
         $"cast({leftAlias}.{leftColumn} as varchar(100)) collate database_default = cast({rightAlias}.{rightColumn} as varchar(100)) collate database_default";
+
+    /// <summary>Collation-safe compare between a table column and a SQL parameter (e.g. <c>@loan_code</c>).</summary>
+    public static string EqualsVarcharParam(string tableAlias, string column, string parameterName) =>
+        $"cast({tableAlias}.{column} as varchar(100)) collate database_default = cast({parameterName} as varchar(100)) collate database_default";
 }
