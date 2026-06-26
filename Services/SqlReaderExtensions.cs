@@ -19,6 +19,16 @@ internal static class SqlReaderExtensions
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
+    public static long? GetNullableInt64(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt64(reader.GetValue(ordinal));
+    }
+
     public static int GetInt32OrDefault(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);

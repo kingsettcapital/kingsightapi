@@ -13,6 +13,8 @@ public sealed class SubjectiveInputSql
         InvestorAliasRelationship = tables.SubjectiveInput("investor_alias_relationship");
         LoanTaxDetails = tables.SubjectiveInput("loan_tax_details");
         SharedDimLoan = tables.Shared("dim_loan");
+        MortgageDimInvestor = tables.Mortgage("dim_investor");
+        LegacyDimInvestor = tables.Mort("dim_investor");
         DimStatus = tables.Mort("dim_status");
     }
 
@@ -22,6 +24,8 @@ public sealed class SubjectiveInputSql
     public string InvestorAliasRelationship { get; }
     public string LoanTaxDetails { get; }
     public string SharedDimLoan { get; }
+    public string MortgageDimInvestor { get; }
+    public string LegacyDimInvestor { get; }
     public string DimStatus { get; }
 
     /// <summary>Resolve loan_key for API DTOs via <c>wh_gold1.shared.dim_loan</c>.</summary>
@@ -34,6 +38,16 @@ public sealed class SubjectiveInputSql
 
     public string SharedDimLoanJoinOnLoanCode(string relationshipAlias = "r", string dimLoanAlias = "l") =>
         $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsVarchar(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")} and {DimLoanIsCurrent(dimLoanAlias)}";
+
+    /// <summary>Unfiltered <c>wh_gold1.shared.dim_loan</c> join on <c>loan_code</c> (subjective-input source SQL).</summary>
+    public string SharedDimLoanJoinOnLoanCodeUnfiltered(string relationshipAlias = "r", string dimLoanAlias = "l") =>
+        $"left join {SharedDimLoan} {dimLoanAlias} on {relationshipAlias}.loan_code = {dimLoanAlias}.loan_code";
+
+    public string MortgageDimInvestorJoinOnInvestorCode(string dimLoanAlias = "l", string investorAlias = "i") =>
+        $"left join {MortgageDimInvestor} {investorAlias} on {dimLoanAlias}.investor_code = {investorAlias}.investor_code";
+
+    public string LegacyDimInvestorJoinOnInvestorCode(string dimLoanAlias = "l", string investorAlias = "i2") =>
+        $"left join {LegacyDimInvestor} {investorAlias} on {dimLoanAlias}.investor_code = {investorAlias}.investor_code";
 
     public string LoanAliasMasterJoinOnName(string relationshipAlias = "r", string masterAlias = "m") =>
         $"left join {LoanAliasMaster} {masterAlias} on {relationshipAlias}.loan_alias_name = {masterAlias}.loan_alias_name";

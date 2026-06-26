@@ -1,14 +1,15 @@
 namespace kingsightapi.Entities
 {
     /// <summary>
-    /// Current loan row from mort.dim_loan for alias assignment (is_current = 1).
+    /// Loan attribute assignment row from <c>wh_gold1.subjective_input.loan_alias_relationship</c>
+    /// with <c>loan_key</c> / investor resolved via <c>wh_gold1.shared.dim_loan</c>.
     /// </summary>
     public sealed class LoanDto
     {
         public long LoanKey { get; init; }
         public string LoanCode { get; init; } = string.Empty;
         public string LoanDesc { get; init; } = string.Empty;
-        public int? LoanAliasKey { get; init; }
+        public long? LoanAliasKey { get; init; }
         public string LoanAliasName { get; init; } = string.Empty;
         public string InvestorName { get; init; } = string.Empty;
         public short? LoanRanking { get; init; }
@@ -17,5 +18,17 @@ namespace kingsightapi.Entities
         public string LateInterestOffNote { get; init; } = string.Empty;
         public string UserUpdatedBy { get; init; } = string.Empty;
         public DateTime? UserUpdatedDate { get; init; }
+    }
+
+    /// <summary>Dropdown options for Loan Attribute Assignment (from <c>loan_alias_master</c>).</summary>
+    public sealed class LoanAliasOptionDto
+    {
+        public long LoanAliasId { get; init; }
+        public string LoanAliasName { get; init; } = string.Empty;
+    }
+
+    public sealed class LoanLookupsDto
+    {
+        public IReadOnlyList<LoanAliasOptionDto> LoanAliases { get; init; } = [];
     }
 }

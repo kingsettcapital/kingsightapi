@@ -26,4 +26,8 @@ public sealed class FabricWarehouseTables
     /// <summary>Shared dimension tables in <c>wh_gold1.shared</c>.</summary>
     public string Shared(string table) =>
         $"{_options.SubjectiveInputDatabase}.shared.{table}";
+
+    /// <summary>Mortgage dimension tables in <c>wh_gold1.mortgage</c>.</summary>
+    public string Mortgage(string table) =>
+        $"{_options.SubjectiveInputDatabase}.mortgage.{table}";
 }

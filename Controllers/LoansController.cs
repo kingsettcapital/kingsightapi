@@ -24,6 +24,26 @@ namespace kingsightapi.Controllers
             _logger = logger;
         }
 
+        // GET: api/Loans/lookups (loan alias dropdown from loan_alias_master)
+        [HttpGet("lookups")]
+        public async Task<ActionResult<LoanLookupsDto>> GetLookups(CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _service.GetLookupsAsync(cancellationToken));
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get loan lookups cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving loan lookups");
+                return StatusCode(500, "An error occurred while retrieving loan lookups.");
+            }
+        }
+
         // GET: api/Loans
         [HttpGet]
         public async Task<ActionResult<List<LoanDto>>> GetAll()
