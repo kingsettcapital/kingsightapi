@@ -2,6 +2,7 @@
 [Bb]in/
 [Oo]bj/
 build-out/
+_buildcheck/
 
 ## CMHC uploads (local dev storage)
 CmhcUploads/

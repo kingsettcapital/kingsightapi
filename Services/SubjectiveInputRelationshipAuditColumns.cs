@@ -69,6 +69,25 @@ namespace kingsightapi.Services
             return sets.Count == 0 ? string.Empty : ", " + string.Join(", ", sets);
         }
 
+        public (IReadOnlyList<string> Columns, IReadOnlyList<string> Values) BuildInsertColumnList()
+        {
+            var columns = new List<string>();
+            var values = new List<string>();
+            if (UpdatedByColumn is not null)
+            {
+                columns.Add(Bracket(UpdatedByColumn));
+                values.Add("@audit_user");
+            }
+
+            if (UpdatedDtmColumn is not null)
+            {
+                columns.Add(Bracket(UpdatedDtmColumn));
+                values.Add("@audit_dtm");
+            }
+
+            return (columns, values);
+        }
+
         public void AddUpdateParameters(SqlCommand command, string auditDisplayName, DateTime auditUtc)
         {
             if (UpdatedByColumn is not null)

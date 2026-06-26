@@ -23,21 +23,22 @@ namespace kingsightapi.Controllers
             _logger = logger;
         }
 
-        // GET: api/TaxArrears?loanAliasIds=1&statuses=2
+        // GET: api/TaxArrears?loanAliasIds=1&statuses=2 (loanAliasIds optional)
         [HttpGet]
         public async Task<ActionResult<List<TaxArrearsRowDto>>> Get(
             [FromQuery] int[]? loanAliasIds,
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasIds is null || loanAliasIds.Length == 0 || loanAliasIds.Any(id => id <= 0))
+            var aliasFilter = loanAliasIds?.Where(id => id > 0).ToArray();
+            if (aliasFilter is null or { Length: 0 })
             {
-                return BadRequest("At least one valid loanAliasIds value is required.");
+                aliasFilter = null;
             }
 
             try
             {
-                var result = await _service.GetAsync(loanAliasIds, statuses, cancellationToken);
+                var result = await _service.GetAsync(aliasFilter, statuses, cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)

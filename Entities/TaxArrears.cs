@@ -23,6 +23,7 @@ namespace kingsightapi.Entities
     public sealed class TaxArrearsCreateRequest
     {
         public long LoanKey { get; init; }
+        public string? LoanCode { get; init; }
         public DateTime? TaxMemoDate { get; init; }
         public decimal? TaxArrears { get; init; }
         public string? TaxYear { get; init; }
@@ -33,6 +34,8 @@ namespace kingsightapi.Entities
     public sealed class TaxArrearsUpdateItem
     {
         public long TaxArrearKey { get; init; }
+        public string? LoanCode { get; init; }
+        public string? OriginalTaxYear { get; init; }
         public DateTime? TaxMemoDate { get; init; }
         public decimal? TaxArrears { get; init; }
         public string? TaxYear { get; init; }
