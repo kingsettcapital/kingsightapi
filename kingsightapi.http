@@ -19,7 +19,6 @@ Content-Type: application/json
     {
       "loanName": "External Servicer Loan A",
       "asAtDate": "2026-03-31",
-      "loanId": "NKS-EXT-001",
       "servicerId": "SVC-100",
       "description": "Quarterly capture test",
       "investor": "Investor A",
@@ -39,8 +38,7 @@ Content-Type: application/json
   "loans": [
     {
       "nonKsServicedLoanKey": 1,
-      "loanName": "External Servicer Loan A",
-      "loanId": "NKS-EXT-001",
+      "loanId": "NONKS-1",
       "principalBalance": 1050000,
       "userUpdatedBy": "system"
     }

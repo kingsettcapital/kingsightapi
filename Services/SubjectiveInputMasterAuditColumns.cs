@@ -4,7 +4,8 @@ namespace kingsightapi.Services
 {
     /// <summary>
     /// Audit columns on subjective_input.loan_alias_master / investor_alias_master.
-    /// Create writes created_by + created_datetime only; update writes updated_by + updated_datetime only.
+    /// Create writes created_by + created_datetime when present; otherwise updated_by + updated_datetime.
+    /// Update writes updated_by + updated_datetime only.
     /// </summary>
     internal sealed class SubjectiveInputMasterAuditColumns
     {
@@ -63,8 +64,14 @@ namespace kingsightapi.Services
 
         public string BuildInsertColumnList()
         {
-            var columns = DistinctColumns(InsertCreatedByColumn, InsertCreatedDtmColumn);
-            return columns.Count == 0 ? string.Empty : ", " + string.Join(", ", columns);
+            if (HasCreateAuditColumns())
+            {
+                var columns = DistinctColumns(InsertCreatedByColumn, InsertCreatedDtmColumn);
+                return columns.Count == 0 ? string.Empty : ", " + string.Join(", ", columns);
+            }
+
+            var fallback = DistinctColumns(UpdateUpdatedByColumn, UpdateUpdatedDtmColumn);
+            return fallback.Count == 0 ? string.Empty : ", " + string.Join(", ", fallback);
         }
 
         public string BuildInsertValueList()
@@ -141,11 +148,20 @@ namespace kingsightapi.Services
                 assignments.Add((parameterName, parameterName, isDate));
             }
 
-            AddColumn(InsertCreatedByColumn, "@audit_user", isDate: false);
-            AddColumn(InsertCreatedDtmColumn, "@audit_dtm", isDate: true);
+            if (HasCreateAuditColumns())
+            {
+                AddColumn(InsertCreatedByColumn, "@audit_created_by", isDate: false);
+                AddColumn(InsertCreatedDtmColumn, "@audit_created_dtm", isDate: true);
+                return assignments;
+            }
 
+            AddColumn(UpdateUpdatedByColumn, "@audit_user", isDate: false);
+            AddColumn(UpdateUpdatedDtmColumn, "@audit_dtm", isDate: true);
             return assignments;
         }
+
+        private bool HasCreateAuditColumns() =>
+            InsertCreatedByColumn is not null || InsertCreatedDtmColumn is not null;
 
         private static async Task<string?> FindFirstAsync(
             string connectionString,

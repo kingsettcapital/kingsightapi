@@ -2,11 +2,15 @@ using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace kingsightapi.Services
 {
     public interface INonKsServicedLoansService
     {
+        Task<NonKsServicedLoanLookupsDto> GetLookupsAsync(
+            CancellationToken cancellationToken = default);
+
         Task<IReadOnlyList<NonKsServicedLoanRowDto>> GetAllAsync(
             CancellationToken cancellationToken = default);
 
@@ -14,25 +18,20 @@ namespace kingsightapi.Services
             NonKsServicedLoanBulkCreateRequest request,
             CancellationToken cancellationToken = default);
 
-        Task<bool> UpdateAsync(
+        Task<IReadOnlyList<NonKsServicedLoanRowDto>> UpdateAsync(
             NonKsServicedLoanBulkUpdateRequest request,
             CancellationToken cancellationToken = default);
     }
 
     public sealed class NonKsServicedLoansService : INonKsServicedLoansService
     {
-        private readonly string _listSql;
-        private readonly string _selectByKeySql;
-        private readonly string _nextKeySql;
-        private readonly string _loanIdExistsSql;
-        private readonly string _insertSql;
-        private readonly string _updateSql;
+        private const string ExtLoanCodePrefix = "NONKS-";
 
         private readonly string _connectionString;
-        private readonly FabricWarehouseTables _tables;
-        private readonly string _tblNonKsServicedLoan;
+        private readonly string _tblExternalServicedLoan;
         private readonly ILogger<NonKsServicedLoansService> _logger;
-        private bool? _tableAvailable;
+        private readonly SemaphoreSlim _schemaLock = new(1, 1);
+        private ExternalServicedLoanColumnMap? _columns;
 
         public NonKsServicedLoansService(
             IConfiguration configuration,
@@ -42,189 +41,28 @@ namespace kingsightapi.Services
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
-            _tables = tables;
-            _tblNonKsServicedLoan = tables.Mort("non_ks_serviced_loan");
+            _tblExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
+        }
 
-            _listSql = $"""
-                select non_ks_serviced_loan_key,
-                       loan_name,
-                       as_at_date,
-                       loan_id,
-                       servicer_id,
-                       description,
-                       investor,
-                       date_of_default,
-                       maturity_date,
-                       interest_off_date,
-                       tax_memo_date,
-                       security_value,
-                       units,
-                       net_acres,
-                       square_feet,
-                       interest_rate,
-                       principal_balance,
-                       outstanding_interest,
-                       accrued_interest,
-                       late_interest,
-                       outstanding_invoices,
-                       est_realization_costs,
-                       cost_to_complete,
-                       tax_arrears,
-                       interest_as_of_tax_memo,
-                       interest_adjustment,
-                       user_updated_by,
-                       user_updated_date
-                from {_tblNonKsServicedLoan}
-                order by loan_name, as_at_date, non_ks_serviced_loan_key
-                """;
+        public async Task<NonKsServicedLoanLookupsDto> GetLookupsAsync(
+            CancellationToken cancellationToken = default)
+        {
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
-            _selectByKeySql = $"""
-                select non_ks_serviced_loan_key,
-                       loan_name,
-                       as_at_date,
-                       loan_id,
-                       servicer_id,
-                       description,
-                       investor,
-                       date_of_default,
-                       maturity_date,
-                       interest_off_date,
-                       tax_memo_date,
-                       security_value,
-                       units,
-                       net_acres,
-                       square_feet,
-                       interest_rate,
-                       principal_balance,
-                       outstanding_interest,
-                       accrued_interest,
-                       late_interest,
-                       outstanding_invoices,
-                       est_realization_costs,
-                       cost_to_complete,
-                       tax_arrears,
-                       interest_as_of_tax_memo,
-                       interest_adjustment,
-                       user_updated_by,
-                       user_updated_date
-                from {_tblNonKsServicedLoan}
-                where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
-                """;
-
-            _nextKeySql = $"""
-                select isnull(max(non_ks_serviced_loan_key), 0) + 1
-                from {_tblNonKsServicedLoan}
-                """;
-
-            _loanIdExistsSql = $"""
-                select 1
-                from {_tblNonKsServicedLoan}
-                where loan_id = @loan_id
-                """;
-
-            _insertSql = $"""
-                insert into {_tblNonKsServicedLoan} (
-                    non_ks_serviced_loan_key,
-                    loan_name,
-                    as_at_date,
-                    loan_id,
-                    servicer_id,
-                    description,
-                    investor,
-                    date_of_default,
-                    maturity_date,
-                    interest_off_date,
-                    tax_memo_date,
-                    security_value,
-                    units,
-                    net_acres,
-                    square_feet,
-                    interest_rate,
-                    principal_balance,
-                    outstanding_interest,
-                    accrued_interest,
-                    late_interest,
-                    outstanding_invoices,
-                    est_realization_costs,
-                    cost_to_complete,
-                    tax_arrears,
-                    interest_as_of_tax_memo,
-                    interest_adjustment,
-                    user_updated_by,
-                    user_updated_date)
-                values (
-                    @non_ks_serviced_loan_key,
-                    @loan_name,
-                    @as_at_date,
-                    @loan_id,
-                    @servicer_id,
-                    @description,
-                    @investor,
-                    @date_of_default,
-                    @maturity_date,
-                    @interest_off_date,
-                    @tax_memo_date,
-                    @security_value,
-                    @units,
-                    @net_acres,
-                    @square_feet,
-                    @interest_rate,
-                    @principal_balance,
-                    @outstanding_interest,
-                    @accrued_interest,
-                    @late_interest,
-                    @outstanding_invoices,
-                    @est_realization_costs,
-                    @cost_to_complete,
-                    @tax_arrears,
-                    @interest_as_of_tax_memo,
-                    @interest_adjustment,
-                    @user_updated_by,
-                    sysutcdatetime())
-                """;
-
-            _updateSql = $"""
-                update {_tblNonKsServicedLoan}
-                set loan_name = @loan_name,
-                    as_at_date = @as_at_date,
-                    loan_id = @loan_id,
-                    servicer_id = @servicer_id,
-                    description = @description,
-                    investor = @investor,
-                    date_of_default = @date_of_default,
-                    maturity_date = @maturity_date,
-                    interest_off_date = @interest_off_date,
-                    tax_memo_date = @tax_memo_date,
-                    security_value = @security_value,
-                    units = @units,
-                    net_acres = @net_acres,
-                    square_feet = @square_feet,
-                    interest_rate = @interest_rate,
-                    principal_balance = @principal_balance,
-                    outstanding_interest = @outstanding_interest,
-                    accrued_interest = @accrued_interest,
-                    late_interest = @late_interest,
-                    outstanding_invoices = @outstanding_invoices,
-                    est_realization_costs = @est_realization_costs,
-                    cost_to_complete = @cost_to_complete,
-                    tax_arrears = @tax_arrears,
-                    interest_as_of_tax_memo = @interest_as_of_tax_memo,
-                    interest_adjustment = @interest_adjustment,
-                    user_updated_by = @user_updated_by,
-                    user_updated_date = sysutcdatetime()
-                where non_ks_serviced_loan_key = @non_ks_serviced_loan_key
-                """;
+            return new NonKsServicedLoanLookupsDto
+            {
+                NextExtLoanCode = await GetNextExtLoanCodeAsync(connection, cancellationToken)
+            };
         }
 
         public async Task<IReadOnlyList<NonKsServicedLoanRowDto>> GetAllAsync(
             CancellationToken cancellationToken = default)
         {
-            await EnsureTableAvailableAsync(cancellationToken);
+            var columns = await GetColumnsAsync(cancellationToken);
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
+            await using var command = new SqlCommand(columns.BuildListSql(), connection);
 
-            await using var command = new SqlCommand(_listSql, connection);
             var rows = new List<NonKsServicedLoanRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -233,7 +71,7 @@ namespace kingsightapi.Services
                 rows.Add(MapRow(reader));
             }
 
-            _logger.LogInformation("Retrieved {Count} non-KS serviced loan rows.", rows.Count);
+            _logger.LogInformation("Retrieved {Count} external serviced loan rows.", rows.Count);
             return rows;
         }
 
@@ -246,12 +84,13 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("Request body must include at least one loan row.");
             }
 
-            await EnsureTableAvailableAsync(cancellationToken);
+            var columns = await GetColumnsAsync(cancellationToken);
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             var created = new List<NonKsServicedLoanRowDto>();
+            var nextExtLoanCode = await GetNextExtLoanCodeAsync(connection, cancellationToken);
+
             foreach (var loan in request.Loans)
             {
                 var validationError = NonKsServicedLoansValidation.ValidateCreateItem(loan);
@@ -260,40 +99,37 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException(validationError);
                 }
 
-                var loanId = NormalizeOptional(loan.LoanId);
-                if (!string.IsNullOrEmpty(loanId)
-                    && await LoanIdExistsAsync(connection, loanId, cancellationToken))
+                var extLoanCode = nextExtLoanCode;
+                nextExtLoanCode = IncrementExtLoanCode(extLoanCode);
+
+                if (await ExtLoanCodeExistsAsync(connection, extLoanCode, cancellationToken))
                 {
-                    throw new InvalidOperationException($"Loan ID '{loanId}' already exists.");
+                    throw new InvalidOperationException($"Loan ID '{extLoanCode}' already exists.");
                 }
 
-                var key = await GetNextKeyAsync(connection, cancellationToken);
-                if (string.IsNullOrEmpty(loanId))
-                {
-                    loanId = $"NKS-{key}";
-                }
-
-                await using var command = new SqlCommand(_insertSql, connection);
-                command.Parameters.AddWithValue("@non_ks_serviced_loan_key", key);
-                AddCreateParameters(command, loan, loanId);
+                var auditUtc = DateTime.UtcNow;
+                await using var command = new SqlCommand(columns.BuildInsertSql(), connection);
+                command.Parameters.AddWithValue("@ext_loan_code", extLoanCode);
+                AddWriteParameters(command, columns, loan);
+                columns.AddInsertAuditParameters(command, loan.UserUpdatedBy, auditUtc);
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
 
-                var row = await ReadByKeyAsync(connection, key, cancellationToken);
+                var row = await ReadByKeyAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken);
                 if (row is null)
                 {
                     throw new InvalidOperationException(
-                        $"Non-KS serviced loan {key} was created but could not be read back.");
+                        $"External serviced loan '{extLoanCode}' was created but could not be read back.");
                 }
 
                 created.Add(row);
             }
 
-            _logger.LogInformation("Created {Count} non-KS serviced loan row(s).", created.Count);
+            _logger.LogInformation("Created {Count} external serviced loan row(s).", created.Count);
             return created;
         }
 
-        public async Task<bool> UpdateAsync(
+        public async Task<IReadOnlyList<NonKsServicedLoanRowDto>> UpdateAsync(
             NonKsServicedLoanBulkUpdateRequest request,
             CancellationToken cancellationToken = default)
         {
@@ -302,11 +138,11 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("Request body must include at least one loan row.");
             }
 
-            await EnsureTableAvailableAsync(cancellationToken);
+            var columns = await GetColumnsAsync(cancellationToken);
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
+            var updated = new List<NonKsServicedLoanRowDto>();
             var affectedRows = 0;
             foreach (var loan in request.Loans)
             {
@@ -316,155 +152,242 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException(validationError);
                 }
 
-                var loanId = NormalizeOptional(loan.LoanId);
-                if (!string.IsNullOrEmpty(loanId)
-                    && await LoanIdExistsForOtherKeyAsync(
-                        connection,
-                        loanId,
-                        loan.NonKsServicedLoanKey,
-                        cancellationToken))
-                {
-                    throw new InvalidOperationException($"Loan ID '{loanId}' already exists.");
-                }
+                var extLoanCode = ResolveExtLoanCode(loan);
+                var originalAsAtDate = loan.OriginalAsAtDate ?? loan.AsAtDate;
 
-                await using var command = new SqlCommand(_updateSql, connection);
-                command.Parameters.AddWithValue("@non_ks_serviced_loan_key", loan.NonKsServicedLoanKey);
-                AddCreateParameters(command, loan, loanId);
+                await using var command = new SqlCommand(columns.BuildUpdateSql(), connection);
+                command.Parameters.AddWithValue("@ext_loan_code", extLoanCode);
+                command.Parameters.AddWithValue("@original_as_at_date", ToDbDate(originalAsAtDate));
+                AddWriteParameters(command, columns, loan);
+                columns.AddUpdateAuditParameters(command, loan.UserUpdatedBy, DateTime.UtcNow);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+
+                var row = await ReadByKeyAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken);
+                if (row is null && originalAsAtDate != loan.AsAtDate)
+                {
+                    row = await ReadByKeyAsync(connection, columns, extLoanCode, originalAsAtDate, cancellationToken);
+                }
+
+                if (row is not null)
+                {
+                    updated.Add(row);
+                }
             }
 
             if (affectedRows > 0)
             {
-                _logger.LogInformation("Updated {AffectedRows} non-KS serviced loan row(s).", affectedRows);
-                return true;
+                _logger.LogInformation("Updated {AffectedRows} external serviced loan row(s).", affectedRows);
+                return updated;
             }
 
-            _logger.LogWarning("No non-KS serviced loan rows updated.");
-            return false;
+            _logger.LogWarning("No external serviced loan rows updated.");
+            throw new InvalidOperationException(
+                "No external serviced loan rows were updated. Verify Loan ID and As At date match an existing row.");
         }
 
-        private async Task EnsureTableAvailableAsync(CancellationToken cancellationToken)
+        private async Task<ExternalServicedLoanColumnMap> GetColumnsAsync(CancellationToken cancellationToken)
         {
-            if (_tableAvailable == true)
+            if (_columns is not null)
             {
-                return;
+                return _columns;
             }
 
-            var probeSql = $"select top 0 non_ks_serviced_loan_key from {_tblNonKsServicedLoan}";
-
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-
+            await _schemaLock.WaitAsync(cancellationToken);
             try
             {
-                await using var command = new SqlCommand(probeSql, connection);
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                _tableAvailable = true;
+                if (_columns is not null)
+                {
+                    return _columns;
+                }
+
+                _columns = await ExternalServicedLoanColumnMap.ProbeAsync(
+                    _connectionString,
+                    _tblExternalServicedLoan,
+                    cancellationToken);
+                return _columns;
             }
             catch (SqlException ex) when (ex.Number is 208 or 3701)
             {
                 throw new InvalidOperationException(
-                    "mort.non_ks_serviced_loan does not exist. Run Scripts/Create_mort_non_ks_serviced_loan.sql.");
+                    "subjective_input.external_serviced_loan does not exist. Verify wh_gold1 subjective_input schema.");
+            }
+            finally
+            {
+                _schemaLock.Release();
             }
         }
 
-        private async Task<long> GetNextKeyAsync(
-            SqlConnection connection,
-            CancellationToken cancellationToken)
+        private async Task<SqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(_nextKeySql, connection);
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            return Convert.ToInt64(result);
+            var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            return connection;
         }
 
-        private async Task<bool> LoanIdExistsAsync(
+        private async Task<string> GetNextExtLoanCodeAsync(
             SqlConnection connection,
-            string loanId,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(_loanIdExistsSql, connection);
-            command.Parameters.AddWithValue("@loan_id", loanId);
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            return result is not null;
-        }
-
-        private async Task<bool> LoanIdExistsForOtherKeyAsync(
-            SqlConnection connection,
-            string loanId,
-            long nonKsServicedLoanKey,
-            CancellationToken cancellationToken)
-        {
+            var columns = await GetColumnsAsync(cancellationToken);
             var sql = $"""
-                select 1
-                from {_tblNonKsServicedLoan}
-                where loan_id = @loan_id
-                  and non_ks_serviced_loan_key <> @non_ks_serviced_loan_key
+                select [{columns.ExtLoanCode}]
+                from {_tblExternalServicedLoan}
+                where [{columns.ExtLoanCode}] like @prefix
                 """;
 
             await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_id", loanId);
-            command.Parameters.AddWithValue("@non_ks_serviced_loan_key", nonKsServicedLoanKey);
+            command.Parameters.AddWithValue("@prefix", $"{ExtLoanCodePrefix}%");
+
+            var maxNumber = 0;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var code = reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0));
+                var number = ParseExtLoanCodeNumber(code);
+                if (number > maxNumber)
+                {
+                    maxNumber = number;
+                }
+            }
+
+            return $"{ExtLoanCodePrefix}{maxNumber + 1}";
+        }
+
+        private static string IncrementExtLoanCode(string extLoanCode)
+        {
+            var number = ParseExtLoanCodeNumber(extLoanCode);
+            return $"{ExtLoanCodePrefix}{number + 1}";
+        }
+
+        private static int ParseExtLoanCodeNumber(string? extLoanCode)
+        {
+            if (string.IsNullOrWhiteSpace(extLoanCode))
+            {
+                return 0;
+            }
+
+            var match = Regex.Match(extLoanCode.Trim(), @"^NONKS-(\d+)$", RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out var parsed) ? parsed : 0;
+        }
+
+        private static string ResolveExtLoanCode(NonKsServicedLoanUpdateItem loan)
+        {
+            if (!string.IsNullOrWhiteSpace(loan.LoanId))
+            {
+                return loan.LoanId.Trim();
+            }
+
+            throw new InvalidOperationException("Loan ID is required for update.");
+        }
+
+        private async Task<bool> ExtLoanCodeExistsAsync(
+            SqlConnection connection,
+            string extLoanCode,
+            CancellationToken cancellationToken)
+        {
+            var columns = await GetColumnsAsync(cancellationToken);
+            var sql = $"""
+                select 1
+                from {_tblExternalServicedLoan}
+                where [{columns.ExtLoanCode}] = @ext_loan_code
+                """;
+
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@ext_loan_code", extLoanCode);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
         }
 
         private async Task<NonKsServicedLoanRowDto?> ReadByKeyAsync(
             SqlConnection connection,
-            long nonKsServicedLoanKey,
+            ExternalServicedLoanColumnMap columns,
+            string extLoanCode,
+            DateTime? asAtDate,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(_selectByKeySql, connection);
-            command.Parameters.AddWithValue("@non_ks_serviced_loan_key", nonKsServicedLoanKey);
+            await using var command = new SqlCommand(columns.BuildSelectByKeySql(), connection);
+            command.Parameters.AddWithValue("@ext_loan_code", extLoanCode);
+            command.Parameters.AddWithValue("@as_at_date", ToDbDate(asAtDate));
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             return await reader.ReadAsync(cancellationToken) ? MapRow(reader) : null;
         }
 
-        private static void AddCreateParameters(
+        private static void AddWriteParameters(
             SqlCommand command,
-            NonKsServicedLoanCreateItem loan,
-            string? loanId)
+            ExternalServicedLoanColumnMap columns,
+            NonKsServicedLoanCreateItem loan)
         {
-            command.Parameters.AddWithValue("@loan_name", ToDbValue(NormalizeOptional(loan.LoanName)));
-            command.Parameters.AddWithValue("@as_at_date", ToDbDate(loan.AsAtDate));
-            command.Parameters.AddWithValue("@loan_id", ToDbValue(loanId));
-            command.Parameters.AddWithValue("@servicer_id", ToDbValue(NormalizeOptional(loan.ServicerId)));
-            command.Parameters.AddWithValue("@description", ToDbValue(NormalizeOptional(loan.Description)));
-            command.Parameters.AddWithValue("@investor", ToDbValue(NormalizeOptional(loan.Investor)));
-            command.Parameters.AddWithValue("@date_of_default", ToDbDate(loan.DateOfDefault));
-            command.Parameters.AddWithValue("@maturity_date", ToDbDate(loan.MaturityDate));
-            command.Parameters.AddWithValue("@interest_off_date", ToDbDate(loan.InterestOffDate));
-            command.Parameters.AddWithValue("@tax_memo_date", ToDbDate(loan.TaxMemoDate));
-            command.Parameters.AddWithValue("@security_value", ToDbDecimal(loan.SecurityValue));
-            command.Parameters.AddWithValue("@units", ToDbInt(loan.Units));
-            command.Parameters.AddWithValue("@net_acres", ToDbDecimal(loan.NetAcres));
-            command.Parameters.AddWithValue("@square_feet", ToDbDecimal(loan.SquareFeet));
-            command.Parameters.AddWithValue("@interest_rate", ToDbDecimal(loan.InterestRate));
-            command.Parameters.AddWithValue("@principal_balance", ToDbDecimal(loan.PrincipalBalance));
-            command.Parameters.AddWithValue("@outstanding_interest", ToDbDecimal(loan.OutstandingInterest));
-            command.Parameters.AddWithValue("@accrued_interest", ToDbDecimal(loan.AccruedInterest));
-            command.Parameters.AddWithValue("@late_interest", ToDbDecimal(loan.LateInterest));
-            command.Parameters.AddWithValue("@outstanding_invoices", ToDbDecimal(loan.OutstandingInvoices));
-            command.Parameters.AddWithValue("@est_realization_costs", ToDbDecimal(loan.EstRealizationCosts));
-            command.Parameters.AddWithValue("@cost_to_complete", ToDbDecimal(loan.CostToComplete));
-            command.Parameters.AddWithValue("@tax_arrears", ToDbDecimal(loan.TaxArrears));
-            command.Parameters.AddWithValue("@interest_as_of_tax_memo", ToDbDecimal(loan.InterestAsOfTaxMemo));
-            command.Parameters.AddWithValue("@interest_adjustment", ToDbDecimal(loan.InterestAdjustment));
-            command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+            var loanAliasName = ResolveLoanAliasName(loan);
+            var investorAliasName = ResolveInvestorAliasName(loan);
+
+            if (columns.LoanAliasName is not null)
+            {
+                command.Parameters.AddWithValue("@loan_alias_name", ToDbValue(loanAliasName));
+            }
+
+            if (columns.AsAtDate is not null)
+            {
+                command.Parameters.AddWithValue("@as_at_date", ToDbDate(loan.AsAtDate));
+            }
+
+            if (columns.ServicerId is not null)
+            {
+                command.Parameters.AddWithValue("@servicer_id", ToDbValue(NormalizeOptional(loan.ServicerId)));
+            }
+
+            if (columns.Description is not null)
+            {
+                command.Parameters.AddWithValue("@description", ToDbValue(NormalizeOptional(loan.Description)));
+            }
+
+            if (columns.InvestorAliasName is not null)
+            {
+                command.Parameters.AddWithValue("@investor_alias_name", ToDbValue(investorAliasName));
+            }
+
+            AddOptionalDate(command, columns.DefaultDate, "@default_date", loan.DateOfDefault);
+            AddOptionalDate(command, columns.MaturityDate, "@maturity_date", loan.MaturityDate);
+            AddOptionalDate(command, columns.InterestOffDate, "@interest_off_date", loan.InterestOffDate);
+            AddOptionalDate(command, columns.TaxMemoDate, "@tax_memo_date", loan.TaxMemoDate);
+            AddOptionalDecimal(command, columns.SecurityValue, "@security_value", loan.SecurityValue);
+            AddOptionalInt(command, columns.Units, "@units", loan.Units);
+            AddOptionalDecimal(command, columns.NetAcres, "@net_acres", loan.NetAcres);
+            AddOptionalDecimal(command, columns.SquareFeet, "@square_feet", loan.SquareFeet);
+            AddOptionalDecimal(command, columns.InterestRate, "@interest_rate", loan.InterestRate);
+            AddOptionalDecimal(command, columns.PrincipalBalance, "@principal_balance", loan.PrincipalBalance);
+            AddOptionalDecimal(command, columns.OutstandingInterest, "@outstanding_interest", loan.OutstandingInterest);
+            AddOptionalDecimal(command, columns.AccruedInterest, "@accrued_interest", loan.AccruedInterest);
+            AddOptionalDecimal(command, columns.LateInterest, "@late_interest", loan.LateInterest);
+            AddOptionalDecimal(command, columns.OutstandingInvoices, "@outstanding_invoices", loan.OutstandingInvoices);
+            AddOptionalDecimal(command, columns.EstRealizationCosts, "@est_realization_costs", loan.EstRealizationCosts);
+            AddOptionalDecimal(command, columns.CostToComplete, "@cost_to_complete", loan.CostToComplete);
+            AddOptionalDecimal(command, columns.TaxArrears, "@tax_arrears", loan.TaxArrears);
+            AddOptionalDecimal(command, columns.InterestAsOfTaxMemo, "@interest_as_of_tax_memo", loan.InterestAsOfTaxMemo);
+            AddOptionalDecimal(command, columns.InterestAdjustment, "@interest_adjustment", loan.InterestAdjustment);
         }
 
-        private static NonKsServicedLoanRowDto MapRow(SqlDataReader reader) =>
-            new()
+        private static NonKsServicedLoanRowDto MapRow(SqlDataReader reader)
+        {
+            var extLoanCode = GetNullableString(reader, "ext_loan_code");
+            var asAtDate = GetNullableDate(reader, "as_at_date");
+            var loanAliasName = GetNullableString(reader, "loan_alias_name");
+            var investorAliasName = GetNullableString(reader, "investor_alias_name")
+                ?? GetNullableString(reader, "investor_code");
+
+            return new NonKsServicedLoanRowDto
             {
-                NonKsServicedLoanKey = GetInt64(reader, "non_ks_serviced_loan_key"),
-                LoanName = GetNullableString(reader, "loan_name"),
-                AsAtDate = GetNullableDate(reader, "as_at_date"),
-                LoanId = GetNullableString(reader, "loan_id"),
+                NonKsServicedLoanKey = ComputeRowKey(extLoanCode, asAtDate),
+                LoanAliasName = loanAliasName,
+                LoanName = loanAliasName,
+                AsAtDate = asAtDate,
+                LoanId = extLoanCode,
                 ServicerId = GetNullableString(reader, "servicer_id"),
                 Description = GetNullableString(reader, "description"),
-                Investor = GetNullableString(reader, "investor"),
-                DateOfDefault = GetNullableDate(reader, "date_of_default"),
+                InvestorAliasName = investorAliasName,
+                Investor = investorAliasName,
+                DateOfDefault = GetNullableDate(reader, "default_date"),
                 MaturityDate = GetNullableDate(reader, "maturity_date"),
                 InterestOffDate = GetNullableDate(reader, "interest_off_date"),
                 TaxMemoDate = GetNullableDate(reader, "tax_memo_date"),
@@ -477,15 +400,61 @@ namespace kingsightapi.Services
                 OutstandingInterest = GetNullableDecimal(reader, "outstanding_interest"),
                 AccruedInterest = GetNullableDecimal(reader, "accrued_interest"),
                 LateInterest = GetNullableDecimal(reader, "late_interest"),
-                OutstandingInvoices = GetNullableDecimal(reader, "outstanding_invoices"),
-                EstRealizationCosts = GetNullableDecimal(reader, "est_realization_costs"),
+                OutstandingInvoices = GetNullableDecimal(reader, "outstanding_invoice"),
+                EstRealizationCosts = GetNullableDecimal(reader, "estimated_realization_costs"),
                 CostToComplete = GetNullableDecimal(reader, "cost_to_complete"),
                 TaxArrears = GetNullableDecimal(reader, "tax_arrears"),
                 InterestAsOfTaxMemo = GetNullableDecimal(reader, "interest_as_of_tax_memo"),
                 InterestAdjustment = GetNullableDecimal(reader, "interest_adjustment"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                UserUpdatedBy = GetNullableString(reader, "updated_by"),
+                UserUpdatedDate = GetNullableDateTime(reader, "updated_datetime"),
+                CreatedBy = GetNullableString(reader, "created_by"),
+                CreatedDate = GetNullableDateTime(reader, "created_datetime")
             };
+        }
+
+        private static long ComputeRowKey(string? extLoanCode, DateTime? asAtDate)
+        {
+            unchecked
+            {
+                long hash = 5381;
+                foreach (var c in (extLoanCode ?? string.Empty).ToUpperInvariant())
+                {
+                    hash = ((hash << 5) + hash) ^ c;
+                }
+
+                if (asAtDate.HasValue)
+                {
+                    hash = ((hash << 5) + hash) ^ asAtDate.Value.Ticks;
+                }
+
+                return hash == long.MinValue ? 1 : Math.Abs(hash);
+            }
+        }
+
+        private static void AddOptionalDate(SqlCommand command, string? column, string parameter, DateTime? value)
+        {
+            if (column is not null)
+            {
+                command.Parameters.AddWithValue(parameter, ToDbDate(value));
+            }
+        }
+
+        private static void AddOptionalDecimal(SqlCommand command, string? column, string parameter, decimal? value)
+        {
+            if (column is not null)
+            {
+                command.Parameters.AddWithValue(parameter, ToDbDecimal(value));
+            }
+        }
+
+        private static void AddOptionalInt(SqlCommand command, string? column, string parameter, int? value)
+        {
+            if (column is not null)
+            {
+                command.Parameters.AddWithValue(parameter, ToDbInt(value));
+            }
+        }
 
         private static object ToDbValue(string? value) =>
             string.IsNullOrEmpty(value) ? DBNull.Value : value;
@@ -502,8 +471,11 @@ namespace kingsightapi.Services
         private static string? NormalizeOptional(string? value) =>
             string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
-        private static long GetInt64(SqlDataReader reader, string name) =>
-            Convert.ToInt64(reader.GetValue(reader.GetOrdinal(name)));
+        private static string? ResolveLoanAliasName(NonKsServicedLoanCreateItem loan) =>
+            NormalizeOptional(loan.LoanAliasName) ?? NormalizeOptional(loan.LoanName);
+
+        private static string? ResolveInvestorAliasName(NonKsServicedLoanCreateItem loan) =>
+            NormalizeOptional(loan.InvestorAliasName) ?? NormalizeOptional(loan.Investor);
 
         private static string? GetNullableString(SqlDataReader reader, string name)
         {

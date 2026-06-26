@@ -12,6 +12,7 @@ public sealed class SubjectiveInputSql
         LoanAliasRelationship = tables.SubjectiveInput("loan_alias_relationship");
         InvestorAliasRelationship = tables.SubjectiveInput("investor_alias_relationship");
         LoanTaxDetails = tables.SubjectiveInput("loan_tax_details");
+        ExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
         SharedDimLoan = tables.Shared("dim_loan");
         MortgageDimInvestor = tables.Mortgage("dim_investor");
         LegacyDimInvestor = tables.Mort("dim_investor");
@@ -23,6 +24,7 @@ public sealed class SubjectiveInputSql
     public string LoanAliasRelationship { get; }
     public string InvestorAliasRelationship { get; }
     public string LoanTaxDetails { get; }
+    public string ExternalServicedLoan { get; }
     public string SharedDimLoan { get; }
     public string MortgageDimInvestor { get; }
     public string LegacyDimInvestor { get; }

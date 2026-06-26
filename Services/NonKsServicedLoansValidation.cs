@@ -16,9 +16,9 @@ namespace kingsightapi.Services
 
         public static string? ValidateUpdateItem(NonKsServicedLoanUpdateItem item)
         {
-            if (item.NonKsServicedLoanKey <= 0)
+            if (string.IsNullOrWhiteSpace(item.LoanId))
             {
-                return "Non-KS serviced loan key is required.";
+                return "Loan ID is required for update.";
             }
 
             return ValidateCreateItem(item);
@@ -41,9 +41,9 @@ namespace kingsightapi.Services
                 return "Servicer ID must be 100 characters or fewer.";
             }
 
-            if (item.LoanName is { Length: > 200 })
+            if (item.LoanName is { Length: > 200 } || item.LoanAliasName is { Length: > 200 })
             {
-                return "Loan name must be 200 characters or fewer.";
+                return "Loan alias must be 200 characters or fewer.";
             }
 
             return null;

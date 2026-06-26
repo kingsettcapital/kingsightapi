@@ -1,13 +1,26 @@
+using System.Text.Json.Serialization;
+using kingsightapi.Configuration;
+
 namespace kingsightapi.Entities
 {
+    public sealed class NonKsServicedLoanLookupsDto
+    {
+        public string NextExtLoanCode { get; init; } = "NONKS-1";
+    }
+
     public sealed class NonKsServicedLoanRowDto
     {
+        [JsonConverter(typeof(LongAsStringJsonConverter))]
         public long NonKsServicedLoanKey { get; init; }
+        /// <summary>Loan alias dropdown value (maps to loan_alias_name).</summary>
+        public string? LoanAliasName { get; init; }
         public string? LoanName { get; init; }
         public DateTime? AsAtDate { get; init; }
         public string? LoanId { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
+        /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>
+        public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
@@ -30,15 +43,21 @@ namespace kingsightapi.Entities
         public decimal? InterestAdjustment { get; init; }
         public string? UserUpdatedBy { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
+        public string? CreatedBy { get; init; }
+        public DateTime? CreatedDate { get; init; }
     }
 
     public class NonKsServicedLoanCreateItem
     {
+        /// <summary>Loan alias (SPA sends as loanName).</summary>
+        public string? LoanAliasName { get; init; }
         public string? LoanName { get; init; }
         public DateTime? AsAtDate { get; init; }
         public string? LoanId { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
+        /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>
+        public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
@@ -64,7 +83,11 @@ namespace kingsightapi.Entities
 
     public sealed class NonKsServicedLoanUpdateItem : NonKsServicedLoanCreateItem
     {
-        public long NonKsServicedLoanKey { get; init; }
+        [JsonConverter(typeof(LongAsStringJsonConverter))]
+        public long? NonKsServicedLoanKey { get; init; }
+
+        /// <summary>Original as-at date used to locate the row when the date is edited.</summary>
+        public DateTime? OriginalAsAtDate { get; init; }
     }
 
     public sealed class NonKsServicedLoanBulkCreateRequest
