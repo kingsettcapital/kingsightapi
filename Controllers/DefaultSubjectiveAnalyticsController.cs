@@ -33,14 +33,13 @@ namespace kingsightapi.Controllers
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasIds is null || loanAliasIds.Length == 0 || loanAliasIds.Any(id => id <= 0))
-            {
-                return BadRequest("At least one valid loanAliasIds value is required.");
-            }
-
             try
             {
-                var result = await _service.GetAsync(loanAliasIds, statuses, cancellationToken);
+                var aliasFilter = loanAliasIds?.Where(id => id > 0).ToArray();
+                var result = await _service.GetAsync(
+                    aliasFilter is { Length: > 0 } ? aliasFilter : null,
+                    statuses,
+                    cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)

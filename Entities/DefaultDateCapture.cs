@@ -15,6 +15,7 @@ namespace kingsightapi.Entities
     public sealed class DefaultDateCaptureUpdateItem
     {
         public long LoanKey { get; init; }
+        public string LoanCode { get; init; } = string.Empty;
         public DateTime? DefaultDate { get; init; }
         public string UserUpdatedBy { get; init; } = "system";
     }

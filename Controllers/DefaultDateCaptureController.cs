@@ -33,14 +33,13 @@ namespace kingsightapi.Controllers
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasIds is null || loanAliasIds.Length == 0 || loanAliasIds.Any(id => id <= 0))
-            {
-                return BadRequest("At least one valid loanAliasIds value is required.");
-            }
-
             try
             {
-                var result = await _service.GetAsync(loanAliasIds, statuses, cancellationToken);
+                var aliasFilter = loanAliasIds?.Where(id => id > 0).ToArray();
+                var result = await _service.GetAsync(
+                    aliasFilter is { Length: > 0 } ? aliasFilter : null,
+                    statuses,
+                    cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)
@@ -90,9 +89,9 @@ namespace kingsightapi.Controllers
 
             foreach (var loan in request.Loans)
             {
-                if (loan.LoanKey <= 0)
+                if (loan.LoanKey <= 0 && string.IsNullOrWhiteSpace(loan.LoanCode))
                 {
-                    return BadRequest("Loan key is required.");
+                    return BadRequest("Loan key or loan code is required.");
                 }
             }
 
