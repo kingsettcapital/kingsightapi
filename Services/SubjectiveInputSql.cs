@@ -30,20 +30,58 @@ public sealed class SubjectiveInputSql
     public string LegacyDimInvestor { get; }
     public string DimStatus { get; }
 
-    /// <summary>Resolve loan_key for API DTOs via <c>wh_gold1.shared.dim_loan</c>.</summary>
+    /// <summary>Resolve loan_key for API DTOs via <c>shared.dim_loan</c>.</summary>
     public static string LoanKeySelect(string relationshipAlias = "r", string dimLoanAlias = "l") =>
         $"loan_key = isnull({dimLoanAlias}.loan_key, 0)";
 
-    /// <summary>Current SCD row — works when <c>scd_cur_ind</c> is bit (1) or varchar ('Y').</summary>
+    /// <summary>Direct <c>loan_code</c> join — matches subjective-input source SQL.</summary>
+    public static string EqualsLoanCode(string leftAlias, string leftColumn, string rightAlias, string rightColumn) =>
+        $"{leftAlias}.{leftColumn} = {rightAlias}.{rightColumn}";
+
+    /// <summary>Direct <c>loan_code</c> parameter match.</summary>
+    public static string EqualsLoanCodeParam(string tableAlias, string column, string parameterName) =>
+        $"{tableAlias}.{column} = {parameterName}";
+
+    /// <summary>Current SCD row — bit <c>1</c> or common varchar truthy values on <c>scd_cur_ind</c>.</summary>
     public static string DimLoanIsCurrent(string dimLoanAlias) =>
-        $"cast({dimLoanAlias}.scd_cur_ind as varchar(10)) in ('1', 'Y')";
+        $"({dimLoanAlias}.scd_cur_ind = 1 or cast({dimLoanAlias}.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE'))";
+
+    /// <summary>Prefer current SCD rows when ordering (0 = current).</summary>
+    public static string DimLoanCurrentSortRank(string dimLoanAlias) =>
+        $"case when {DimLoanIsCurrent(dimLoanAlias)} then 0 else 1 end";
+
+    /// <summary>
+    /// Best <c>shared.dim_loan</c> row per relationship <c>loan_code</c> using direct equality.
+    /// Current SCD first, then highest <c>loan_key</c>.
+    /// </summary>
+    public string SharedDimLoanOuterApplyOnLoanCode(
+        string relationshipAlias = "r",
+        string dimLoanAlias = "l",
+        IReadOnlyList<string>? extraColumns = null)
+    {
+        var extraSelect = extraColumns is { Count: > 0 }
+            ? ", " + string.Join(", ", extraColumns.Select(column => $"ck.[{column}]"))
+            : string.Empty;
+
+        return $"""
+        outer apply (
+            select top (1)
+                   ck.loan_key,
+                   ck.parent_loan_code,
+                   ck.investor_code{extraSelect}
+            from {SharedDimLoan} ck
+            where {EqualsLoanCode(relationshipAlias, "loan_code", "ck", "loan_code")}
+            order by {DimLoanCurrentSortRank("ck")}, ck.loan_key desc
+        ) {dimLoanAlias}
+        """;
+    }
 
     public string SharedDimLoanJoinOnLoanCode(string relationshipAlias = "r", string dimLoanAlias = "l") =>
-        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsVarchar(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")} and {DimLoanIsCurrent(dimLoanAlias)}";
+        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsLoanCode(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")} and {DimLoanIsCurrent(dimLoanAlias)}";
 
-    /// <summary>Unfiltered <c>wh_gold1.shared.dim_loan</c> join on <c>loan_code</c> (subjective-input source SQL).</summary>
+    /// <summary>Unfiltered <c>shared.dim_loan</c> join on <c>loan_code</c>.</summary>
     public string SharedDimLoanJoinOnLoanCodeUnfiltered(string relationshipAlias = "r", string dimLoanAlias = "l") =>
-        $"left join {SharedDimLoan} {dimLoanAlias} on {relationshipAlias}.loan_code = {dimLoanAlias}.loan_code";
+        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsLoanCode(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")}";
 
     public string MortgageDimInvestorJoinOnInvestorCode(string dimLoanAlias = "l", string investorAlias = "i") =>
         $"left join {MortgageDimInvestor} {investorAlias} on {dimLoanAlias}.investor_code = {investorAlias}.investor_code";
@@ -58,7 +96,7 @@ public sealed class SubjectiveInputSql
         $"left join {InvestorAliasMaster} {masterAlias} on {relationshipAlias}.investor_alias_name = {masterAlias}.investor_alias_name";
 
     public string InvestorAliasRelationshipJoinOnInvestorCode(string sharedDimLoanAlias = "c", string investorRelAlias = "d") =>
-        $"left join {InvestorAliasRelationship} {investorRelAlias} on {EqualsVarchar(sharedDimLoanAlias, "investor_code", investorRelAlias, "investor_code")}";
+        $"left join {InvestorAliasRelationship} {investorRelAlias} on {EqualsLoanCode(sharedDimLoanAlias, "investor_code", investorRelAlias, "investor_code")}";
 
     /// <summary>Collation-safe varchar compare for cross-table code joins.</summary>
     public static string EqualsVarchar(string leftAlias, string leftColumn, string rightAlias, string rightColumn) =>

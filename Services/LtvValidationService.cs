@@ -31,9 +31,11 @@ namespace kingsightapi.Services
         private readonly string _tblSharedDimLoan;
         private readonly string _tblDimStatus;
         private readonly string _investorJoinSql;
+        private readonly SubjectiveInputSql _subjectiveInputSql;
         private readonly string _confirmLtvSql;
         private readonly string _loanEligibleSql;
         private readonly string _loanEligibleByKeySql;
+        private readonly string _resolveLoanKeyByCodeSql;
 
         private readonly string _connectionString;
         private readonly ILogger<LtvValidationService> _logger;
@@ -52,26 +54,26 @@ namespace kingsightapi.Services
             _logger = logger;
 
             var subjective = new SubjectiveInputSql(tables);
+            _subjectiveInputSql = subjective;
             _tblSharedDimLoan = subjective.SharedDimLoan;
             _tblDimStatus = subjective.DimStatus;
             _loanAliasRelationship = subjective.LoanAliasRelationship;
             _loanAliasMaster = subjective.LoanAliasMaster;
-            _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("c", "d");
+            _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("l", "d");
 
             _confirmLtvSql = $"""
                 select 1
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on c.loan_key = @loan_key
-                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
                 where a.loan_to_value is not null
                 """;
 
             _loanEligibleSql = $"""
                 select 1
                 from {_loanAliasRelationship} a
-                where {SubjectiveInputSql.EqualsVarcharParam("a", "loan_code", "@loan_code")}
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
                 """;
 
             _loanEligibleByKeySql = $"""
@@ -79,8 +81,14 @@ namespace kingsightapi.Services
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on c.loan_key = @loan_key
-                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
+                """;
+
+            _resolveLoanKeyByCodeSql = $"""
+                select top (1) ck.loan_key
+                from {_tblSharedDimLoan} ck
+                where {SubjectiveInputSql.EqualsLoanCodeParam("ck", "loan_code", "@loan_code")}
+                order by {SubjectiveInputSql.DimLoanCurrentSortRank("ck")}, ck.loan_key desc
                 """;
         }
 
@@ -150,7 +158,16 @@ namespace kingsightapi.Services
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add(MapRow(reader));
+                var row = MapRow(reader);
+                if (row.LoanKey <= 0 && !string.IsNullOrWhiteSpace(row.LoanCode))
+                {
+                    _logger.LogWarning(
+                        "LTV validation: no shared.dim_loan match for loan_code={LoanCode}, alias={LoanAliasName}",
+                        row.LoanCode,
+                        row.LoanAliasName);
+                }
+
+                rows.Add(row);
             }
 
             _logger.LogInformation(
@@ -317,15 +334,15 @@ namespace kingsightapi.Services
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn)
         {
+            IReadOnlyList<string>? dimLoanExtraColumns = null;
+            if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
+            {
+                dimLoanExtraColumns = [loanStatusKeyColumn];
+            }
+
             var sql = new StringBuilder($"""
-                select loan_key = isnull((
-                           select top (1) ck.loan_key
-                           from {_tblSharedDimLoan} ck
-                           where {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "ck", "loan_code")}
-                             and {SubjectiveInputSql.DimLoanIsCurrent("ck")}
-                           order by ck.loan_key desc
-                       ), 0),
-                       parent_loan_code = isnull(c.parent_loan_code, ''),
+                select {SubjectiveInputSql.LoanKeySelect("a", "l")},
+                       parent_loan_code = isnull(l.parent_loan_code, ''),
                        loan_code = a.loan_code,
                        loan_name = isnull(a.loan_description, ''),
                        loan_alias_name = isnull(a.loan_alias_name, ''),
@@ -341,8 +358,7 @@ namespace kingsightapi.Services
                 from {_loanAliasRelationship} a
                 left join {_loanAliasMaster} b
                     on a.loan_alias_name = b.loan_alias_name
-                left join {_tblSharedDimLoan} c
-                    on {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
+                {_subjectiveInputSql.SharedDimLoanOuterApplyOnLoanCode("a", "l", dimLoanExtraColumns)}
                 {_investorJoinSql}
                 """);
 
@@ -353,7 +369,7 @@ namespace kingsightapi.Services
                 AppendLoanAliasFilter(sql, loanAliasIds);
                 LoanStatusFilterParser.AppendSqlCondition(
                     sql,
-                    "c",
+                    "l",
                     loanStatusKeyColumn,
                     statusFilter,
                     _tblDimStatus);
@@ -397,7 +413,7 @@ namespace kingsightapi.Services
                 update a
                 set loan_to_value = @ltv{optionalSet}{auditSet}
                 from {_loanAliasRelationship} a
-                where {SubjectiveInputSql.EqualsVarcharParam("a", "loan_code", "@loan_code")}
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
                 """;
         }
 
@@ -412,8 +428,7 @@ namespace kingsightapi.Services
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on c.loan_key = @loan_key
-                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
                 """;
         }
 
@@ -431,8 +446,7 @@ namespace kingsightapi.Services
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on c.loan_key = @loan_key
-                   and {SubjectiveInputSql.EqualsVarchar("a", "loan_code", "c", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("c")}
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
                 """;
         }
 
