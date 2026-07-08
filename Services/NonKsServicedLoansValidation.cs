@@ -16,7 +16,9 @@ namespace kingsightapi.Services
 
         public static string? ValidateUpdateItem(NonKsServicedLoanUpdateItem item)
         {
-            if (string.IsNullOrWhiteSpace(item.LoanId))
+            if (string.IsNullOrWhiteSpace(item.LoanId)
+                && string.IsNullOrWhiteSpace(item.LoanCode)
+                && string.IsNullOrWhiteSpace(item.ExtLoanCode))
             {
                 return "Loan ID is required for update.";
             }
@@ -31,7 +33,9 @@ namespace kingsightapi.Services
                 return "Interest rate must be between 0 and 100.";
             }
 
-            if (item.LoanId is { Length: > 100 })
+            if (item.LoanId is { Length: > 100 }
+                || item.LoanCode is { Length: > 100 }
+                || item.ExtLoanCode is { Length: > 100 })
             {
                 return "Loan ID must be 100 characters or fewer.";
             }

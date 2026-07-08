@@ -17,6 +17,8 @@ namespace kingsightapi.Entities
         public string? LoanName { get; init; }
         public DateTime? AsAtDate { get; init; }
         public string? LoanId { get; init; }
+        public string? LoanCode { get; init; }
+        public string? ExtLoanCode { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
         /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>
@@ -54,6 +56,8 @@ namespace kingsightapi.Entities
         public string? LoanName { get; init; }
         public DateTime? AsAtDate { get; init; }
         public string? LoanId { get; init; }
+        public string? LoanCode { get; init; }
+        public string? ExtLoanCode { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
         /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>

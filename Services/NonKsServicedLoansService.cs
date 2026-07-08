@@ -99,12 +99,22 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException(validationError);
                 }
 
-                var extLoanCode = nextExtLoanCode;
-                nextExtLoanCode = IncrementExtLoanCode(extLoanCode);
-
-                if (await ExtLoanCodeExistsAsync(connection, extLoanCode, cancellationToken))
+                string extLoanCode;
+                if (TryResolveProvidedExtLoanCode(loan, out var providedExtLoanCode))
                 {
-                    throw new InvalidOperationException($"Loan ID '{extLoanCode}' already exists.");
+                    extLoanCode = providedExtLoanCode;
+                }
+                else
+                {
+                    extLoanCode = nextExtLoanCode;
+                    nextExtLoanCode = IncrementExtLoanCode(extLoanCode);
+                }
+
+                if (await RowExistsAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken))
+                {
+                    var asAtLabel = loan.AsAtDate?.ToString("yyyy-MM-dd") ?? "(none)";
+                    throw new InvalidOperationException(
+                        $"A record already exists for Loan ID '{extLoanCode}' and As At date '{asAtLabel}'.");
                 }
 
                 var auditUtc = DateTime.UtcNow;
@@ -271,32 +281,45 @@ namespace kingsightapi.Services
             return match.Success && int.TryParse(match.Groups[1].Value, out var parsed) ? parsed : 0;
         }
 
-        private static string ResolveExtLoanCode(NonKsServicedLoanUpdateItem loan)
+        private static bool TryResolveProvidedExtLoanCode(
+            NonKsServicedLoanCreateItem loan,
+            out string extLoanCode)
         {
-            if (!string.IsNullOrWhiteSpace(loan.LoanId))
+            var candidate = NormalizeOptional(loan.ExtLoanCode)
+                ?? NormalizeOptional(loan.LoanCode)
+                ?? NormalizeOptional(loan.LoanId);
+            if (candidate is null)
             {
-                return loan.LoanId.Trim();
+                extLoanCode = string.Empty;
+                return false;
             }
 
-            throw new InvalidOperationException("Loan ID is required for update.");
+            extLoanCode = candidate;
+            return true;
         }
 
-        private async Task<bool> ExtLoanCodeExistsAsync(
+        private static string ResolveExtLoanCode(NonKsServicedLoanUpdateItem loan)
+        {
+            var extLoanCode = NormalizeOptional(loan.ExtLoanCode)
+                ?? NormalizeOptional(loan.LoanCode)
+                ?? NormalizeOptional(loan.LoanId);
+            if (extLoanCode is null)
+            {
+                throw new InvalidOperationException("Loan ID is required for update.");
+            }
+
+            return extLoanCode;
+        }
+
+        private async Task<bool> RowExistsAsync(
             SqlConnection connection,
+            ExternalServicedLoanColumnMap columns,
             string extLoanCode,
+            DateTime? asAtDate,
             CancellationToken cancellationToken)
         {
-            var columns = await GetColumnsAsync(cancellationToken);
-            var sql = $"""
-                select 1
-                from {_tblExternalServicedLoan}
-                where [{columns.ExtLoanCode}] = @ext_loan_code
-                """;
-
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@ext_loan_code", extLoanCode);
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            return result is not null;
+            return await ReadByKeyAsync(connection, columns, extLoanCode, asAtDate, cancellationToken)
+                is not null;
         }
 
         private async Task<NonKsServicedLoanRowDto?> ReadByKeyAsync(
@@ -383,6 +406,8 @@ namespace kingsightapi.Services
                 LoanName = loanAliasName,
                 AsAtDate = asAtDate,
                 LoanId = extLoanCode,
+                LoanCode = extLoanCode,
+                ExtLoanCode = extLoanCode,
                 ServicerId = GetNullableString(reader, "servicer_id"),
                 Description = GetNullableString(reader, "description"),
                 InvestorAliasName = investorAliasName,

@@ -34,6 +34,27 @@ Content-Type: application/json
   ]
 }
 
+### Duplicate row — reuse existing Loan Code with a new As At date
+
+POST {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanName": "External Servicer Loan A",
+      "asAtDate": "2026-06-30",
+      "loanCode": "NONKS-1",
+      "servicerId": "SVC-100",
+      "description": "Duplicated quarterly snapshot",
+      "investor": "Investor A",
+      "interestRate": 15.75,
+      "principalBalance": 1000000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
 ###
 
 PUT {{api_HostAddress}}/api/NonKsServicedLoans
