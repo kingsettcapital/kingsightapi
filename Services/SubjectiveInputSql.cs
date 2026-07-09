@@ -42,9 +42,9 @@ public sealed class SubjectiveInputSql
     public static string EqualsLoanCodeParam(string tableAlias, string column, string parameterName) =>
         $"{tableAlias}.{column} = {parameterName}";
 
-    /// <summary>Current SCD row — bit <c>1</c> or common varchar truthy values on <c>scd_cur_ind</c>.</summary>
+    /// <summary>Current SCD row — compare as varchar so Fabric does not coerce <c>Y</c>/<c>N</c> to int.</summary>
     public static string DimLoanIsCurrent(string dimLoanAlias) =>
-        $"({dimLoanAlias}.scd_cur_ind = 1 or cast({dimLoanAlias}.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE'))";
+        $"cast({dimLoanAlias}.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')";
 
     /// <summary>Prefer current SCD rows when ordering (0 = current).</summary>
     public static string DimLoanCurrentSortRank(string dimLoanAlias) =>

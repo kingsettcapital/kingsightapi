@@ -3,12 +3,14 @@ using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Options;
 using System.Data;
+using System.Globalization;
 
 namespace kingsightapi.Services
 {
     public sealed class CmhcUploadService : ICmhcUploadService
     {
-        private readonly string _cmhcUploadHistoryTable;
+        private readonly string _fileUploadHistoryTable;
+        private readonly string _legacyUploadHistoryTable;
         private readonly string NextFileIdSql;
 
         private readonly string _connectionString;
@@ -16,9 +18,11 @@ namespace kingsightapi.Services
         private readonly IUserService _userService;
         private readonly CmhcUploadOptions _options;
         private readonly ILogger<CmhcUploadService> _logger;
+        private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
         private bool _schemaProbed;
-        private string? _asOfDateColumn;
+        private bool _useFileUploadHistoryTable;
+        private string? _legacyAsOfDateColumn;
 
         public CmhcUploadService(
             IConfiguration configuration,
@@ -31,12 +35,12 @@ namespace kingsightapi.Services
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
 
-            var cmhcUploadHistory = tables.Mort("CMHC_upload_historytbl");
-            _cmhcUploadHistoryTable = cmhcUploadHistory;
+            _fileUploadHistoryTable = tables.SubjectiveInput("file_upload_history");
+            _legacyUploadHistoryTable = tables.PortalMort("CMHC_upload_historytbl");
 
             NextFileIdSql = $"""
                 select isnull(max(file_id), 0) + 1
-                from {cmhcUploadHistory}
+                from {_fileUploadHistoryTable}
                 """;
 
             _fileStorage = fileStorage;
@@ -64,7 +68,7 @@ namespace kingsightapi.Services
 
             await EnrichUploadedByDisplayAsync(rows, cancellationToken);
 
-            _logger.LogInformation("Retrieved {Count} CMHC upload history rows.", rows.Count);
+            _logger.LogInformation("Retrieved {Count} file upload history rows.", rows.Count);
             return rows;
         }
 
@@ -98,6 +102,7 @@ namespace kingsightapi.Services
             {
                 var row = await InsertHistoryRowAsync(
                     storedFileName,
+                    uploadCategory,
                     uploadedByStorageGuid,
                     asOfDate,
                     cancellationToken);
@@ -112,7 +117,7 @@ namespace kingsightapi.Services
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to roll back stored CMHC file {FileName}", storedFileName);
+                    _logger.LogWarning(ex, "Failed to roll back stored file {FileName}", storedFileName);
                 }
 
                 throw;
@@ -224,11 +229,18 @@ namespace kingsightapi.Services
 
         private async Task<CmhcUploadHistoryDto> InsertHistoryRowAsync(
             string filename,
+            string fileType,
             Guid uploadedByStorageGuid,
             DateOnly asOfDate,
             CancellationToken cancellationToken)
         {
             await EnsureSchemaAsync(cancellationToken);
+
+            if (!_useFileUploadHistoryTable)
+            {
+                throw new InvalidOperationException(
+                    "subjective_input.file_upload_history is not available. Run Scripts/Create_subjective_input_file_upload_history.sql.");
+            }
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -239,12 +251,10 @@ namespace kingsightapi.Services
             await using var insertCommand = new SqlCommand(BuildInsertSql(), connection);
             insertCommand.Parameters.AddWithValue("@file_id", nextId);
             insertCommand.Parameters.AddWithValue("@filename", filename);
+            insertCommand.Parameters.AddWithValue("@file_type", fileType);
+            insertCommand.Parameters.AddWithValue("@as_of_date", asOfDate.ToDateTime(TimeOnly.MinValue));
             insertCommand.Parameters.AddWithValue("@uploaded_date", DateTime.UtcNow);
             insertCommand.Parameters.Add(CreateUploadedByParameter("@uploaded_by", uploadedByStorageGuid));
-            if (_asOfDateColumn is not null)
-            {
-                insertCommand.Parameters.AddWithValue("@as_of_date", asOfDate.ToDateTime(TimeOnly.MinValue));
-            }
 
             await insertCommand.ExecuteNonQueryAsync(cancellationToken);
 
@@ -254,14 +264,16 @@ namespace kingsightapi.Services
             await using var reader = await getCommand.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
             {
-                throw new InvalidOperationException("CMHC upload insert did not return a row.");
+                throw new InvalidOperationException("File upload history insert did not return a row.");
             }
 
             var row = MapRow(reader);
             _logger.LogInformation(
-                "Inserted CMHC upload history row {FileId} for {FileName} by user {UploadedByUserId}",
+                "Inserted file upload history row {FileId} for {FileName} ({FileType}, as of {AsOfDate}) by user {UploadedByUserId}",
                 row.FileId,
                 row.Filename,
+                row.FileType,
+                row.AsOfDate,
                 row.UploadedByUserId);
 
             return row;
@@ -329,73 +341,143 @@ namespace kingsightapi.Services
                 return;
             }
 
-            _asOfDateColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                _cmhcUploadHistoryTable,
-                ["as_of_date"],
-                cancellationToken);
-            _schemaProbed = true;
+            await _schemaLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (_schemaProbed)
+                {
+                    return;
+                }
+
+                _useFileUploadHistoryTable = await TableExistsAsync(_fileUploadHistoryTable, cancellationToken);
+                if (!_useFileUploadHistoryTable)
+                {
+                    _legacyAsOfDateColumn = await DimLoanColumnProbe.FindFirstAsync(
+                        _connectionString,
+                        _legacyUploadHistoryTable,
+                        ["as_of_date"],
+                        cancellationToken);
+                    _logger.LogWarning(
+                        "subjective_input.file_upload_history not found; reads will use legacy {LegacyTable}.",
+                        _legacyUploadHistoryTable);
+                }
+
+                _schemaProbed = true;
+            }
+            finally
+            {
+                _schemaLock.Release();
+            }
+        }
+
+        private async Task<bool> TableExistsAsync(string tableName, CancellationToken cancellationToken)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await using var command = new SqlCommand($"select top 0 file_id from {tableName}", connection);
+                await command.ExecuteReaderAsync(cancellationToken);
+                return true;
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 3701)
+            {
+                return false;
+            }
         }
 
         private string BuildHistorySql()
         {
-            var asOfSelect = _asOfDateColumn is not null ? $", [{_asOfDateColumn}]" : string.Empty;
+            if (_useFileUploadHistoryTable)
+            {
+                return $"""
+                    select file_id,
+                           filename,
+                           file_type,
+                           as_of_date,
+                           uploaded_date,
+                           uploaded_by
+                    from {_fileUploadHistoryTable}
+                    order by uploaded_date desc
+                    """;
+            }
+
+            var asOfSelect = _legacyAsOfDateColumn is not null ? $", [{_legacyAsOfDateColumn}]" : string.Empty;
             return $"""
                 select file_id,
                        filename,
+                       cast('' as varchar(100)) as file_type,
                        uploaded_date,
                        uploaded_by{asOfSelect}
-                from {_cmhcUploadHistoryTable}
+                from {_legacyUploadHistoryTable}
                 order by uploaded_date desc
                 """;
         }
 
-        private string BuildInsertSql()
-        {
-            if (_asOfDateColumn is not null)
-            {
-                return $"""
-                    insert into {_cmhcUploadHistoryTable} (file_id, filename, uploaded_date, uploaded_by, [{_asOfDateColumn}])
-                    values (@file_id, @filename, @uploaded_date, @uploaded_by, @as_of_date)
-                    """;
-            }
-
-            return $"""
-                insert into {_cmhcUploadHistoryTable} (file_id, filename, uploaded_date, uploaded_by)
-                values (@file_id, @filename, @uploaded_date, @uploaded_by)
+        private string BuildInsertSql() =>
+            $"""
+                insert into {_fileUploadHistoryTable}
+                    (file_id, filename, file_type, as_of_date, uploaded_date, uploaded_by)
+                values
+                    (@file_id, @filename, @file_type, @as_of_date, @uploaded_date, @uploaded_by)
                 """;
-        }
 
-        private string BuildGetInsertedRowSql()
-        {
-            var asOfSelect = _asOfDateColumn is not null ? $", [{_asOfDateColumn}]" : string.Empty;
-            return $"""
+        private string BuildGetInsertedRowSql() =>
+            $"""
                 select file_id,
                        filename,
+                       file_type,
+                       as_of_date,
                        uploaded_date,
-                       uploaded_by{asOfSelect}
-                from {_cmhcUploadHistoryTable}
+                       uploaded_by
+                from {_fileUploadHistoryTable}
                 where file_id = @file_id
                 """;
-        }
 
         private CmhcUploadHistoryDto MapRow(SqlDataReader reader)
         {
             var uploadedByOrdinal = reader.GetOrdinal("uploaded_by");
             var uploadedByValue = reader.GetGuid(uploadedByOrdinal);
+            var filename = reader.GetString(reader.GetOrdinal("filename"));
+            var fileType = TryGetStringColumn(reader, "file_type");
+            if (string.IsNullOrWhiteSpace(fileType))
+            {
+                fileType = CmhcUploadFileTypes.Resolve(null, filename);
+            }
+
             var row = new CmhcUploadHistoryDto
             {
                 FileId = Convert.ToInt64(reader.GetValue(reader.GetOrdinal("file_id"))),
-                Filename = reader.GetString(reader.GetOrdinal("filename")),
+                Filename = filename,
+                FileType = fileType,
                 UploadedDate = DateTime.SpecifyKind(
                     reader.GetDateTime(reader.GetOrdinal("uploaded_date")),
                     DateTimeKind.Utc),
                 UploadedBy = uploadedByValue.ToString(),
-                AsOfDate = TryGetOptionalDateColumn(reader, _asOfDateColumn)
+                AsOfDate = FormatAsOfDate(
+                    TryGetOptionalDateColumn(reader, "as_of_date")
+                        ?? TryGetOptionalDateColumn(reader, _legacyAsOfDateColumn)),
             };
 
             ApplyUploadedByDisplay(row, new Dictionary<int, UserDto>());
             return row;
+        }
+
+        private static string? FormatAsOfDate(DateTime? value) =>
+            value?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        private static string? TryGetStringColumn(SqlDataReader reader, string columnName)
+        {
+            try
+            {
+                var ordinal = reader.GetOrdinal(columnName);
+                return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal).Trim();
+            }
+            catch (IndexOutOfRangeException)
+            {
+                return null;
+            }
         }
 
         private static DateTime? TryGetOptionalDateColumn(SqlDataReader reader, string? columnName)
@@ -428,4 +510,3 @@ namespace kingsightapi.Services
         public int StatusCode { get; }
     }
 }
-

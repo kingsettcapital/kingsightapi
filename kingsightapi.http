@@ -1,6 +1,18 @@
 @api_HostAddress = https://localhost:7140
 @api_HostAddressHttp = http://localhost:5181
 
+GET {{api_HostAddress}}/api/Notifications
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/Notifications/mark-all-read
+Content-Type: application/json
+
+{}
+
+###
+
 GET {{api_HostAddress}}/api/CmhcUpload/history
 Accept: application/json
 

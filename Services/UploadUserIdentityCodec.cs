@@ -1,7 +1,7 @@
 namespace kingsightapi.Services;
 
 /// <summary>
-/// Maps <see cref="Entities.UserDto.UserId"/> (int) to <c>mort.CMHC_upload_historytbl.uploaded_by</c> (UNIQUEIDENTIFIER)
+/// Maps <see cref="Entities.UserDto.UserId"/> (int) to <c>subjective_input.file_upload_history.uploaded_by</c> (UNIQUEIDENTIFIER)
 /// without altering the warehouse column type. Pattern: 00000000-0000-0000-0000-{userId as 12 hex digits}.
 /// All-zero GUID remains the legacy "system" placeholder.
 /// </summary>

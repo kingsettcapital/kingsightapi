@@ -16,6 +16,7 @@ namespace kingsightapi.Services
     {
         private readonly string _connectionString;
         private readonly SubjectiveInputSql _sql;
+        private readonly INotificationService _notificationService;
         private readonly ILogger<LoanService> _logger;
 
         private bool _schemaProbed;
@@ -25,10 +26,15 @@ namespace kingsightapi.Services
         private string? _lateInterestApplicableColumn;
         private string? _lateInterestOffNoteColumn;
 
-        public LoanService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<LoanService> logger)
+        public LoanService(
+            IConfiguration configuration,
+            FabricWarehouseTables tables,
+            INotificationService notificationService,
+            ILogger<LoanService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _notificationService = notificationService;
             _logger = logger;
             _sql = new SubjectiveInputSql(tables);
         }
@@ -114,6 +120,12 @@ namespace kingsightapi.Services
                     continue;
                 }
 
+                short? priorRanking = null;
+                if (loan.LoanRanking.HasValue)
+                {
+                    priorRanking = await TryGetPriorRankingAsync(connection, loan, cancellationToken);
+                }
+
                 var rowsChanged = loan.LoanKey > 0
                     ? await ExecuteUpdateAsync(BuildUpdateByLoanKeySql(), loan, auditDisplayName, connection, cancellationToken)
                     : 0;
@@ -126,6 +138,22 @@ namespace kingsightapi.Services
                         auditDisplayName,
                         connection,
                         cancellationToken);
+                }
+
+                if (rowsChanged > 0 && loan.LoanRanking.HasValue)
+                {
+                    await _notificationService.CreateRankingUpdateAsync(
+                        loan.LoanCode,
+                        priorRanking,
+                        loan.LoanRanking,
+                        auditDisplayName,
+                        cancellationToken);
+                }
+                else if (rowsChanged > 0)
+                {
+                    _logger.LogDebug(
+                        "Skipped ranking notification for {LoanCode}; loanRanking was not sent in the request.",
+                        loan.LoanCode);
                 }
 
                 affectedRows += rowsChanged;
@@ -188,6 +216,41 @@ namespace kingsightapi.Services
             _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<short?> TryGetPriorRankingAsync(
+            SqlConnection connection,
+            LoanUpdateRequestDto loan,
+            CancellationToken cancellationToken)
+        {
+            if (_rankingColumn is null)
+            {
+                return null;
+            }
+
+            var sql = loan.LoanKey > 0
+                ? $"""
+                  select top 1 r.[{_rankingColumn}]
+                  from {_sql.LoanAliasRelationship} r
+                  inner join {_sql.SharedDimLoan} l on l.loan_key = @loan_key and l.loan_code = r.loan_code
+                  """
+                : $"""
+                  select top 1 r.[{_rankingColumn}]
+                  from {_sql.LoanAliasRelationship} r
+                  where r.loan_code = @loan_code
+                  """;
+
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            if (result is null or DBNull)
+            {
+                return null;
+            }
+
+            return Convert.ToInt16(result);
         }
 
         private async Task EnsureSchemaAsync(CancellationToken cancellationToken)

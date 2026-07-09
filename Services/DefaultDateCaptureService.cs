@@ -23,6 +23,7 @@ namespace kingsightapi.Services
     {
         private readonly string _connectionString;
         private readonly SubjectiveInputSql _sql;
+        private readonly INotificationService _notificationService;
         private readonly ILogger<DefaultDateCaptureService> _logger;
 
         private bool _schemaProbed;
@@ -32,11 +33,13 @@ namespace kingsightapi.Services
         public DefaultDateCaptureService(
             IConfiguration configuration,
             ILogger<DefaultDateCaptureService> logger,
-            FabricWarehouseTables tables)
+            FabricWarehouseTables tables,
+            INotificationService notificationService)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _notificationService = notificationService;
             _sql = new SubjectiveInputSql(tables);
         }
 
@@ -114,6 +117,8 @@ namespace kingsightapi.Services
             var affectedRows = 0;
             foreach (var loan in request.Loans)
             {
+                DateTime? priorDefaultDate = await TryGetPriorDefaultDateAsync(connection, loan, cancellationToken);
+
                 var rowsChanged = loan.LoanKey > 0
                     ? await ExecuteUpdateAsync(
                         BuildUpdateByLoanKeySql(),
@@ -130,6 +135,16 @@ namespace kingsightapi.Services
                         loan,
                         auditDisplayName,
                         connection,
+                        cancellationToken);
+                }
+
+                if (rowsChanged > 0)
+                {
+                    await _notificationService.CreateDefaultDateUpdateAsync(
+                        loan.LoanCode,
+                        priorDefaultDate,
+                        loan.DefaultDate,
+                        auditDisplayName,
                         cancellationToken);
                 }
 
@@ -162,6 +177,36 @@ namespace kingsightapi.Services
             _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<DateTime?> TryGetPriorDefaultDateAsync(
+            SqlConnection connection,
+            DefaultDateCaptureUpdateItem loan,
+            CancellationToken cancellationToken)
+        {
+            var sql = loan.LoanKey > 0
+                ? $"""
+                  select top 1 r.default_date
+                  from {_sql.LoanAliasRelationship} r
+                  inner join {_sql.SharedDimLoan} l on l.loan_key = @loan_key and l.loan_code = r.loan_code
+                  """
+                : $"""
+                  select top 1 r.default_date
+                  from {_sql.LoanAliasRelationship} r
+                  where r.loan_code = @loan_code
+                  """;
+
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            if (result is null or DBNull)
+            {
+                return null;
+            }
+
+            return Convert.ToDateTime(result).Date;
         }
 
         private async Task EnsureSchemaAsync(CancellationToken cancellationToken)

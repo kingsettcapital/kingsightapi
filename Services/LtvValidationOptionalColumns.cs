@@ -2,6 +2,7 @@ namespace kingsightapi.Services
 {
     internal sealed class LtvValidationOptionalColumns
     {
+        public string? LtvColumn { get; init; }
         public string? UpdateReason { get; init; }
         public string? UpdateComment { get; init; }
         public string? AiComments { get; init; }
@@ -14,6 +15,11 @@ namespace kingsightapi.Services
         {
             return new LtvValidationOptionalColumns
             {
+                LtvColumn = await DimLoanColumnProbe.FindFirstAsync(
+                    connectionString,
+                    tableName,
+                    ["current_loan_to_value", "loan_to_value", "ltv", "loan_ltv"],
+                    cancellationToken),
                 UpdateReason = await DimLoanColumnProbe.FindFirstAsync(
                     connectionString,
                     tableName,
@@ -37,7 +43,37 @@ namespace kingsightapi.Services
             };
         }
 
-        public string BuildSelectFragment(string relationshipAlias = "a")
+        public string BuildUpdateSetClause(string relationshipAlias = "a")
+        {
+            var ltvSet = BuildLtvUpdateSetClause(relationshipAlias);
+            var optionalSet = BuildOptionalUpdateSetClause(relationshipAlias);
+            if (string.IsNullOrEmpty(ltvSet))
+            {
+                return optionalSet;
+            }
+
+            return optionalSet.Length == 0 ? ltvSet : ltvSet + optionalSet;
+        }
+
+        public string BuildLtvUpdateSetClause(string relationshipAlias = "a")
+        {
+            if (LtvColumn is null)
+            {
+                return string.Empty;
+            }
+
+            return $"{relationshipAlias}.{Bracket(LtvColumn)} = @ltv";
+        }
+
+        public string BuildOptionalUpdateSetClause(string relationshipAlias = "a")
+        {
+            var sets = new List<string>();
+            AddSet(sets, UpdateReason, relationshipAlias, "@update_reason");
+            AddSet(sets, UpdateComment, relationshipAlias, "@update_comment");
+            return sets.Count == 0 ? string.Empty : ",\n                    " + string.Join(",\n                    ", sets);
+        }
+
+        public string BuildOptionalSelectFragment(string relationshipAlias = "a")
         {
             var parts = new List<string>
             {
@@ -50,13 +86,17 @@ namespace kingsightapi.Services
             return ",\n                       " + string.Join(",\n                       ", parts);
         }
 
-        public string BuildUpdateSetClause(string relationshipAlias = "a")
-        {
-            var sets = new List<string>();
-            AddSet(sets, UpdateReason, relationshipAlias, "@update_reason");
-            AddSet(sets, UpdateComment, relationshipAlias, "@update_comment");
-            return sets.Count == 0 ? string.Empty : ",\n                    " + string.Join(",\n                    ", sets);
-        }
+        public string BuildLtvSelectExpression(string relationshipAlias = "a") =>
+            SelectAliasOrNull(LtvColumn, relationshipAlias, "ltv", "decimal(18, 4)");
+
+        public string BuildSelectFragment(string relationshipAlias = "a") =>
+            ",\n                       " + BuildLtvSelectExpression(relationshipAlias)
+            + BuildOptionalSelectFragment(relationshipAlias);
+
+        public string BuildLtvIsNotNullCondition(string relationshipAlias = "a") =>
+            LtvColumn is null
+                ? "1 = 0"
+                : $"{relationshipAlias}.{Bracket(LtvColumn)} is not null";
 
         private static void AddSet(List<string> sets, string? column, string alias, string parameter)
         {

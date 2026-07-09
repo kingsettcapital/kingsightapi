@@ -15,11 +15,19 @@ public sealed class FabricWarehouseTables
 
     public string Database => _options.Database;
 
+    public string SubjectiveInputDatabase => _options.SubjectiveInputDatabase;
+
     public string Mort(string table) => $"{Database}.mort.{table}";
 
     public string Input(string table) => $"{Database}.input.{table}";
 
-    /// <summary>Mortgage subjective input tables in <c>wh_gold1.subjective_input</c>.</summary>
+    /// <summary>Portal mortgage tables in <c>{SubjectiveInputDatabase}.mort</c> (CMHC upload history, etc.).</summary>
+    public string PortalMort(string table) => $"{SubjectiveInputDatabase}.mort.{table}";
+
+    /// <summary>Portal auth tables in <c>{SubjectiveInputDatabase}.input</c> (legacy UserMst, RoleMst).</summary>
+    public string PortalInput(string table) => $"{SubjectiveInputDatabase}.input.{table}";
+
+    /// <summary>User Management in <c>{SubjectiveInputDatabase}.subjective_input</c> (user_master, role_master).</summary>
     public string SubjectiveInput(string table) =>
         $"{_options.SubjectiveInputDatabase}.subjective_input.{table}";
 

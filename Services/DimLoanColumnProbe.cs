@@ -23,6 +23,10 @@ namespace kingsightapi.Services
                     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
                     return column;
                 }
+                catch (SqlException ex) when (ex.Number is 208 or 3701)
+                {
+                    return null;
+                }
                 catch (SqlException ex) when (ex.Number == 207)
                 {
                     // Try next candidate.
