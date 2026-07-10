@@ -117,6 +117,66 @@ namespace kingsightapi.Services
             sql.Append(')');
         }
 
+        /// <summary>
+        /// Status filter via EXISTS — avoids Fabric warehouse errors when adding dim_loan to the FROM clause.
+        /// </summary>
+        public static void AppendExistsSqlCondition(
+            StringBuilder sql,
+            string relationshipAlias,
+            string sharedDimLoanTable,
+            string loanStatusKeyColumn,
+            LoanStatusFilter filter,
+            string dimStatusTable)
+        {
+            if (!filter.HasFilter)
+            {
+                return;
+            }
+
+            const string dimLoanAlias = "dl";
+            var statusAlias = "ds";
+
+            sql.AppendLine();
+            sql.Append("  and exists (");
+            sql.Append("select 1 from ");
+            sql.Append(sharedDimLoanTable);
+            sql.Append($" {dimLoanAlias} where ");
+            sql.Append(SubjectiveInputSql.EqualsLoanCode(relationshipAlias, "loan_code", dimLoanAlias, "loan_code"));
+            sql.Append($" and {SubjectiveInputSql.DimLoanIsCurrent(dimLoanAlias)}");
+
+            if (filter.StatusNames.Count > 0)
+            {
+                sql.Append($" left join {dimStatusTable} {statusAlias}");
+                sql.Append($" on {dimLoanAlias}.{loanStatusKeyColumn} = {statusAlias}.status_key");
+            }
+
+            var conditions = new List<string>();
+            if (filter.StatusKeys.Count > 0)
+            {
+                var inList = string.Join(
+                    ", ",
+                    filter.StatusKeys.Select((_, i) => $"@status_key_{i}"));
+                conditions.Add($"{dimLoanAlias}.{loanStatusKeyColumn} in ({inList})");
+            }
+
+            if (filter.StatusNames.Count > 0)
+            {
+                var inList = string.Join(
+                    ", ",
+                    filter.StatusNames.Select((_, i) => $"@status_name_{i}"));
+                conditions.Add($"{statusAlias}.status_name in ({inList})");
+            }
+
+            if (filter.IncludeNull)
+            {
+                conditions.Add($"{dimLoanAlias}.{loanStatusKeyColumn} is null");
+            }
+
+            sql.Append(" and (");
+            sql.Append(string.Join(" or ", conditions));
+            sql.Append("))");
+        }
+
         public static void AddParameters(SqlCommand command, LoanStatusFilter filter)
         {
             for (var i = 0; i < filter.StatusKeys.Count; i++)

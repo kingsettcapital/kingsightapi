@@ -153,13 +153,15 @@ namespace kingsightapi.Services
 
             {
 
-                _logger.LogWarning(
+                _logger.LogError(
 
                     ex,
 
-                    "Loan security value query failed with status filter; retrying without status filter.");
+                    "Loan security value query failed with status filter (column={Column}).",
 
-                return await GetAllAsync(loanAliasIds, null);
+                    loanStatusKeyColumn);
+
+                throw;
 
             }
 
@@ -204,6 +206,7 @@ namespace kingsightapi.Services
                            s.status_name
                     from {_tblDimStatus} s
                     where isnull(s.is_active, 1) = 1
+                      and isnull(s.status_type, 'FUNDING') = 'FUNDING'
                     order by isnull(s.sort_order, 999999), s.status_name
                     """;
 
@@ -221,7 +224,7 @@ namespace kingsightapi.Services
 
                     var statusName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
 
-                    if (statusKey <= 0 || string.IsNullOrWhiteSpace(statusName))
+                    if (statusKey < 0 || string.IsNullOrWhiteSpace(statusName))
 
                     {
 

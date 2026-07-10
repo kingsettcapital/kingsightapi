@@ -76,10 +76,11 @@ namespace kingsightapi.Services
             }
             catch (SqlException ex) when (statusFilter.HasFilter)
             {
-                _logger.LogWarning(
+                _logger.LogError(
                     ex,
-                    "Default date capture query failed with status filter; retrying without status filter.");
-                return await GetAsync(loanAliasIds, null, cancellationToken);
+                    "Default date capture query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
             }
         }
 
@@ -252,11 +253,6 @@ namespace kingsightapi.Services
                      """);
             }
 
-            if (needsStatusJoin)
-            {
-                sql.AppendLine(_sql.SharedDimLoanJoinOnLoanCode());
-            }
-
             if (loanAliasIds is { Count: > 0 })
             {
                 sql.Append(" where m.loan_alias_id in (");
@@ -265,9 +261,10 @@ namespace kingsightapi.Services
 
                 if (needsStatusJoin)
                 {
-                    LoanStatusFilterParser.AppendSqlCondition(
+                    LoanStatusFilterParser.AppendExistsSqlCondition(
                         sql,
-                        "l",
+                        "r",
+                        _sql.SharedDimLoan,
                         loanStatusKeyColumn!,
                         statusFilter,
                         _sql.DimStatus);
@@ -276,9 +273,10 @@ namespace kingsightapi.Services
             else if (needsStatusJoin)
             {
                 sql.AppendLine(" where 1 = 1");
-                LoanStatusFilterParser.AppendSqlCondition(
+                LoanStatusFilterParser.AppendExistsSqlCondition(
                     sql,
-                    "l",
+                    "r",
+                    _sql.SharedDimLoan,
                     loanStatusKeyColumn!,
                     statusFilter,
                     _sql.DimStatus);

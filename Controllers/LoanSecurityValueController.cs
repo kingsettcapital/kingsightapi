@@ -46,7 +46,8 @@ namespace kingsightapi.Controllers
         }
 
         // GET: api/LoanSecurityValue?loanAliasIds=1&statuses=3&statuses=In%20Default
-        // statuses: dim_status.status_key (numeric) or status_name; (null) = loan has no status FK
+        // statuses: wh_gold1.shared.dim_status.status_key (numeric) or status_name;
+        // applied via shared.dim_loan.funding_status_code; (null) = no funding status on dim_loan
         [HttpGet]
         public async Task<ActionResult<List<LoanSecurityValueDto>>> GetAll(
             [FromQuery] long[]? loanAliasIds,

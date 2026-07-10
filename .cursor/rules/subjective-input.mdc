@@ -17,7 +17,7 @@ globs:
 
 # Subjective input schema (`wh_gold1.subjective_input`)
 
-Mortgage capture screens read/write **`wh_gold1.subjective_input`** tables. Status lookups use **`wh_gold1.shared.dim_status`**. Loan keys resolve via **`wh_gold1.shared.dim_loan`**.
+Mortgage capture screens read/write **`wh_gold1.subjective_input`** tables. Status lookups use **`wh_gold1.shared.dim_status`** (`status_key`, `status_code`, `status_name`, `status_type`). Loan status filters join **`wh_gold1.shared.dim_loan.funding_status_code`** to **`shared.dim_status.status_key`**. Loan keys resolve via **`wh_gold1.shared.dim_loan`**.
 
 **Do not** retarget Capital dashboard services, `ManagementSummaryService`, or `CapitalInvestorService` unless explicitly requested.
 
@@ -132,8 +132,11 @@ select * from wh_gold1.subjective_input.loan_alias_relationship;
 from wh_gold1.subjective_input.loan_alias_relationship r
 left join wh_gold1.subjective_input.loan_alias_master m
   on r.loan_alias_name = m.loan_alias_name
-left join wh_gold.mort.dim_loan l
-  on l.loan_code = r.loan_code and l.is_current = 1
+left join wh_gold1.shared.dim_loan l
+  on l.loan_code = r.loan_code
+ and cast(l.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')
+left join wh_gold1.shared.dim_status s
+  on l.funding_status_code = s.status_key
 ```
 
-Filter by alias id: `m.loan_alias_id in (@ids)`. Status filter: append `LoanStatusFilterParser` on `l`.
+Filter by alias id: `m.loan_alias_id in (@ids)`. Status filter: append `LoanStatusFilterParser` on `l` using column `funding_status_code` and `shared.dim_status`.

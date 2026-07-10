@@ -118,10 +118,11 @@ namespace kingsightapi.Services
             }
             catch (SqlException ex) when (statusFilter.HasFilter)
             {
-                _logger.LogWarning(
+                _logger.LogError(
                     ex,
-                    "Tax arrears query failed with status filter; retrying without status filter.");
-                return await GetAsync(loanAliasIds, null, cancellationToken);
+                    "Tax arrears query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
             }
         }
 
@@ -322,13 +323,25 @@ namespace kingsightapi.Services
 
                 if (needsStatusJoin)
                 {
-                    LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn!, statusFilter, _tblDimStatus);
+                    LoanStatusFilterParser.AppendExistsSqlCondition(
+                        sql,
+                        "b",
+                        _tblDimLoan,
+                        loanStatusKeyColumn!,
+                        statusFilter,
+                        _tblDimStatus);
                 }
             }
             else if (needsStatusJoin)
             {
                 sql.AppendLine(" where 1 = 1");
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn!, statusFilter, _tblDimStatus);
+                LoanStatusFilterParser.AppendExistsSqlCondition(
+                    sql,
+                    "b",
+                    _tblDimLoan,
+                    loanStatusKeyColumn!,
+                    statusFilter,
+                    _tblDimStatus);
             }
 
             sql.AppendLine();

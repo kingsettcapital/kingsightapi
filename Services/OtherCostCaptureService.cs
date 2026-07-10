@@ -148,13 +148,15 @@ namespace kingsightapi.Services
 
             {
 
-                _logger.LogWarning(
+                _logger.LogError(
 
                     ex,
 
-                    "Other cost capture query failed with status filter; retrying without status filter.");
+                    "Other cost capture query failed with status filter (column={Column}).",
 
-                return await GetAsync(loanAliasId, null, cancellationToken);
+                    loanStatusKeyColumn);
+
+                throw;
 
             }
 
@@ -380,7 +382,7 @@ namespace kingsightapi.Services
 
                 $"""
 
-                 select {SubjectiveInputSql.LoanKeySelect()},
+                 select {SubjectiveInputSql.LoanKeySelect("r", "l")},
 
                         r.loan_code,
 
@@ -399,6 +401,8 @@ namespace kingsightapi.Services
                         user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression()}
 
                  from {_sql.LoanAliasRelationship} r
+
+                 {_sql.SharedDimLoanOuterApplyOnLoanCode("r", "l")}
 
                  """);
 
@@ -428,29 +432,21 @@ namespace kingsightapi.Services
 
             {
 
-                sql.AppendLine(_sql.SharedDimLoanJoinOnLoanCode());
-
                 sql.AppendLine(" where 1 = 1");
 
-                LoanStatusFilterParser.AppendSqlCondition(
+                LoanStatusFilterParser.AppendExistsSqlCondition(
 
                     sql,
 
-                    "l",
+                    "r",
+
+                    _sql.SharedDimLoan,
 
                     loanStatusKeyColumn,
 
                     statusFilter,
 
                     _sql.DimStatus);
-
-            }
-
-            else
-
-            {
-
-                sql.AppendLine(_sql.SharedDimLoanJoinOnLoanCode("r", "l"));
 
             }
 

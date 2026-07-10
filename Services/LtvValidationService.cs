@@ -130,16 +130,11 @@ namespace kingsightapi.Services
             }
             catch (SqlException ex) when (statusFilter.HasFilter)
             {
-                _logger.LogWarning(
+                _logger.LogError(
                     ex,
-                    "LTV validation query failed with status filter; retrying without status filter.");
-
-                return await ExecuteListQueryAsync(
-                    schema,
-                    loanAliasIds,
-                    LoanStatusFilterParser.Parse(null),
-                    null,
-                    cancellationToken);
+                    "LTV validation query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
             }
         }
 
@@ -408,12 +403,6 @@ namespace kingsightapi.Services
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn)
         {
-            IReadOnlyList<string>? dimLoanExtraColumns = null;
-            if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
-            {
-                dimLoanExtraColumns = [loanStatusKeyColumn];
-            }
-
             var sql = new StringBuilder($"""
                 select {SubjectiveInputSql.LoanKeySelect("a", "l")},
                        parent_loan_code = isnull(l.parent_loan_code, ''),
@@ -432,27 +421,23 @@ namespace kingsightapi.Services
                 from {_loanAliasRelationship} a
                 left join {_loanAliasMaster} b
                     on a.loan_alias_name = b.loan_alias_name
-                {_subjectiveInputSql.SharedDimLoanOuterApplyOnLoanCode("a", "l", dimLoanExtraColumns)}
+                {_subjectiveInputSql.SharedDimLoanOuterApplyOnLoanCode("a", "l")}
                 {_investorJoinSql}
                 """);
 
+            sql.AppendLine();
+            sql.Append(" where 1 = 1");
+            AppendLoanAliasFilter(sql, loanAliasIds);
+
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                sql.AppendLine();
-                sql.Append(" where 1 = 1");
-                AppendLoanAliasFilter(sql, loanAliasIds);
-                LoanStatusFilterParser.AppendSqlCondition(
+                LoanStatusFilterParser.AppendExistsSqlCondition(
                     sql,
-                    "l",
+                    "a",
+                    _subjectiveInputSql.SharedDimLoan,
                     loanStatusKeyColumn,
                     statusFilter,
                     _tblDimStatus);
-            }
-            else
-            {
-                sql.AppendLine();
-                sql.Append(" where 1 = 1");
-                AppendLoanAliasFilter(sql, loanAliasIds);
             }
 
             sql.AppendLine();
