@@ -12,6 +12,7 @@ namespace kingsightapi.Entities
         public decimal? Exposure { get; init; }
         public int? Ranking { get; init; }
         public decimal? Ltv { get; init; }
+        public decimal? PriorLtv { get; init; }
         public string? UpdateReason { get; init; }
         public string? UpdateComment { get; init; }
         public string? AiComments { get; init; }

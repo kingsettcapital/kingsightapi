@@ -414,6 +414,7 @@ namespace kingsightapi.Services
                        a.exposure,
                        a.ranking,
                        {schema.Optional.BuildLtvSelectExpression("a")},
+                       {schema.Optional.BuildPriorLtvSelectExpression("a")},
                        {schema.QrSlideLinkSelect},
                        user_updated_by = {schema.Audit.BuildSelectUpdatedByExpression("a")},
                        user_updated_date = {schema.Audit.BuildSelectUpdatedDtmExpression("a")}
@@ -631,6 +632,7 @@ namespace kingsightapi.Services
                 Exposure = GetNullableDecimal(reader, "exposure"),
                 Ranking = GetNullableInt32(reader, "ranking"),
                 Ltv = GetNullableDecimal(reader, "ltv"),
+                PriorLtv = GetNullableDecimal(reader, "prior_ltv"),
                 UpdateReason = GetNullableString(reader, "update_reason"),
                 UpdateComment = GetNullableString(reader, "update_comment"),
                 AiComments = GetNullableString(reader, "ai_comments"),

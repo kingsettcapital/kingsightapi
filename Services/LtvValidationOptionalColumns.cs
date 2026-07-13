@@ -3,6 +3,7 @@ namespace kingsightapi.Services
     internal sealed class LtvValidationOptionalColumns
     {
         public string? LtvColumn { get; init; }
+        public string? PriorLtvColumn { get; init; }
         public string? UpdateReason { get; init; }
         public string? UpdateComment { get; init; }
         public string? AiComments { get; init; }
@@ -13,13 +14,33 @@ namespace kingsightapi.Services
             string tableName,
             CancellationToken cancellationToken = default)
         {
+            var currentLoanToValue = await DimLoanColumnProbe.FindFirstAsync(
+                connectionString,
+                tableName,
+                ["current_loan_to_value"],
+                cancellationToken);
+            var loanToValue = await DimLoanColumnProbe.FindFirstAsync(
+                connectionString,
+                tableName,
+                ["loan_to_value"],
+                cancellationToken);
+            var legacyLtv = await DimLoanColumnProbe.FindFirstAsync(
+                connectionString,
+                tableName,
+                ["ltv", "loan_ltv"],
+                cancellationToken);
+
+            var currentLtvColumn = currentLoanToValue ?? loanToValue ?? legacyLtv;
+            string? priorLtvColumn = null;
+            if (currentLoanToValue is not null && loanToValue is not null)
+            {
+                priorLtvColumn = loanToValue;
+            }
+
             return new LtvValidationOptionalColumns
             {
-                LtvColumn = await DimLoanColumnProbe.FindFirstAsync(
-                    connectionString,
-                    tableName,
-                    ["current_loan_to_value", "loan_to_value", "ltv", "loan_ltv"],
-                    cancellationToken),
+                LtvColumn = currentLtvColumn,
+                PriorLtvColumn = priorLtvColumn,
                 UpdateReason = await DimLoanColumnProbe.FindFirstAsync(
                     connectionString,
                     tableName,
@@ -89,8 +110,12 @@ namespace kingsightapi.Services
         public string BuildLtvSelectExpression(string relationshipAlias = "a") =>
             SelectAliasOrNull(LtvColumn, relationshipAlias, "ltv", "decimal(18, 4)");
 
+        public string BuildPriorLtvSelectExpression(string relationshipAlias = "a") =>
+            SelectAliasOrNull(PriorLtvColumn, relationshipAlias, "prior_ltv", "decimal(18, 4)");
+
         public string BuildSelectFragment(string relationshipAlias = "a") =>
             ",\n                       " + BuildLtvSelectExpression(relationshipAlias)
+            + ",\n                       " + BuildPriorLtvSelectExpression(relationshipAlias)
             + BuildOptionalSelectFragment(relationshipAlias);
 
         public string BuildLtvIsNotNullCondition(string relationshipAlias = "a") =>
