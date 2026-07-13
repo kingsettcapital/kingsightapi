@@ -21,6 +21,7 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly string _investorAliasMasterTable;
+        private readonly string _investorAliasRelationshipTable;
         private readonly ILogger<InvestorAliasService> _logger;
 
         private bool _schemaProbed;
@@ -33,6 +34,7 @@ namespace kingsightapi.Services
             _logger = logger;
 
             _investorAliasMasterTable = tables.SubjectiveInput("investor_alias_master");
+            _investorAliasRelationshipTable = tables.SubjectiveInput("investor_alias_relationship");
 
             NextIdSql = $"""
                 select isnull(max(investor_alias_id), 0) + 1
@@ -143,29 +145,94 @@ namespace kingsightapi.Services
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(BuildUpdateSql(), connection)
+            try
+            {
+                var previousName = await GetCurrentNameAsync(connection, transaction, investorAliasId, cancellationToken);
+
+                await using var command = new SqlCommand(BuildUpdateSql(), connection, transaction)
+                {
+                    CommandType = System.Data.CommandType.Text
+                };
+
+                command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
+                command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
+                _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+                var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+                if (affectedRows == 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _logger.LogWarning("No row updated for investor_alias_id {InvestorAliasId}.", investorAliasId);
+                    return false;
+                }
+
+                var cascadedRows = 0;
+                if (!string.IsNullOrWhiteSpace(previousName)
+                    && !string.Equals(previousName, request.InvestorAliasName, StringComparison.Ordinal))
+                {
+                    cascadedRows = await CascadeRelationshipRenameAsync(
+                        connection, transaction, previousName!, request.InvestorAliasName, cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Updated investor alias row {InvestorAliasId} by {AuditUser}. Master rows: {AffectedRows}, linked investors updated: {CascadedRows}",
+                    investorAliasId,
+                    auditDisplayName,
+                    affectedRows,
+                    cascadedRows);
+                return true;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        private async Task<string?> GetCurrentNameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            long investorAliasId,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(
+                $"select investor_alias_name from {_investorAliasMasterTable} where investor_alias_id = @investor_alias_id",
+                connection,
+                transaction)
             {
                 CommandType = System.Data.CommandType.Text
             };
-
             command.Parameters.AddWithValue("@investor_alias_id", investorAliasId);
-            command.Parameters.AddWithValue("@investor_alias_name", request.InvestorAliasName);
-            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
-            var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
-            if (affectedRows > 0)
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
+        }
+
+        private async Task<int> CascadeRelationshipRenameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string previousName,
+            string newName,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                update {_investorAliasRelationshipTable}
+                set investor_alias_name = @new_name
+                where cast(investor_alias_name as varchar(200)) collate database_default = cast(@old_name as varchar(200)) collate database_default
+                """;
+
+            await using var command = new SqlCommand(sql, connection, transaction)
             {
-                _logger.LogInformation(
-                    "Updated investor alias row {InvestorAliasId} by {AuditUser}. Rows affected: {AffectedRows}",
-                    investorAliasId,
-                    auditDisplayName,
-                    affectedRows);
-                return true;
-            }
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@new_name", newName);
+            command.Parameters.AddWithValue("@old_name", previousName);
 
-            _logger.LogWarning("No row updated for investor_alias_id {InvestorAliasId}.", investorAliasId);
-            return false;
+            return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task<bool> DeleteAsync(long investorAliasId, CancellationToken cancellationToken = default)

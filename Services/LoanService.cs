@@ -115,8 +115,23 @@ namespace kingsightapi.Services
             var affectedRows = 0;
             foreach (var loan in request.Loans)
             {
-                if (!loan.LoanAliasKey.HasValue)
+                // A missing or non-positive alias key means "remove the assigned alias".
+                var isClearingAlias = !loan.LoanAliasKey.HasValue || loan.LoanAliasKey.Value <= 0;
+
+                if (isClearingAlias)
                 {
+                    var clearedRows = loan.LoanKey > 0
+                        ? await ExecuteClearAliasAsync(
+                            BuildClearAliasByLoanKeySql(), loan, auditDisplayName, connection, cancellationToken)
+                        : 0;
+
+                    if (clearedRows == 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
+                    {
+                        clearedRows = await ExecuteClearAliasAsync(
+                            BuildClearAliasByLoanCodeSql(), loan, auditDisplayName, connection, cancellationToken);
+                    }
+
+                    affectedRows += clearedRows;
                     continue;
                 }
 
@@ -213,6 +228,24 @@ namespace kingsightapi.Services
                         : loan.LateInterestOffNote.Trim());
             }
 
+            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<int> ExecuteClearAliasAsync(
+            string sql,
+            LoanUpdateRequestDto loan,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(sql, connection)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
             _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
@@ -342,6 +375,7 @@ namespace kingsightapi.Services
                        loan_alias_key = m.loan_alias_id,
                        loan_alias_name = isnull(r.loan_alias_name, ''),
                        investor_name = isnull(i.investor_name, ''),
+                       investor_alias_name = isnull(d.investor_alias_name, ''),
                        loan_ranking = {BuildRankingSelectExpression()},
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
@@ -352,6 +386,7 @@ namespace kingsightapi.Services
                 left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
                 left join {_sql.SharedDimLoan} l on r.loan_code = l.loan_code
                 left join {_sql.MortgageDimInvestor} i on l.investor_code = i.investor_code
+                {_sql.InvestorAliasRelationshipJoinOnInvestorCode("l", "d")}
                 order by r.loan_code
                 """;
 
@@ -374,6 +409,24 @@ namespace kingsightapi.Services
                 from {_sql.LoanAliasRelationship} r
                 inner join {_sql.LoanAliasMaster} m
                     on m.loan_alias_id = @loan_alias_key
+                where r.loan_code = @loan_code
+                """;
+
+        private string BuildClearAliasByLoanKeySql() =>
+            $"""
+                update r
+                set r.loan_alias_name = null{_auditColumns.BuildUpdateSetClause()}
+                from {_sql.LoanAliasRelationship} r
+                inner join {_sql.SharedDimLoan} l
+                    on l.loan_key = @loan_key
+                   and l.loan_code = r.loan_code
+                """;
+
+        private string BuildClearAliasByLoanCodeSql() =>
+            $"""
+                update r
+                set r.loan_alias_name = null{_auditColumns.BuildUpdateSetClause()}
+                from {_sql.LoanAliasRelationship} r
                 where r.loan_code = @loan_code
                 """;
 
@@ -405,6 +458,7 @@ namespace kingsightapi.Services
                 LoanAliasKey = reader.GetNullableInt64("loan_alias_key"),
                 LoanAliasName = reader.GetStringOrEmpty("loan_alias_name"),
                 InvestorName = reader.GetStringOrEmpty("investor_name"),
+                InvestorAliasName = reader.GetStringOrEmpty("investor_alias_name"),
                 LoanRanking = ranking,
                 DummyLoanLink = reader.GetStringOrEmpty("dummy_loan_link"),
                 IsLoanInterestApplicable = interestApplicable,

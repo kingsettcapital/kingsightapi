@@ -29,6 +29,7 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly string _loanAliasMasterTable;
+        private readonly string _loanAliasRelationshipTable;
         private readonly ILogger<LoanAliasService> _logger;
 
         private bool _schemaProbed;
@@ -41,6 +42,7 @@ namespace kingsightapi.Services
             _logger = logger;
 
             _loanAliasMasterTable = tables.SubjectiveInput("loan_alias_master");
+            _loanAliasRelationshipTable = tables.SubjectiveInput("loan_alias_relationship");
 
             NextIdSql = $"""
                 select isnull(max(loan_alias_id), 0) + 1
@@ -151,29 +153,94 @@ namespace kingsightapi.Services
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
-            await using var command = new SqlCommand(BuildUpdateSql(), connection)
+            try
+            {
+                var previousName = await GetCurrentNameAsync(connection, transaction, loanAliasId, cancellationToken);
+
+                await using var command = new SqlCommand(BuildUpdateSql(), connection, transaction)
+                {
+                    CommandType = System.Data.CommandType.Text
+                };
+
+                command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
+                command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
+                _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+                var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+                if (affectedRows == 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _logger.LogWarning("No row updated for loan_alias_id {LoanAliasId}.", loanAliasId);
+                    return false;
+                }
+
+                var cascadedRows = 0;
+                if (!string.IsNullOrWhiteSpace(previousName)
+                    && !string.Equals(previousName, request.LoanAliasName, StringComparison.Ordinal))
+                {
+                    cascadedRows = await CascadeRelationshipRenameAsync(
+                        connection, transaction, previousName!, request.LoanAliasName, cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Updated loan alias row {LoanAliasId} by {AuditUser}. Master rows: {AffectedRows}, linked loans updated: {CascadedRows}",
+                    loanAliasId,
+                    auditDisplayName,
+                    affectedRows,
+                    cascadedRows);
+                return true;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        private async Task<string?> GetCurrentNameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            long loanAliasId,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(
+                $"select loan_alias_name from {_loanAliasMasterTable} where loan_alias_id = @loan_alias_id",
+                connection,
+                transaction)
             {
                 CommandType = System.Data.CommandType.Text
             };
-
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
-            command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
-            var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
-            if (affectedRows > 0)
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
+        }
+
+        private async Task<int> CascadeRelationshipRenameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string previousName,
+            string newName,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                update {_loanAliasRelationshipTable}
+                set loan_alias_name = @new_name
+                where cast(loan_alias_name as varchar(200)) collate database_default = cast(@old_name as varchar(200)) collate database_default
+                """;
+
+            await using var command = new SqlCommand(sql, connection, transaction)
             {
-                _logger.LogInformation(
-                    "Updated loan alias row {LoanAliasId} by {AuditUser}. Rows affected: {AffectedRows}",
-                    loanAliasId,
-                    auditDisplayName,
-                    affectedRows);
-                return true;
-            }
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@new_name", newName);
+            command.Parameters.AddWithValue("@old_name", previousName);
 
-            _logger.LogWarning("No row updated for loan_alias_id {LoanAliasId}.", loanAliasId);
-            return false;
+            return await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
         public async Task<bool> DeleteAsync(long loanAliasId, CancellationToken cancellationToken = default)

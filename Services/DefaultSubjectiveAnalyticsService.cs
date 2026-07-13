@@ -259,7 +259,9 @@ namespace kingsightapi.Services
         private string BuildExitDateSetClause() =>
             _exitDateIsTextColumn
                 ? "exit_date = @subjective_exit_date"
-                : "exit_date = try_convert(date, @subjective_exit_date, 103)";
+                : "exit_date = coalesce("
+                    + "try_convert(date, @subjective_exit_date, 23), "   // ISO yyyy-MM-dd (native date picker)
+                    + "try_convert(date, @subjective_exit_date, 103))";  // legacy dd/MM/yyyy
 
         private string BuildListSql(
             IReadOnlyList<int>? loanAliasIds,
