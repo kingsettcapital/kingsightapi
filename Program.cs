@@ -75,6 +75,7 @@ namespace kingsightapi
             builder.Services.AddSingleton<IDefaultSubjectiveAnalyticsService, DefaultSubjectiveAnalyticsService>();
             builder.Services.AddSingleton<ITaxArrearsService, TaxArrearsService>();
             builder.Services.AddSingleton<ILtvValidationService, LtvValidationService>();
+            builder.Services.AddSingleton<INonKsLoanAliasBridge, NonKsLoanAliasBridge>();
             builder.Services.AddSingleton<INonKsServicedLoansService, NonKsServicedLoansService>();
             builder.Services.AddSingleton<INotificationService, NotificationService>();
             builder.Services.AddSingleton<IManagementSummaryService, ManagementSummaryService>();

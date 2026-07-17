@@ -29,6 +29,7 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly string _tblExternalServicedLoan;
+        private readonly INonKsLoanAliasBridge _loanAliasBridge;
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
         private ExternalServicedLoanColumnMap? _columns;
@@ -36,11 +37,13 @@ namespace kingsightapi.Services
         public NonKsServicedLoansService(
             IConfiguration configuration,
             ILogger<NonKsServicedLoansService> logger,
-            FabricWarehouseTables tables)
+            FabricWarehouseTables tables,
+            INonKsLoanAliasBridge loanAliasBridge)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _loanAliasBridge = loanAliasBridge;
             _tblExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
         }
 
@@ -124,6 +127,24 @@ namespace kingsightapi.Services
                 columns.AddInsertAuditParameters(command, loan.UserUpdatedBy, auditUtc);
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
+
+                try
+                {
+                    await _loanAliasBridge.EnsureRelationshipRowAsync(
+                        connection,
+                        extLoanCode,
+                        loan.Description,
+                        ResolveLoanAliasName(loan),
+                        loan.UserUpdatedBy,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Non-KS loan {ExtLoanCode} created but failed to register on Loan Alias Assignment.",
+                        extLoanCode);
+                }
 
                 var row = await ReadByKeyAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken);
                 if (row is null)

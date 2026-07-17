@@ -17,6 +17,7 @@ namespace kingsightapi.Services
         private readonly string _connectionString;
         private readonly SubjectiveInputSql _sql;
         private readonly INotificationService _notificationService;
+        private readonly INonKsLoanAliasBridge _nonKsLoanAliasBridge;
         private readonly ILogger<LoanService> _logger;
 
         private bool _schemaProbed;
@@ -30,11 +31,13 @@ namespace kingsightapi.Services
             IConfiguration configuration,
             FabricWarehouseTables tables,
             INotificationService notificationService,
+            INonKsLoanAliasBridge nonKsLoanAliasBridge,
             ILogger<LoanService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _notificationService = notificationService;
+            _nonKsLoanAliasBridge = nonKsLoanAliasBridge;
             _logger = logger;
             _sql = new SubjectiveInputSql(tables);
         }
@@ -47,6 +50,15 @@ namespace kingsightapi.Services
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await _nonKsLoanAliasBridge.EnsureMissingRelationshipRowsAsync(connection, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync Non-KS loans into loan_alias_relationship before list.");
+            }
 
             await using var command = new SqlCommand(BuildListSql(), connection)
             {
@@ -132,6 +144,10 @@ namespace kingsightapi.Services
                     }
 
                     affectedRows += clearedRows;
+                    if (clearedRows > 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
+                    {
+                        await TrySyncExternalAliasAsync(connection, loan.LoanCode, null, cancellationToken);
+                    }
                     continue;
                 }
 
@@ -172,6 +188,15 @@ namespace kingsightapi.Services
                 }
 
                 affectedRows += rowsChanged;
+
+                if (rowsChanged > 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
+                {
+                    var aliasName = await TryGetAliasNameByKeyAsync(
+                        connection,
+                        loan.LoanAliasKey!.Value,
+                        cancellationToken);
+                    await TrySyncExternalAliasAsync(connection, loan.LoanCode, aliasName, cancellationToken);
+                }
             }
 
             if (affectedRows > 0)
@@ -185,6 +210,46 @@ namespace kingsightapi.Services
 
             _logger.LogWarning("No loan rows updated.");
             return false;
+        }
+
+        private async Task TrySyncExternalAliasAsync(
+            SqlConnection connection,
+            string loanCode,
+            string? loanAliasName,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await _nonKsLoanAliasBridge.SyncAliasToExternalServicedLoanAsync(
+                    connection,
+                    loanCode,
+                    loanAliasName,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Failed to sync loan alias to Non-KS external_serviced_loan for {LoanCode}.",
+                    loanCode);
+            }
+        }
+
+        private async Task<string?> TryGetAliasNameByKeyAsync(
+            SqlConnection connection,
+            long loanAliasKey,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(
+                $"""
+                    select top 1 loan_alias_name
+                    from {_sql.LoanAliasMaster}
+                    where loan_alias_id = @loan_alias_key
+                    """,
+                connection);
+            command.Parameters.AddWithValue("@loan_alias_key", loanAliasKey);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
         }
 
         private async Task<int> ExecuteUpdateAsync(

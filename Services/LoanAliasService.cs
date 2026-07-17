@@ -30,15 +30,21 @@ namespace kingsightapi.Services
         private readonly string _connectionString;
         private readonly string _loanAliasMasterTable;
         private readonly string _loanAliasRelationshipTable;
+        private readonly INonKsLoanAliasBridge _nonKsLoanAliasBridge;
         private readonly ILogger<LoanAliasService> _logger;
 
         private bool _schemaProbed;
         private SubjectiveInputMasterAuditColumns _auditColumns = new();
 
-        public LoanAliasService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<LoanAliasService> logger)
+        public LoanAliasService(
+            IConfiguration configuration,
+            FabricWarehouseTables tables,
+            INonKsLoanAliasBridge nonKsLoanAliasBridge,
+            ILogger<LoanAliasService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _nonKsLoanAliasBridge = nonKsLoanAliasBridge;
             _logger = logger;
 
             _loanAliasMasterTable = tables.SubjectiveInput("loan_alias_master");
@@ -181,6 +187,8 @@ namespace kingsightapi.Services
                     && !string.Equals(previousName, request.LoanAliasName, StringComparison.Ordinal))
                 {
                     cascadedRows = await CascadeRelationshipRenameAsync(
+                        connection, transaction, previousName!, request.LoanAliasName, cancellationToken);
+                    cascadedRows += await _nonKsLoanAliasBridge.CascadeAliasRenameOnExternalServicedLoanAsync(
                         connection, transaction, previousName!, request.LoanAliasName, cancellationToken);
                 }
 

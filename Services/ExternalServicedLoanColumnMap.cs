@@ -4,9 +4,9 @@ namespace kingsightapi.Services
 {
     /// <summary>
     /// Physical columns on wh_gold1.subjective_input.external_serviced_loan.
-    /// Loan Alias and Investor Alias dropdown values are persisted on this table only
-    /// (e.g. loan_name / loan_alias_name, investor / investor_alias_name).
-    /// Do not join or write loan_alias_relationship / investor_alias_relationship.
+    /// Loan Alias / Investor values are stored on this table for Non-KS grids.
+    /// Loan Alias Assignment also maintains loan_alias_relationship stubs for Non-KS codes
+    /// and syncs assigned aliases back into loan_alias_name here.
     /// </summary>
     internal sealed class ExternalServicedLoanColumnMap
     {
