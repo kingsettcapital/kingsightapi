@@ -45,6 +45,48 @@ namespace kingsightapi.Controllers
             }
         }
 
+        // POST: api/Investors
+        [HttpPost]
+        public async Task<ActionResult<InvestorDto>> Create(
+            [FromBody] InvestorCreateRequest? request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null || string.IsNullOrWhiteSpace(request.InvestorName))
+            {
+                return BadRequest("Investor name is required.");
+            }
+
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.CreatedBy,
+                "createdBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
+            try
+            {
+                var created = await _service.CreateAsync(request, auditDisplayName!, cancellationToken);
+                return StatusCode(StatusCodes.Status201Created, created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Create investor validation failed");
+                return BadRequest(ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Create investor cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating investor");
+                return StatusCode(500, "An error occurred while creating the investor.");
+            }
+        }
+
         // PUT: api/Investors
         [HttpPut]
         public async Task<IActionResult> Update(

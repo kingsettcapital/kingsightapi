@@ -5,7 +5,7 @@ namespace kingsightapi.Entities
 {
     public sealed class NonKsServicedLoanLookupsDto
     {
-        public string NextExtLoanCode { get; init; } = "NONKS-1";
+        public string NextExtLoanCode { get; init; } = "NKSLn-1";
     }
 
     public sealed class NonKsServicedLoanRowDto
@@ -21,9 +21,10 @@ namespace kingsightapi.Entities
         public string? ExtLoanCode { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
-        /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>
+        /// <summary>Investor name selected on Non-KS entry (maps to investor / investor_alias_name).</summary>
         public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
+        public string? InvestorCode { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
         public DateTime? InterestOffDate { get; init; }
@@ -60,9 +61,10 @@ namespace kingsightapi.Entities
         public string? ExtLoanCode { get; init; }
         public string? ServicerId { get; init; }
         public string? Description { get; init; }
-        /// <summary>Investor alias dropdown value (maps to investor_alias_name).</summary>
+        /// <summary>Investor name selected on Non-KS entry (maps to investor / investor_alias_name).</summary>
         public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
+        public string? InvestorCode { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
         public DateTime? InterestOffDate { get; init; }

@@ -151,7 +151,8 @@ namespace kingsightapi.Services
             AddWriteColumn(columns, values, AsAtDate, "@as_at_date");
             AddWriteColumn(columns, values, ServicerId, "@servicer_id");
             AddWriteColumn(columns, values, Description, "@description");
-            AddWriteColumn(columns, values, InvestorAliasName, "@investor_alias_name");
+                AddWriteColumn(columns, values, InvestorAliasName, "@investor_alias_name");
+            AddWriteColumn(columns, values, InvestorCode, "@investor_code");
             AddWriteColumn(columns, values, DefaultDate, "@default_date");
             AddWriteColumn(columns, values, MaturityDate, "@maturity_date");
             AddWriteColumn(columns, values, InterestOffDate, "@interest_off_date");
@@ -192,6 +193,7 @@ namespace kingsightapi.Services
             AddUpdateSet(sets, ServicerId, "@servicer_id");
             AddUpdateSet(sets, Description, "@description");
             AddUpdateSet(sets, InvestorAliasName, "@investor_alias_name");
+            AddUpdateSet(sets, InvestorCode, "@investor_code");
             AddUpdateSet(sets, DefaultDate, "@default_date");
             AddUpdateSet(sets, MaturityDate, "@maturity_date");
             AddUpdateSet(sets, InterestOffDate, "@interest_off_date");

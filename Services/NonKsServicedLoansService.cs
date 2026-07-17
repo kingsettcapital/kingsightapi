@@ -25,7 +25,7 @@ namespace kingsightapi.Services
 
     public sealed class NonKsServicedLoansService : INonKsServicedLoansService
     {
-        private const string ExtLoanCodePrefix = "NONKS-";
+        private const string ExtLoanCodePrefix = "NKSLn-";
 
         private readonly string _connectionString;
         private readonly string _tblExternalServicedLoan;
@@ -243,11 +243,13 @@ namespace kingsightapi.Services
             var sql = $"""
                 select [{columns.ExtLoanCode}]
                 from {_tblExternalServicedLoan}
-                where [{columns.ExtLoanCode}] like @prefix
+                where [{columns.ExtLoanCode}] like @prefixNew
+                   or [{columns.ExtLoanCode}] like @prefixLegacy
                 """;
 
             await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@prefix", $"{ExtLoanCodePrefix}%");
+            command.Parameters.AddWithValue("@prefixNew", $"{ExtLoanCodePrefix}%");
+            command.Parameters.AddWithValue("@prefixLegacy", "NONKS-%");
 
             var maxNumber = 0;
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -277,7 +279,7 @@ namespace kingsightapi.Services
                 return 0;
             }
 
-            var match = Regex.Match(extLoanCode.Trim(), @"^NONKS-(\d+)$", RegexOptions.IgnoreCase);
+            var match = Regex.Match(extLoanCode.Trim(), @"^(?:NKSLn|NONKS)-(\d+)$", RegexOptions.IgnoreCase);
             return match.Success && int.TryParse(match.Groups[1].Value, out var parsed) ? parsed : 0;
         }
 
@@ -370,6 +372,13 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue("@investor_alias_name", ToDbValue(investorAliasName));
             }
 
+            if (columns.InvestorCode is not null)
+            {
+                command.Parameters.AddWithValue(
+                    "@investor_code",
+                    ToDbValue(NormalizeOptional(loan.InvestorCode)));
+            }
+
             AddOptionalDate(command, columns.DefaultDate, "@default_date", loan.DateOfDefault);
             AddOptionalDate(command, columns.MaturityDate, "@maturity_date", loan.MaturityDate);
             AddOptionalDate(command, columns.InterestOffDate, "@interest_off_date", loan.InterestOffDate);
@@ -396,8 +405,8 @@ namespace kingsightapi.Services
             var extLoanCode = GetNullableString(reader, "ext_loan_code");
             var asAtDate = GetNullableDate(reader, "as_at_date");
             var loanAliasName = GetNullableString(reader, "loan_alias_name");
-            var investorAliasName = GetNullableString(reader, "investor_alias_name")
-                ?? GetNullableString(reader, "investor_code");
+            var investorName = GetNullableString(reader, "investor_alias_name");
+            var investorCode = GetNullableString(reader, "investor_code");
 
             return new NonKsServicedLoanRowDto
             {
@@ -410,8 +419,9 @@ namespace kingsightapi.Services
                 ExtLoanCode = extLoanCode,
                 ServicerId = GetNullableString(reader, "servicer_id"),
                 Description = GetNullableString(reader, "description"),
-                InvestorAliasName = investorAliasName,
-                Investor = investorAliasName,
+                InvestorAliasName = investorName,
+                Investor = investorName,
+                InvestorCode = investorCode,
                 DateOfDefault = GetNullableDate(reader, "default_date"),
                 MaturityDate = GetNullableDate(reader, "maturity_date"),
                 InterestOffDate = GetNullableDate(reader, "interest_off_date"),

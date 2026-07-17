@@ -2,17 +2,29 @@ using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text.RegularExpressions;
 
 namespace kingsightapi.Services
 {
     public interface IInvestorService
     {
         Task<IReadOnlyList<InvestorDto>> GetAllAsync(CancellationToken cancellationToken = default);
-        Task<bool> UpdateAsync(InvestorUpdateBatchRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
+
+        Task<InvestorDto> CreateAsync(
+            InvestorCreateRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> UpdateAsync(
+            InvestorUpdateBatchRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default);
     }
 
     public sealed class InvestorService : IInvestorService
     {
+        private const string ExtInvestorCodePrefix = "NKSInv-";
+
         private readonly string _connectionString;
         private readonly SubjectiveInputSql _sql;
         private readonly ILogger<InvestorService> _logger;
@@ -51,6 +63,53 @@ namespace kingsightapi.Services
 
             _logger.LogInformation("Retrieved {Count} investor alias relationship rows.", rows.Count);
             return rows;
+        }
+
+        public async Task<InvestorDto> CreateAsync(
+            InvestorCreateRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
+        {
+            var investorName = request.InvestorName?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(investorName))
+            {
+                throw new InvalidOperationException("Investor name is required.");
+            }
+
+            await EnsureSchemaAsync(cancellationToken);
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var investorCode = await GetNextExtInvestorCodeAsync(connection, cancellationToken);
+            var auditUtc = DateTime.UtcNow;
+
+            await using var command = new SqlCommand(BuildInsertSql(), connection)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@investor_code", investorCode);
+            command.Parameters.AddWithValue("@investor_name", investorName);
+            _auditColumns.AddUpdateParameters(command, auditDisplayName, auditUtc);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Created investor {InvestorCode} ({InvestorName}) by {AuditUser}.",
+                investorCode,
+                investorName,
+                auditDisplayName);
+
+            return new InvestorDto
+            {
+                InvestorKey = 0,
+                InvestorCode = investorCode,
+                InvestorName = investorName,
+                InvestorAliasKey = null,
+                InvestorAliasName = string.Empty,
+                UserUpdatedBy = auditDisplayName,
+                UserUpdatedDate = auditUtc
+            };
         }
 
         public async Task<bool> UpdateAsync(
@@ -123,6 +182,22 @@ namespace kingsightapi.Services
                 order by r.investor_code
                 """;
 
+        private string BuildInsertSql()
+        {
+            var (auditColumns, auditValues) = _auditColumns.BuildInsertColumnList();
+            var columns = new List<string> { "investor_code", "investor_name", "investor_alias_name" };
+            var values = new List<string> { "@investor_code", "@investor_name", "null" };
+            columns.AddRange(auditColumns);
+            values.AddRange(auditValues);
+
+            return $"""
+                insert into {_sql.InvestorAliasRelationship} (
+                    {string.Join(", ", columns)})
+                values (
+                    {string.Join(", ", values)})
+                """;
+        }
+
         private string BuildUpdateSql() =>
             $"""
                 update r
@@ -132,6 +207,50 @@ namespace kingsightapi.Services
                     on m.investor_alias_id = @investor_alias_key
                 where cast(r.investor_code as varchar(100)) collate database_default = cast(@investor_code as varchar(100)) collate database_default
                 """;
+
+        private async Task<string> GetNextExtInvestorCodeAsync(
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select investor_code
+                from {_sql.InvestorAliasRelationship}
+                where investor_code like @prefixNew
+                   or investor_code like @prefixLegacy
+                """;
+
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@prefixNew", $"{ExtInvestorCodePrefix}%");
+            command.Parameters.AddWithValue("@prefixLegacy", "NONKSInv-%");
+
+            var maxNumber = 0;
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var code = reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0));
+                var number = ParseExtInvestorCodeNumber(code);
+                if (number > maxNumber)
+                {
+                    maxNumber = number;
+                }
+            }
+
+            return $"{ExtInvestorCodePrefix}{maxNumber + 1}";
+        }
+
+        private static int ParseExtInvestorCodeNumber(string? investorCode)
+        {
+            if (string.IsNullOrWhiteSpace(investorCode))
+            {
+                return 0;
+            }
+
+            var match = Regex.Match(
+                investorCode.Trim(),
+                @"^(?:NKSInv|NONKSInv)-(\d+)$",
+                RegexOptions.IgnoreCase);
+            return match.Success && int.TryParse(match.Groups[1].Value, out var parsed) ? parsed : 0;
+        }
 
         private InvestorDto MapRow(SqlDataReader reader)
         {

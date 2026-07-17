@@ -17,4 +17,10 @@ namespace kingsightapi.Entities
     {
         public List<InvestorUpdateRequestDto> Investors { get; init; } = new();
     }
+
+    public sealed class InvestorCreateRequest
+    {
+        public string InvestorName { get; init; } = string.Empty;
+        public string? CreatedBy { get; init; }
+    }
 }
