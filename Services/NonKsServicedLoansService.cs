@@ -30,6 +30,7 @@ namespace kingsightapi.Services
         private readonly string _connectionString;
         private readonly string _tblExternalServicedLoan;
         private readonly INonKsLoanAliasBridge _loanAliasBridge;
+        private readonly INonKsInvestorAliasBridge _investorAliasBridge;
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
         private ExternalServicedLoanColumnMap? _columns;
@@ -38,12 +39,14 @@ namespace kingsightapi.Services
             IConfiguration configuration,
             ILogger<NonKsServicedLoansService> logger,
             FabricWarehouseTables tables,
-            INonKsLoanAliasBridge loanAliasBridge)
+            INonKsLoanAliasBridge loanAliasBridge,
+            INonKsInvestorAliasBridge investorAliasBridge)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
             _loanAliasBridge = loanAliasBridge;
+            _investorAliasBridge = investorAliasBridge;
             _tblExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
         }
 
@@ -146,6 +149,28 @@ namespace kingsightapi.Services
                         extLoanCode);
                 }
 
+                try
+                {
+                    var investorCode = NormalizeOptional(loan.InvestorCode);
+                    if (!string.IsNullOrWhiteSpace(investorCode))
+                    {
+                        await _investorAliasBridge.EnsureRelationshipRowAsync(
+                            connection,
+                            investorCode,
+                            ResolveInvestorAliasName(loan) ?? loan.Investor,
+                            null,
+                            loan.UserUpdatedBy,
+                            cancellationToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Non-KS loan {ExtLoanCode} created but failed to register investor on Investor Alias Assignment.",
+                        extLoanCode);
+                }
+
                 var row = await ReadByKeyAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken);
                 if (row is null)
                 {
@@ -193,6 +218,27 @@ namespace kingsightapi.Services
                 columns.AddUpdateAuditParameters(command, loan.UserUpdatedBy, DateTime.UtcNow);
 
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+
+                try
+                {
+                    var investorCode = NormalizeOptional(loan.InvestorCode);
+                    if (!string.IsNullOrWhiteSpace(investorCode))
+                    {
+                        await _investorAliasBridge.EnsureRelationshipRowAsync(
+                            connection,
+                            investorCode,
+                            ResolveInvestorAliasName(loan) ?? loan.Investor,
+                            null,
+                            loan.UserUpdatedBy,
+                            cancellationToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Non-KS loan updated but failed to register investor on Investor Alias Assignment.");
+                }
 
                 var row = await ReadByKeyAsync(connection, columns, extLoanCode, loan.AsAtDate, cancellationToken);
                 if (row is null && originalAsAtDate != loan.AsAtDate)

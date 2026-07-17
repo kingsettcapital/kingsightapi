@@ -27,15 +27,21 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly SubjectiveInputSql _sql;
+        private readonly INonKsInvestorAliasBridge _nonKsInvestorAliasBridge;
         private readonly ILogger<InvestorService> _logger;
 
         private bool _schemaProbed;
         private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
 
-        public InvestorService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<InvestorService> logger)
+        public InvestorService(
+            IConfiguration configuration,
+            FabricWarehouseTables tables,
+            INonKsInvestorAliasBridge nonKsInvestorAliasBridge,
+            ILogger<InvestorService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _nonKsInvestorAliasBridge = nonKsInvestorAliasBridge;
             _logger = logger;
             _sql = new SubjectiveInputSql(tables);
         }
@@ -48,6 +54,15 @@ namespace kingsightapi.Services
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+
+            try
+            {
+                await _nonKsInvestorAliasBridge.EnsureMissingRelationshipRowsAsync(connection, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync Non-KS investors into investor_alias_relationship before list.");
+            }
 
             await using var command = new SqlCommand(BuildListSql(), connection)
             {
