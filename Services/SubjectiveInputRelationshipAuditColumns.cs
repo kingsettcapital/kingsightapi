@@ -18,12 +18,25 @@ namespace kingsightapi.Services
             var updatedBy = await DimLoanColumnProbe.FindFirstAsync(
                 connectionString,
                 tableName,
-                ["updated_by", "user_updated_by", "modified_by"],
+                [
+                    "default_si_updated_by",
+                    "updated_by",
+                    "user_updated_by",
+                    "modified_by",
+                ],
                 cancellationToken);
             var updatedDtm = await DimLoanColumnProbe.FindFirstAsync(
                 connectionString,
                 tableName,
-                ["updated_datetime", "updated_dtm", "updated_date", "user_updated_date", "modified_at", "modified_date"],
+                [
+                    "default_si_updated_datetime",
+                    "updated_datetime",
+                    "updated_dtm",
+                    "updated_date",
+                    "user_updated_date",
+                    "modified_at",
+                    "modified_date",
+                ],
                 cancellationToken);
 
             return new SubjectiveInputRelationshipAuditColumns

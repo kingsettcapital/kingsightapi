@@ -33,6 +33,8 @@ namespace kingsightapi.Services
         private bool _schemaProbed;
         private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
         private string? _loanStatusKeyColumn;
+        private string? _dimLoanMaturityDateColumn;
+        private bool _relationshipHasMaturityDate = true;
         private bool _exitDateIsTextColumn = true;
 
         public DefaultSubjectiveAnalyticsService(
@@ -236,7 +238,44 @@ namespace kingsightapi.Services
                 _sql.LoanAliasRelationship,
                 "exit_date",
                 cancellationToken);
+            _dimLoanMaturityDateColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.SharedDimLoan,
+                ["maturity_date", "loan_maturity_date", "maturity_dt"],
+                cancellationToken);
+            _relationshipHasMaturityDate = await ColumnExistsAsync(
+                _sql.LoanAliasRelationship,
+                "maturity_date",
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Default subjective analytics schema: dimLoanMaturity={DimMaturity}, relationshipMaturity={RelMaturity}, auditBy={AuditBy}.",
+                _dimLoanMaturityDateColumn ?? "(none)",
+                _relationshipHasMaturityDate,
+                _auditColumns.UpdatedByColumn ?? "(none)");
+
             _schemaProbed = true;
+        }
+
+        private async Task<bool> ColumnExistsAsync(
+            string tableName,
+            string columnName,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"select top (0) [{columnName}] from {tableName}",
+                    connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                return true;
+            }
+            catch (SqlException)
+            {
+                return false;
+            }
         }
 
         private async Task<bool> IsTextColumnAsync(
@@ -269,14 +308,16 @@ namespace kingsightapi.Services
             string? loanStatusKeyColumn)
         {
             var needsStatusJoin = statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn);
+            var maturitySelect = BuildMaturityDateSelectExpression();
+            var dimLoanApply = BuildDimLoanOuterApply();
 
             var sql = new StringBuilder(
                 $"""
-                 select loan_key = cast(0 as bigint),
+                 select loan_key = isnull(l.loan_key, 0),
                         r.loan_code,
                         r.loan_description,
                         r.loan_alias_name,
-                        r.maturity_date,
+                        {maturitySelect},
                         r.default_status,
                         r.exit_plan,
                         r.exit_date,
@@ -284,6 +325,7 @@ namespace kingsightapi.Services
                         user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression()},
                         user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression()}
                  from {_sql.LoanAliasRelationship} r
+                 {dimLoanApply}
                  """);
 
             if (loanAliasIds is { Count: > 0 })
@@ -327,6 +369,48 @@ namespace kingsightapi.Services
             sql.AppendLine();
             sql.Append(" order by r.loan_alias_name, r.loan_code");
             return sql.ToString();
+        }
+
+        /// <summary>
+        /// Yardi maturity date from shared.dim_loan (MAX per loan_code on current SCD rows),
+        /// falling back to relationship.maturity_date when present.
+        /// </summary>
+        private string BuildMaturityDateSelectExpression()
+        {
+            if (!string.IsNullOrEmpty(_dimLoanMaturityDateColumn) && _relationshipHasMaturityDate)
+            {
+                return "maturity_date = coalesce(l.yardi_maturity_date, r.maturity_date)";
+            }
+
+            if (!string.IsNullOrEmpty(_dimLoanMaturityDateColumn))
+            {
+                return "maturity_date = l.yardi_maturity_date";
+            }
+
+            if (_relationshipHasMaturityDate)
+            {
+                return "r.maturity_date";
+            }
+
+            return "maturity_date = cast(null as date)";
+        }
+
+        private string BuildDimLoanOuterApply()
+        {
+            var maturitySelect = string.IsNullOrEmpty(_dimLoanMaturityDateColumn)
+                ? "yardi_maturity_date = cast(null as date)"
+                : $"yardi_maturity_date = max(ck.[{_dimLoanMaturityDateColumn}])";
+
+            return $"""
+                outer apply (
+                    select
+                        loan_key = max(ck.loan_key),
+                        {maturitySelect}
+                    from {_sql.SharedDimLoan} ck
+                    where {SubjectiveInputSql.EqualsLoanCode("r", "loan_code", "ck", "loan_code")}
+                      and {SubjectiveInputSql.DimLoanIsCurrent("ck")}
+                ) l
+                """;
         }
 
         private string BuildUpdateByLoanKeySql() =>
