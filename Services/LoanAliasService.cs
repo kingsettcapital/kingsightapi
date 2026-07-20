@@ -7,189 +7,254 @@ namespace kingsightapi.Services
 {
     public interface ILoanAliasService
     {
-        Task<IReadOnlyList<LoanAliasDto>> GetAllAsync();
-        Task<LoanAliasDto?> GetByIdAsync(long loanAliasId);
-        Task<long> SaveAsync(LoanAliasSaveRequest request);
-        Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request);
-        Task<bool> DeleteAsync(long loanAliasId);
+        Task<IReadOnlyList<LoanAliasDto>> GetAllAsync(CancellationToken cancellationToken = default);
+        Task<LoanAliasDto?> GetByIdAsync(long loanAliasId, CancellationToken cancellationToken = default);
+        Task<long> SaveAsync(LoanAliasSaveRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
+        Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
+        Task<bool> DeleteAsync(long loanAliasId, CancellationToken cancellationToken = default);
     }
 
     public sealed class LoanAliasService : ILoanAliasService
     {
-        private const string ListSql = """
-            select loan_alias_id,
-                   loan_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.loan_alias_master
-            order by loan_alias_id
-            """;
+        private static readonly string[] ReadOnlyMasterColumns =
+        [
+            "security_value",
+            "units",
+            "net_acres",
+            "square_feet"
+        ];
 
-        private const string GetByIdSql = """
-            select loan_alias_id,
-                   loan_alias_name,
-                   created_by,
-                   created_dtm,
-                   updated_by,
-                   updated_dtm
-            from mort.loan_alias_master
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string NextIdSql = """
-            select isnull(max(loan_alias_id), 0) + 1
-            from mort.loan_alias_master
-            """;
-
-        private const string InsertSql = """
-            insert into mort.loan_alias_master
-                (loan_alias_id, loan_alias_name, created_by, created_dtm)
-            values (@loan_alias_id, @loan_alias_name, @created_by, getutcdate())
-            """;
-
-        private const string UpdateSql = """
-            update mort.loan_alias_master
-            set loan_alias_name = @loan_alias_name,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string DeleteSql = """
-            delete from mort.loan_alias_master
-            where loan_alias_id = @loan_alias_id
-            """;
+        private readonly string NextIdSql;
+        private readonly string DeleteSql;
 
         private readonly string _connectionString;
+        private readonly string _loanAliasMasterTable;
+        private readonly string _loanAliasRelationshipTable;
+        private readonly INonKsLoanAliasBridge _nonKsLoanAliasBridge;
         private readonly ILogger<LoanAliasService> _logger;
 
-        public LoanAliasService(IConfiguration configuration, ILogger<LoanAliasService> logger)
+        private bool _schemaProbed;
+        private SubjectiveInputMasterAuditColumns _auditColumns = new();
+
+        public LoanAliasService(
+            IConfiguration configuration,
+            FabricWarehouseTables tables,
+            INonKsLoanAliasBridge nonKsLoanAliasBridge,
+            ILogger<LoanAliasService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _nonKsLoanAliasBridge = nonKsLoanAliasBridge;
             _logger = logger;
+
+            _loanAliasMasterTable = tables.SubjectiveInput("loan_alias_master");
+            _loanAliasRelationshipTable = tables.SubjectiveInput("loan_alias_relationship");
+
+            NextIdSql = $"""
+                select isnull(max(loan_alias_id), 0) + 1
+                from {_loanAliasMasterTable}
+                """;
+
+            DeleteSql = $"""
+                delete from {_loanAliasMasterTable}
+                where loan_alias_id = @loan_alias_id
+                """;
         }
 
-        public async Task<IReadOnlyList<LoanAliasDto>> GetAllAsync()
+        public async Task<IReadOnlyList<LoanAliasDto>> GetAllAsync(CancellationToken cancellationToken = default)
         {
+            await EnsureSchemaAsync(cancellationToken);
+
             var rows = new List<LoanAliasDto>();
 
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
 
-            await using var command = new SqlCommand(ListSql, connection)
+            await using var command = new SqlCommand(BuildListSql(), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
 
-            await using var reader = await command.ExecuteReaderAsync();
-            var ordinals = GetOrdinals(reader);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
-            while (await reader.ReadAsync())
+            while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add(MapRow(reader, ordinals));
+                rows.Add(MapRow(reader));
             }
 
             _logger.LogInformation("Retrieved {Count} loan alias rows.", rows.Count);
             return rows;
         }
 
-        public async Task<LoanAliasDto?> GetByIdAsync(long loanAliasId)
+        public async Task<LoanAliasDto?> GetByIdAsync(long loanAliasId, CancellationToken cancellationToken = default)
         {
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await EnsureSchemaAsync(cancellationToken);
 
-            await using var command = new SqlCommand(GetByIdSql, connection)
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand(BuildGetByIdSql(), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
 
-            await using var reader = await command.ExecuteReaderAsync();
-            if (!await reader.ReadAsync())
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
             {
                 return null;
             }
 
-            var ordinals = GetOrdinals(reader);
-            return MapRow(reader, ordinals);
+            return MapRow(reader);
         }
 
-        public async Task<long> SaveAsync(LoanAliasSaveRequest request)
+        public async Task<long> SaveAsync(
+            LoanAliasSaveRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
         {
+            await EnsureSchemaAsync(cancellationToken);
+
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync();
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
 
             try
             {
-                var newId = await GetNextIdAsync(connection, transaction);
+                var newId = await GetNextIdAsync(connection, transaction, cancellationToken);
+                var auditUtc = DateTime.UtcNow;
 
-                await using var command = new SqlCommand(InsertSql, connection, transaction)
+                await using var command = new SqlCommand(BuildInsertSql(), connection, transaction)
                 {
                     CommandType = System.Data.CommandType.Text
                 };
+
                 command.Parameters.AddWithValue("@loan_alias_id", newId);
                 command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-                command.Parameters.AddWithValue("@created_by", request.CreatedBy);
+                _auditColumns.AddInsertParameters(command, auditDisplayName, auditUtc);
 
-                await command.ExecuteNonQueryAsync();
-                await transaction.CommitAsync();
+                await command.ExecuteNonQueryAsync(cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
 
-                _logger.LogInformation("Created loan alias row with id {LoanAliasId}.", newId);
+                _logger.LogInformation(
+                    "Created loan alias row with id {LoanAliasId} by {AuditUser}.",
+                    newId,
+                    auditDisplayName);
                 return newId;
             }
             catch
             {
-                await transaction.RollbackAsync();
+                await transaction.RollbackAsync(cancellationToken);
                 throw;
             }
         }
 
-        private static async Task<long> GetNextIdAsync(SqlConnection connection, SqlTransaction transaction)
+        public async Task<bool> UpdateAsync(
+            long loanAliasId,
+            LoanAliasUpdateRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
         {
-            await using var command = new SqlCommand(NextIdSql, connection, transaction)
-            {
-                CommandType = System.Data.CommandType.Text
-            };
+            await EnsureSchemaAsync(cancellationToken);
 
-            var result = await command.ExecuteScalarAsync();
-            return Convert.ToInt64(result);
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = (SqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+
+            try
+            {
+                var previousName = await GetCurrentNameAsync(connection, transaction, loanAliasId, cancellationToken);
+
+                await using var command = new SqlCommand(BuildUpdateSql(), connection, transaction)
+                {
+                    CommandType = System.Data.CommandType.Text
+                };
+
+                command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
+                command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
+                _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+                var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
+                if (affectedRows == 0)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                    _logger.LogWarning("No row updated for loan_alias_id {LoanAliasId}.", loanAliasId);
+                    return false;
+                }
+
+                var cascadedRows = 0;
+                if (!string.IsNullOrWhiteSpace(previousName)
+                    && !string.Equals(previousName, request.LoanAliasName, StringComparison.Ordinal))
+                {
+                    cascadedRows = await CascadeRelationshipRenameAsync(
+                        connection, transaction, previousName!, request.LoanAliasName, cancellationToken);
+                    cascadedRows += await _nonKsLoanAliasBridge.CascadeAliasRenameOnExternalServicedLoanAsync(
+                        connection, transaction, previousName!, request.LoanAliasName, cancellationToken);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Updated loan alias row {LoanAliasId} by {AuditUser}. Master rows: {AffectedRows}, linked loans updated: {CascadedRows}",
+                    loanAliasId,
+                    auditDisplayName,
+                    affectedRows,
+                    cascadedRows);
+                return true;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                throw;
+            }
         }
 
-        public async Task<bool> UpdateAsync(long loanAliasId, LoanAliasUpdateRequest request)
+        private async Task<string?> GetCurrentNameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            long loanAliasId,
+            CancellationToken cancellationToken)
         {
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-
-            await using var command = new SqlCommand(UpdateSql, connection)
+            await using var command = new SqlCommand(
+                $"select loan_alias_name from {_loanAliasMasterTable} where loan_alias_id = @loan_alias_id",
+                connection,
+                transaction)
             {
                 CommandType = System.Data.CommandType.Text
             };
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
-            command.Parameters.AddWithValue("@loan_alias_name", request.LoanAliasName);
-            command.Parameters.AddWithValue("@updated_by", request.UpdatedBy);
 
-            var affectedRows = await command.ExecuteNonQueryAsync();
-            if (affectedRows > 0)
-            {
-                _logger.LogInformation(
-                    "Updated loan alias row {LoanAliasId}. Rows affected: {AffectedRows}",
-                    loanAliasId,
-                    affectedRows);
-                return true;
-            }
-
-            _logger.LogWarning("No row updated for loan_alias_id {LoanAliasId}.", loanAliasId);
-            return false;
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
         }
 
-        public async Task<bool> DeleteAsync(long loanAliasId)
+        private async Task<int> CascadeRelationshipRenameAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            string previousName,
+            string newName,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                update {_loanAliasRelationshipTable}
+                set loan_alias_name = @new_name
+                where cast(loan_alias_name as varchar(200)) collate database_default = cast(@old_name as varchar(200)) collate database_default
+                """;
+
+            await using var command = new SqlCommand(sql, connection, transaction)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@new_name", newName);
+            command.Parameters.AddWithValue("@old_name", previousName);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        public async Task<bool> DeleteAsync(long loanAliasId, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
+            await connection.OpenAsync(cancellationToken);
 
             await using var command = new SqlCommand(DeleteSql, connection)
             {
@@ -197,7 +262,7 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@loan_alias_id", loanAliasId);
 
-            var affectedRows = await command.ExecuteNonQueryAsync();
+            var affectedRows = await command.ExecuteNonQueryAsync(cancellationToken);
             if (affectedRows > 0)
             {
                 _logger.LogInformation(
@@ -211,29 +276,120 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) GetOrdinals(SqlDataReader reader)
+        private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
         {
-            return (
-                reader.GetOrdinal("loan_alias_id"),
-                reader.GetOrdinal("loan_alias_name"),
-                reader.GetOrdinal("created_by"),
-                reader.GetOrdinal("created_dtm"),
-                reader.GetOrdinal("updated_by"),
-                reader.GetOrdinal("updated_dtm"));
+            if (_schemaProbed)
+            {
+                return;
+            }
+
+            _auditColumns = await SubjectiveInputMasterAuditColumns.ProbeAsync(
+                _connectionString,
+                _loanAliasMasterTable,
+                cancellationToken);
+            _schemaProbed = true;
         }
 
-        private static LoanAliasDto MapRow(
-            SqlDataReader reader,
-            (int Id, int Name, int CreatedBy, int CreatedDtm, int UpdatedBy, int UpdatedDtm) ordinals)
+        private string BuildSelectColumns()
         {
+            var auditColumns = _auditColumns.SelectListColumns()
+                .Select(column => column.Trim('[', ']'));
+            return string.Join(
+                ",\n                       ",
+                new[] { "loan_alias_id", "loan_alias_name" }
+                    .Concat(ReadOnlyMasterColumns)
+                    .Concat(auditColumns));
+        }
+
+        private string BuildListSql() =>
+            $"""
+                select {BuildSelectColumns()}
+                from {_loanAliasMasterTable}
+                order by loan_alias_id
+                """;
+
+        private string BuildGetByIdSql() =>
+            $"""
+                select {BuildSelectColumns()}
+                from {_loanAliasMasterTable}
+                where loan_alias_id = @loan_alias_id
+                """;
+
+        private string BuildInsertSql() =>
+            $"""
+                insert into {_loanAliasMasterTable} (
+                    loan_alias_id,
+                    loan_alias_name{_auditColumns.BuildInsertColumnList()})
+                values (
+                    @loan_alias_id,
+                    @loan_alias_name{_auditColumns.BuildInsertValueList()})
+                """;
+
+        private string BuildUpdateSql() =>
+            $"""
+                update {_loanAliasMasterTable}
+                set loan_alias_name = @loan_alias_name{_auditColumns.BuildUpdateSetClause()}
+                where loan_alias_id = @loan_alias_id
+                """;
+
+        private async Task<long> GetNextIdAsync(
+            SqlConnection connection,
+            SqlTransaction transaction,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(NextIdSql, connection, transaction)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return Convert.ToInt64(result);
+        }
+
+        private LoanAliasDto MapRow(SqlDataReader reader)
+        {
+            DateTime? ReadAuditDate(string? column)
+            {
+                if (string.IsNullOrWhiteSpace(column))
+                {
+                    return null;
+                }
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+                {
+                    return null;
+                }
+
+                return DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
+            }
+
+            string ReadAuditUser(string? column)
+            {
+                if (string.IsNullOrWhiteSpace(column))
+                {
+                    return string.Empty;
+                }
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+                {
+                    return string.Empty;
+                }
+
+                return reader.GetString(ordinal);
+            }
+
             return new LoanAliasDto
             {
-                LoanAliasId = reader.IsDBNull(ordinals.Id) ? 0L : Convert.ToInt64(reader.GetValue(ordinals.Id)),
-                LoanAliasName = reader.IsDBNull(ordinals.Name) ? string.Empty : reader.GetString(ordinals.Name),
-                CreatedBy = reader.IsDBNull(ordinals.CreatedBy) ? string.Empty : reader.GetString(ordinals.CreatedBy),
-                CreatedDtm = reader.IsDBNull(ordinals.CreatedDtm) ? null : reader.GetDateTime(ordinals.CreatedDtm),
-                UpdatedBy = reader.IsDBNull(ordinals.UpdatedBy) ? string.Empty : reader.GetString(ordinals.UpdatedBy),
-                UpdatedDtm = reader.IsDBNull(ordinals.UpdatedDtm) ? null : reader.GetDateTime(ordinals.UpdatedDtm)
+                LoanAliasId = reader.GetInt64OrDefault("loan_alias_id"),
+                LoanAliasName = reader.GetStringOrEmpty("loan_alias_name"),
+                SecurityValue = reader.GetNullableDecimal("security_value"),
+                Units = reader.GetNullableInt32("units"),
+                NetAcres = reader.GetNullableDecimal("net_acres"),
+                SquareFeet = reader.GetNullableDecimal("square_feet"),
+                CreatedBy = ReadAuditUser(_auditColumns.ReadCreatedByColumn),
+                CreatedDtm = ReadAuditDate(_auditColumns.ReadCreatedDtmColumn),
+                UpdatedBy = ReadAuditUser(_auditColumns.ReadUpdatedByColumn),
+                UpdatedDtm = ReadAuditDate(_auditColumns.ReadUpdatedDtmColumn)
             };
         }
     }

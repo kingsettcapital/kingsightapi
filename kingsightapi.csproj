@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
@@ -7,12 +7,44 @@
     <UserSecretsId>kingsightapi-local</UserSecretsId>
   </PropertyGroup>
 
+  <!-- Avoid kingsightapi.exe lock when building while dotnet run is active -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+
   <ItemGroup>
+    <InternalsVisibleTo Include="kingsightapi.Tests" />
+  </ItemGroup>
+
+  <!-- Exclude test project sources from web SDK default glob -->
+  <ItemGroup>
+    <Compile Remove="kingsightapi.Tests/**" />
+    <Content Remove="kingsightapi.Tests/**" />
+    <None Remove="kingsightapi.Tests/**" />
+  </ItemGroup>
+
+  <!-- Exclude local tool build output (SchemaProbe obj/*.cs was picked up by **/*.cs glob) -->
+  <ItemGroup>
+    <Compile Remove="tools/**" />
+    <Content Remove="tools/**" />
+    <None Remove="tools/**" />
+    <EmbeddedResource Remove="tools/**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="log4net.config">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.18.0" />
+    <PackageReference Include="Azure.Storage.Files.DataLake" Version="12.22.0" />
+    <PackageReference Include="log4net" Version="3.0.4" />
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.0.0" />
     <PackageReference Include="Microsoft.Data.SqlClient.Extensions.Azure" Version="1.0.0" />
     <PackageReference Include="Microsoft.Identity.Web" Version="4.9.0" />
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
-    <PackageReference Include="WebApiRouteDebugger" Version="1.0.0" />
   </ItemGroup>
 
 </Project>

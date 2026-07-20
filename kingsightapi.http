@@ -1,6 +1,287 @@
-@idpapi_HostAddress = http://localhost:5181
+@api_HostAddress = https://localhost:7140
+@api_HostAddressHttp = http://localhost:5181
 
-GET {{idpapi_HostAddress}}/weatherforecast/
+GET {{api_HostAddress}}/api/Notifications
 Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/Notifications/mark-all-read
+Content-Type: application/json
+
+{}
+
+###
+
+GET {{api_HostAddress}}/api/CmhcUpload/history
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/CmhcUpload/qr-slides/preview?fileName=Baytree%20Condo%20Portfolio.pdf
+Accept: application/pdf
+
+###
+
+GET {{api_HostAddress}}/api/NonKsServicedLoans
+Accept: application/json
+
+###
+
+POST {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanName": "External Servicer Loan A",
+      "asAtDate": "2026-03-31",
+      "servicerId": "SVC-100",
+      "description": "Quarterly capture test",
+      "investor": "Investor A",
+      "interestRate": 15.75,
+      "principalBalance": 1000000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+### Duplicate row — reuse existing Loan Code with a new As At date
+
+POST {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanName": "External Servicer Loan A",
+      "asAtDate": "2026-06-30",
+      "loanCode": "NONKS-1",
+      "servicerId": "SVC-100",
+      "description": "Duplicated quarterly snapshot",
+      "investor": "Investor A",
+      "interestRate": 15.75,
+      "principalBalance": 1000000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+PUT {{api_HostAddress}}/api/NonKsServicedLoans
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "nonKsServicedLoanKey": 1,
+      "loanId": "NONKS-1",
+      "principalBalance": 1050000,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+GET {{api_HostAddress}}/api/LtvValidation?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/LtvValidation
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanKey": 417,
+      "ltv": 57,
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+POST {{api_HostAddress}}/api/LtvValidation/confirm
+Content-Type: application/json
+
+{
+  "loanKeys": [417],
+  "userUpdatedBy": "system"
+}
+
+###
+
+GET {{api_HostAddress}}/api/TaxArrears?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/TaxArrears/lookups
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultDateCapture?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary?statuses=Default
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/1/loan-details?statuses=Default
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/dashboard?asOfDate=2025-08-31&statuses=Default&riskLevels=ALL&sponsor=All
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/ManagementSummary/1/loan-detail-report?asOfDate=2025-08-31&statuses=Default
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/OtherCostCapture?loanAliasId=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics?loanAliasIds=1&statuses=2
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/lookups
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/default-status-options
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/DefaultSubjectiveAnalytics/exit-plan-options
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/DefaultSubjectiveAnalytics
+Content-Type: application/json
+
+{
+  "loans": [
+    {
+      "loanKey": 5037,
+      "defaultStatus": "Executing Plan",
+      "exitPlan": "Timing",
+      "exitDate": "2025-06-30",
+      "maturityAdditionalDetail": "Extension under review",
+      "userUpdatedBy": "system"
+    }
+  ]
+}
+
+###
+
+### Loan Alias — updatedBy/createdBy from JWT (client values ignored)
+
+GET {{api_HostAddress}}/api/LoanAlias/1
+Accept: application/json
+
+###
+
+PUT {{api_HostAddress}}/api/LoanAlias/1
+Content-Type: application/json
+
+{
+  "loanAliasName": "Example Alias",
+  "updatedBy": "system"
+}
+
+###
+
+### User Management — ids are sequential integers (userId 1, 2, 3…). JSON is camelCase.
+
+GET {{api_HostAddress}}/api/user-management/roles
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/roles/1
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/users
+Accept: application/json
+
+###
+
+GET {{api_HostAddress}}/api/user-management/users/1
+Accept: application/json
+
+###
+
+POST {{api_HostAddress}}/api/user-management/roles
+Content-Type: application/json
+
+{
+  "roleName": "Administrator",
+  "status": "A"
+}
+
+###
+
+PUT {{api_HostAddress}}/api/user-management/roles/1
+Content-Type: application/json
+
+{
+  "roleName": "Administrator",
+  "status": "A"
+}
+
+###
+
+DELETE {{api_HostAddress}}/api/user-management/roles/3
+
+###
+
+POST {{api_HostAddress}}/api/user-management/users
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "firstName": "Jane",
+  "lastName": "Doe",
+  "isActive": true,
+  "roleId": 1
+}
+
+###
+
+PUT {{api_HostAddress}}/api/user-management/users/1
+Content-Type: application/json
+
+{
+  "email": "sgarikapati@kingsettcapital.com",
+  "firstName": "Sridevi",
+  "lastName": "Garikapati",
+  "isActive": true,
+  "roleId": 1
+}
+
+###
+
+DELETE {{api_HostAddress}}/api/user-management/users/5
 
 ###

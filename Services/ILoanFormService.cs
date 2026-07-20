@@ -24,11 +24,11 @@ public interface ILoanFormService
     // Form: Tax Arrears
     Task<PagedResult<TaxArrearsDto>> GetTaxArrearsAsync(LoanFormListFilter filter);
     Task<LoanFormBatchUpsertResult> UpsertTaxArrearsAsync(TaxArrearsBatchRequest request, string? updatedBy = null);
-    Task<TaxArrearsDto?> CreateTaxArrearsAsync(TaxArrearsCreateRequest request, string? updatedBy = null);
+    Task<TaxArrearsDto?> CreateTaxArrearsAsync(LoanFormTaxArrearsCreateRequest request, string? updatedBy = null);
 
     // Form: LTV Validation
     Task<PagedResult<LtvValidationDto>> GetLtvValidationAsync(LoanFormListFilter filter);
     Task<LoanFormBatchUpsertResult> UpsertLtvValidationAsync(LtvValidationBatchRequest request, string? updatedBy = null);
-    Task<LoanFormBatchUpsertResult> ConfirmLtvValidationAsync(LtvValidationConfirmRequest request, string? updatedBy = null);
+    Task<LoanFormBatchUpsertResult> ConfirmLtvValidationAsync(LoanFormLtvValidationConfirmRequest request, string? updatedBy = null);
 
 }

@@ -1,8 +1,8 @@
 using kingsightapi.Entities;
 using kingsightapi.Services;
+using kingsightapi.Configuration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
 namespace kingsightapi.Controllers;
 
 [ApiController]
@@ -10,26 +10,62 @@ namespace kingsightapi.Controllers;
 public class AssetsController : ControllerBase
 {
     private readonly IPropertyPortalService _service;
+    private readonly IPortalFilterService _filterService;
     private readonly ILogger<AssetsController> _logger;
 
-    public AssetsController(IPropertyPortalService service, ILogger<AssetsController> logger)
+    public AssetsController(
+        IPropertyPortalService service,
+        IPortalFilterService filterService,
+        ILogger<AssetsController> logger)
     {
         _service = service;
+        _filterService = filterService;
         _logger = logger;
     }
 
-    // GET: api/assets?search=&fundCode=&page=1&pageSize=50
+    // GET: api/assets/filter-options
+    [HttpGet("filter-options")]
+    public async Task<ActionResult<AssetListFilterOptionsDto>> GetFilterOptions()
+    {
+        try
+        {
+            return Ok(await _filterService.GetAssetListFilterOptionsAsync());
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get asset filter options cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset filter options");
+            return StatusCode(500, "An error occurred while retrieving asset filter options.");
+        }
+    }
+
+    // GET: api/assets?search=&assetType=&investmentType=&geography=&status=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
-    public async Task<ActionResult<PagedResult<PropertyListItemDto>>> GetAll(
+    public async Task<ActionResult<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>>> GetAll(
         [FromQuery] string? search,
+        [FromQuery] string? assetType,
+        [FromQuery] string? investmentType,
+        [FromQuery] string? geography,
+        [FromQuery] string? status,
         [FromQuery] string? fundCode,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
         try
         {
-            var result = await _service.GetPropertiesAsync(search, page, pageSize, fundCode);
+            var result = await _service.GetPropertiesAsync(
+                search, assetType, investmentType, geography, status, sortBy, sortDir, page, pageSize, fundCode);
             return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (OperationCanceledException)
         {
@@ -38,14 +74,14 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets");
             return StatusCode(500, "An error occurred while retrieving assets.");
         }
     }
 
     // GET: api/assets/{propertyKey}
     [HttpGet("{propertyKey:long}")]
-    public async Task<ActionResult<PropertyDetailDto>> GetByKey(long propertyKey)
+    public async Task<ActionResult<PropertyProfileDto>> GetByKey(long propertyKey)
     {
         try
         {
@@ -59,8 +95,50 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving asset {PropertyKey}", propertyKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving the asset.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/leasing-summary
+    [HttpGet("{propertyKey:long}/leasing-summary")]
+    public async Task<ActionResult<AssetLeasingSummaryDto>> GetLeasingSummary(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyLeasingSummaryAsync(propertyKey);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get leasing summary for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving leasing summary for asset {PropertyKey}", propertyKey);
+            return StatusCode(500, "An error occurred while retrieving the asset leasing summary.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/fund-holdings
+    [HttpGet("{propertyKey:long}/fund-holdings")]
+    public async Task<ActionResult<IReadOnlyList<PropertyFundHoldingDto>>> GetFundHoldings(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyFundHoldingsAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get fund holdings for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving fund holdings for asset {PropertyKey}", propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset fund holdings.");
         }
     }
 
@@ -80,7 +158,7 @@ public class AssetsController : ControllerBase
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving investments for asset {PropertyKey}", propertyKey);
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving investments for asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving asset investments.");
         }
     }

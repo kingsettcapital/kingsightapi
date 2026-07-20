@@ -13,13 +13,7 @@ namespace kingsightapi.Services
 
     public sealed class FundService : IFundService
     {
-        private const string FundSql = """
-                                   select fund_key,fund_id, fund_code,fund_name,fund_type_name,fund_strategy_name,
-                                          js_fund_name,is_sidecar,fund_start_date
-                                   from wh_enterprise_gold.dbo.dim_fund
-                                   where getdate() between valid_from and isnull(valid_to,getdate())
-                                   order by 1
-                                   """;
+        private readonly string FundSql;
 
         private readonly string _connectionString;
         private readonly ILogger<FundService> _logger;
@@ -29,6 +23,14 @@ namespace kingsightapi.Services
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+
+            FundSql = $"""
+                                   select fund_key,fund_id, fund_code,fund_name,fund_type_name,fund_strategy_name,
+                                          js_fund_name,is_sidecar,fund_start_date
+                                   from {WarehouseTables.DimFund}
+                                   where getdate() between valid_from and isnull(valid_to,getdate())
+                                   order by 1
+                                   """;
         }
 
         public async Task<IReadOnlyList<FundDto>> GetFundsAsync()

@@ -19,6 +19,16 @@ internal static class SqlReaderExtensions
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
+    public static long? GetNullableInt64(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt64(reader.GetValue(ordinal));
+    }
+
     public static int GetInt32OrDefault(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
@@ -50,10 +60,72 @@ internal static class SqlReaderExtensions
         return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
     }
 
+    public static int? GetNullableInt32(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(reader.GetValue(ordinal));
+    }
+
     public static DateTime? GetNullableDateTime(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
-        return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+        if (reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return ConvertToNullableDateTime(reader.GetValue(ordinal));
+    }
+
+    /// <summary>Reads a date column that may be returned as DateTime, date string, or yyyyMMdd int (date_key).</summary>
+    public static DateTime? GetNullableDateTimeFlexible(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return ConvertToNullableDateTime(reader.GetValue(ordinal));
+    }
+
+    private static DateTime? ConvertToNullableDateTime(object value) =>
+        value switch
+        {
+            DateTime dt => dt,
+            DateTimeOffset dto => dto.DateTime,
+            string s when DateTime.TryParse(s, out var parsed) => parsed,
+            string s when int.TryParse(s, out var dateKey) => DateKeyToDate(dateKey),
+            int dateKey => DateKeyToDate(dateKey),
+            long dateKey => DateKeyToDate(Convert.ToInt32(dateKey)),
+            _ => null
+        };
+
+    private static DateTime? DateKeyToDate(int dateKey)
+    {
+        if (dateKey <= 0)
+        {
+            return null;
+        }
+
+        var text = dateKey.ToString();
+        return DateTime.TryParseExact(text, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var parsed)
+            ? parsed
+            : null;
+    }
+
+    public static string? GetNullableTrimmedString(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var value = reader.GetString(ordinal).Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 
     public static string? GetNullableStringIfPresent(this SqlDataReader reader, string column)
@@ -161,6 +233,36 @@ internal static class SqlReaderExtensions
 
         return 0L;
     }
+
+    public static bool GetBooleanFromColumns(this SqlDataReader reader, params string[] columns)
+    {
+        foreach (var column in columns)
+        {
+            if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+            {
+                continue;
+            }
+
+            return ConvertToBoolean(reader.GetValue(ordinal));
+        }
+
+        return false;
+    }
+
+    private static bool ConvertToBoolean(object value) =>
+        value switch
+        {
+            bool b => b,
+            byte or sbyte or short or ushort or int or uint or long or ulong =>
+                Convert.ToInt64(value) != 0,
+            decimal or double or float =>
+                Convert.ToDecimal(value) != 0m,
+            string s when bool.TryParse(s, out var parsed) => parsed,
+            string s => s.Equals("1", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("yes", StringComparison.OrdinalIgnoreCase)
+                || s.Equals("y", StringComparison.OrdinalIgnoreCase),
+            _ => false
+        };
 
     public static string MapPropertyStatus(this SqlDataReader reader)
     {

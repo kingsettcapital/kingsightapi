@@ -114,7 +114,7 @@ internal static class DisplayFieldBuilder
             return Money(ToNullableDecimal(value) ?? 0m);
         }
 
-        if ((lower is "is_current" or "is_sidecar") || lower.StartsWith("is_"))
+        if ((lower is "is_current" or "is_sidecar" or "portfolio") || lower.StartsWith("is_"))
         {
             return Boolean(ToBoolean(value));
         }

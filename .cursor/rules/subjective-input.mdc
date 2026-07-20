@@ -1,0 +1,142 @@
+---
+description: Mortgage subjective input — wh_gold1.subjective_input table mapping for Kingsight API services
+globs:
+  - Services/LoanAliasService.cs
+  - Services/InvestorAliasService.cs
+  - Services/LoanService.cs
+  - Services/InvestorService.cs
+  - Services/TaxArrearsService.cs
+  - Services/LoanSecurityValueService.cs
+  - Services/OtherCostCaptureService.cs
+  - Services/DefaultDateCaptureService.cs
+  - Services/DefaultSubjectiveAnalyticsService.cs
+  - Services/LtvValidationService.cs
+  - Services/SubjectiveInputSql.cs
+  - Services/FabricWarehouseTables.cs
+---
+
+# Subjective input schema (`wh_gold1.subjective_input`)
+
+Mortgage capture screens read/write **`wh_gold1.subjective_input`** tables. Status lookups use **`wh_gold1.shared.dim_status`** (`status_key`, `status_code`, `status_name`, `status_type`). Loan status filters join **`wh_gold1.shared.dim_loan.funding_status_code`** to **`shared.dim_status.status_key`**. Loan keys resolve via **`wh_gold1.shared.dim_loan`**.
+
+**Do not** retarget Capital dashboard services, `ManagementSummaryService`, or `CapitalInvestorService` unless explicitly requested.
+
+## LTV Validation
+
+```sql
+select c.parent_loan_code,
+       a.loan_code child_loan_code,
+       a.loan_description,
+       a.loan_alias_name,
+       d.investor_alias_name,
+       b.security_value,
+       a.exposure,
+       a.ranking,
+       a.loan_to_value,
+       a.ai_comments,
+       a.qr_slide_link
+from wh_gold1.subjective_input.loan_alias_relationship a
+left join wh_gold1.subjective_input.loan_alias_master b on a.loan_alias_name = b.loan_alias_name
+left join wh_gold1.shared.dim_loan c on a.loan_code = c.loan_code
+left join wh_gold1.subjective_input.investor_alias_relationship d on c.investor_code = d.investor_code
+```
+
+| DB column | API field |
+|-----------|-----------|
+| `parent_loan_code` | `parentLoanId` |
+| `loan_code` | `childLoanId` |
+| `loan_to_value` | `ltv` |
+| `ai_comments` | `aiCommentary` |
+
+Writes update `loan_to_value` on `loan_alias_relationship`. Confirm stamps audit when `loan_to_value` is present (AI-extracted value accepted).
+
+## Configuration
+
+```json
+"FabricWarehouse": {
+  "Database": "wh_gold",
+  "SubjectiveInputDatabase": "wh_gold1"
+}
+```
+
+Use `FabricWarehouseTables.SubjectiveInput("table_name")` — never hard-code `wh_gold1`.
+
+## Table → screen mapping
+
+| Table | API / screen |
+|-------|----------------|
+| `investor_alias_master` | `InvestorAliasController` — Investor Alias CRUD |
+| `loan_alias_master` | `LoanAliasController`, `LoanSecurityValueController` |
+| `loan_alias_relationship` | `LoansController`, `OtherCostCapture`, `DefaultDateCapture`, `DefaultSubjectiveAnalytics` |
+| `investor_alias_relationship` | `InvestorsController` — Investor Alias assignment |
+| `loan_tax_details` | `TaxArrearsController` |
+| `loan_alias_relationship` + `shared.dim_loan` | `LtvValidationController` |
+
+## UI query reference (source of truth)
+
+```sql
+-- Investor Alias CRUD
+select * from wh_gold1.subjective_input.investor_alias_master;
+
+-- Loan Alias CRUD
+select * from wh_gold1.subjective_input.loan_alias_master;
+
+-- Loan Alias assignment
+select loan_code, loan_description from wh_gold1.subjective_input.loan_alias_relationship;
+select loan_alias_name from wh_gold1.subjective_input.loan_alias_master;
+
+-- Investor Alias assignment
+select investor_code, investor_name from wh_gold1.subjective_input.investor_alias_relationship;
+select investor_alias_name from wh_gold1.subjective_input.investor_alias_master;
+
+-- Tax Arrears
+select a.loan_code, b.loan_description, b.loan_alias_name, a.tax_memo_date, a.tax_year, a.tax_arrears, a.tax_notes
+from wh_gold1.subjective_input.loan_tax_details a
+inner join wh_gold1.subjective_input.loan_alias_relationship b on a.loan_code = b.loan_code;
+
+-- Security Value
+select a.loan_alias_name, b.collateral, a.security_value, a.units, a.net_acres, a.square_feet
+from wh_gold1.subjective_input.loan_alias_master a
+left join (
+  select loan_alias_name, sum(collateral) collateral
+  from wh_gold1.subjective_input.loan_alias_relationship
+  group by loan_alias_name
+) b on a.loan_alias_name = b.loan_alias_name;
+
+-- Other cost / default date / default subjective
+select * from wh_gold1.subjective_input.loan_alias_relationship;
+```
+
+## Column aliases (API DTO compatibility)
+
+| DB column | API / DTO field |
+|-----------|-----------------|
+| `loan_description` | `description` / `loanDesc` |
+| `tax_notes` | `notes` |
+| `outstanding_invoice` | `outstandingInvoices` |
+| `estimated_realization_costs` | `estRealizationCosts` |
+| `cost_to_complete` | `costToComplete` |
+| `maturity_notes` | `maturityAdditionalDetail` |
+| `net_acres` | `acres` |
+| `default_status` | `defaultStatus` |
+| `exit_plan` | `exitPlan` |
+| `exit_date` | `exitDate` |
+
+## Shared helper
+
+`SubjectiveInputSql` centralizes table names and `loan_code` → `loan_key` joins. Reuse it when adding new mortgage capture endpoints.
+
+## Join pattern
+
+```sql
+from wh_gold1.subjective_input.loan_alias_relationship r
+left join wh_gold1.subjective_input.loan_alias_master m
+  on r.loan_alias_name = m.loan_alias_name
+left join wh_gold1.shared.dim_loan l
+  on l.loan_code = r.loan_code
+ and cast(l.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')
+left join wh_gold1.shared.dim_status s
+  on l.funding_status_code = s.status_key
+```
+
+Filter by alias id: `m.loan_alias_id in (@ids)`. Status filter: append `LoanStatusFilterParser` on `l` using column `funding_status_code` and `shared.dim_status`.

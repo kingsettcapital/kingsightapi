@@ -1,7 +1,7 @@
 namespace kingsightapi.Entities
 {
     /// <summary>
-    /// Row from mort.investor_alias_master for API responses.
+    /// Row from wh_gold1.subjective_input.investor_alias_master for API responses.
     /// </summary>
     public sealed class InvestorAliasDto
     {
@@ -16,6 +16,7 @@ namespace kingsightapi.Entities
     /// <summary>
     /// Body for creating a row in mort.investor_alias_master.
     /// investor_alias_id is assigned server-side as max(investor_alias_id) + 1.
+    /// created_by / updated_by are set server-side from the JWT user (client createdBy is ignored).
     /// </summary>
     public sealed class InvestorAliasSaveRequest
     {
@@ -25,6 +26,7 @@ namespace kingsightapi.Entities
 
     /// <summary>
     /// Body for updating a row in mort.investor_alias_master.
+    /// updated_by is set server-side from the JWT user (client updatedBy is ignored).
     /// </summary>
     public sealed class InvestorAliasUpdateRequest
     {

@@ -128,7 +128,7 @@ public sealed class LoanFormService : ILoanFormService
         return Task.FromResult(new LoanFormBatchUpsertResult());
     }
 
-    public Task<TaxArrearsDto?> CreateTaxArrearsAsync(TaxArrearsCreateRequest request, string? updatedBy = null)
+    public Task<TaxArrearsDto?> CreateTaxArrearsAsync(LoanFormTaxArrearsCreateRequest request, string? updatedBy = null)
     {
         // TODO: INSERT new tax arrears row.
         return Task.FromResult<TaxArrearsDto?>(null);
@@ -157,7 +157,7 @@ public sealed class LoanFormService : ILoanFormService
         return Task.FromResult(new LoanFormBatchUpsertResult());
     }
 
-    public Task<LoanFormBatchUpsertResult> ConfirmLtvValidationAsync(LtvValidationConfirmRequest request, string? updatedBy = null)
+    public Task<LoanFormBatchUpsertResult> ConfirmLtvValidationAsync(LoanFormLtvValidationConfirmRequest request, string? updatedBy = null)
     {
         // TODO: Mark loans confirmed in DWH / workflow table.
         return Task.FromResult(new LoanFormBatchUpsertResult());

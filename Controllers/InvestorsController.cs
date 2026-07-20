@@ -1,86 +1,141 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 
-namespace kingsightapi.Controllers;
-
-[ApiController]
-[Route("api/[controller]")]
-public class InvestorsController : ControllerBase
+namespace kingsightapi.Controllers
 {
-    private readonly IInvestorPortalService _service;
-    private readonly ILogger<InvestorsController> _logger;
-
-    public InvestorsController(IInvestorPortalService service, ILogger<InvestorsController> logger)
+    [ApiController]
+    [Route("api/[controller]")]
+    public class InvestorsController : ControllerBase
     {
-        _service = service;
-        _logger = logger;
-    }
+        private readonly IInvestorService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly ILogger<InvestorsController> _logger;
 
-    // GET: api/investors?search=&page=1&pageSize=50
-    [HttpGet]
-    public async Task<ActionResult<PagedResult<InvestorListItemDto>>> GetAll(
-        [FromQuery] string? search,
-        [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
-    {
-        try
+        public InvestorsController(
+            IInvestorService service,
+            ICurrentUserResolver currentUserResolver,
+            ILogger<InvestorsController> logger)
         {
-            var result = await _service.GetInvestorsAsync(search, page, pageSize);
-            return Ok(result);
+            _service = service;
+            _currentUserResolver = currentUserResolver;
+            _logger = logger;
         }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Get investors cancelled");
-            return StatusCode(499);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving investors");
-            return StatusCode(500, "An error occurred while retrieving investors.");
-        }
-    }
 
-    // GET: api/investors/{investorKey}
-    [HttpGet("{investorKey:long}")]
-    public async Task<ActionResult<InvestorDetailDto>> GetByKey(long investorKey)
-    {
-        try
+        // GET: api/Investors
+        [HttpGet]
+        public async Task<ActionResult<List<InvestorDto>>> GetAll()
         {
-            var result = await _service.GetInvestorByKeyAsync(investorKey);
-            return result is null ? NotFound() : Ok(result);
+            try
+            {
+                var result = await _service.GetAllAsync();
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get all investor rows cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving investor rows");
+                return StatusCode(500, "An error occurred while retrieving investor rows.");
+            }
         }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation("Get investor {InvestorKey} cancelled", investorKey);
-            return StatusCode(499);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving investor {InvestorKey}", investorKey);
-            return StatusCode(500, "An error occurred while retrieving the investor.");
-        }
-    }
 
-    // GET: api/investors/{investorKey}/investments
-    [HttpGet("{investorKey:long}/investments")]
-    public async Task<ActionResult<IReadOnlyList<InvestorInvestmentDto>>> GetInvestments(long investorKey)
-    {
-        try
+        // POST: api/Investors
+        [HttpPost]
+        public async Task<ActionResult<InvestorDto>> Create(
+            [FromBody] InvestorCreateRequest? request,
+            CancellationToken cancellationToken)
         {
-            var result = await _service.GetInvestorInvestmentsAsync(investorKey);
-            return Ok(result);
+            if (request is null || string.IsNullOrWhiteSpace(request.InvestorName))
+            {
+                return BadRequest("Investor name is required.");
+            }
+
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.CreatedBy,
+                "createdBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
+            try
+            {
+                var created = await _service.CreateAsync(request, auditDisplayName!, cancellationToken);
+                return StatusCode(StatusCodes.Status201Created, created);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Create investor validation failed");
+                return BadRequest(ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Create investor cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating investor");
+                return StatusCode(500, "An error occurred while creating the investor.");
+            }
         }
-        catch (OperationCanceledException)
+
+        // PUT: api/Investors
+        [HttpPut]
+        public async Task<IActionResult> Update(
+            [FromBody] InvestorUpdateBatchRequest request,
+            CancellationToken cancellationToken)
         {
-            _logger.LogInformation("Get investments for investor {InvestorKey} cancelled", investorKey);
-            return StatusCode(499);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error retrieving investments for investor {InvestorKey}", investorKey);
-            return StatusCode(500, "An error occurred while retrieving investor investments.");
+            if (request is null)
+            {
+                return BadRequest("Request body is required.");
+            }
+
+            foreach (var investor in request.Investors)
+            {
+                if (!investor.InvestorAliasKey.HasValue)
+                {
+                    return BadRequest("Investor alias key is required.");
+                }
+
+                if (string.IsNullOrWhiteSpace(investor.InvestorCode))
+                {
+                    return BadRequest("Investor code is required.");
+                }
+            }
+
+            var clientAudit = request.Investors.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
+            try
+            {
+                var updated = await _service.UpdateAsync(request, auditDisplayName!);
+                return updated ? NoContent() : NotFound();
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Update investor cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating investor row");
+                return StatusCode(500, "An error occurred while updating the investor row.");
+            }
         }
     }
 }

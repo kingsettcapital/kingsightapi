@@ -1,0 +1,130 @@
+using kingsightapi.Configuration;
+using kingsightapi.Entities;
+using kingsightapi.Services;
+using Microsoft.AspNetCore.Mvc;
+
+namespace kingsightapi.Controllers
+{
+    [ApiController]
+    [Route("api/[controller]")]
+    public class DefaultDateCaptureController : ControllerBase
+    {
+        private readonly IDefaultDateCaptureService _service;
+        private readonly ILoanSecurityValueService _loanSecurityValueService;
+        private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly ILogger<DefaultDateCaptureController> _logger;
+
+        public DefaultDateCaptureController(
+            IDefaultDateCaptureService service,
+            ILoanSecurityValueService loanSecurityValueService,
+            ICurrentUserResolver currentUserResolver,
+            ILogger<DefaultDateCaptureController> logger)
+        {
+            _service = service;
+            _loanSecurityValueService = loanSecurityValueService;
+            _currentUserResolver = currentUserResolver;
+            _logger = logger;
+        }
+
+        // GET: api/DefaultDateCapture?loanAliasIds=1&loanAliasIds=2&statuses=2
+        [HttpGet]
+        public async Task<ActionResult<List<DefaultDateCaptureRowDto>>> Get(
+            [FromQuery] int[]? loanAliasIds,
+            [FromQuery] string[]? statuses,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var aliasFilter = loanAliasIds?.Where(id => id > 0).ToArray();
+                var result = await _service.GetAsync(
+                    aliasFilter is { Length: > 0 } ? aliasFilter : null,
+                    statuses,
+                    cancellationToken);
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get default date capture rows cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving default date capture rows");
+                return StatusCode(500, "An error occurred while retrieving default date capture rows.");
+            }
+        }
+
+        // GET: api/DefaultDateCapture/statuses (optional; SPA may use LoanSecurityValue/statuses)
+        [HttpGet("statuses")]
+        public async Task<ActionResult<List<LoanSecurityValueStatusOptionDto>>> GetStatuses(
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await _loanSecurityValueService.GetStatusOptionsAsync();
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get default date capture status options cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving default date capture status options");
+                return StatusCode(500, "An error occurred while retrieving status filter options.");
+            }
+        }
+
+        // PUT: api/DefaultDateCapture
+        [HttpPut]
+        public async Task<IActionResult> Update(
+            [FromBody] DefaultDateCaptureBulkUpdateRequest? request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null || request.Loans.Count == 0)
+            {
+                return BadRequest("Request body must include at least one loan row.");
+            }
+
+            foreach (var loan in request.Loans)
+            {
+                if (loan.LoanKey <= 0 && string.IsNullOrWhiteSpace(loan.LoanCode))
+                {
+                    return BadRequest("Loan key or loan code is required.");
+                }
+            }
+
+            var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
+            try
+            {
+                var updated = await _service.UpdateAsync(request, auditDisplayName!, cancellationToken);
+                return updated ? NoContent() : NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Default date capture update validation failed");
+                return BadRequest(ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Update default date capture rows cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating default date capture rows");
+                return StatusCode(500, "An error occurred while updating default date capture rows.");
+            }
+        }
+    }
+}
