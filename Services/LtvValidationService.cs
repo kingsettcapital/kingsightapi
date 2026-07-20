@@ -382,6 +382,14 @@ namespace kingsightapi.Services
                     cancellationToken);
 
                 _schema = new LtvValidationSchema(optional, audit, qrSlideLink);
+                _logger.LogInformation(
+                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, auditBy={AuditBy}.",
+                    optional.LtvColumn ?? "(none)",
+                    optional.PriorLtvColumn ?? "(none)",
+                    optional.UpdateReason ?? "(none)",
+                    optional.AiComments ?? "(none)",
+                    qrSlideLink ?? "(none)",
+                    audit.UpdatedByColumn ?? "(none)");
                 if (optional.LtvColumn is null)
                 {
                     _logger.LogWarning(

@@ -19,6 +19,7 @@ namespace kingsightapi.Services
                 connectionString,
                 tableName,
                 [
+                    "ltv_updated_by",
                     "default_si_updated_by",
                     "updated_by",
                     "user_updated_by",
@@ -29,6 +30,7 @@ namespace kingsightapi.Services
                 connectionString,
                 tableName,
                 [
+                    "ltv_updated_datetime",
                     "default_si_updated_datetime",
                     "updated_datetime",
                     "updated_dtm",
