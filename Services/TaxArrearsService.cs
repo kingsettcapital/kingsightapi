@@ -149,6 +149,14 @@ namespace kingsightapi.Services
                     $"Loan {loanCode} is not assigned in loan_alias_relationship.");
             }
 
+            if (await ExistsLoanAndTaxYearAsync(connection, loanCode, request.TaxYear, cancellationToken))
+            {
+                var yearLabel = string.IsNullOrWhiteSpace(request.TaxYear) ? "(none)" : request.TaxYear.Trim();
+                throw new InvalidOperationException(
+                    $"Tax arrears for loan {loanCode} and tax year {yearLabel} already exists. " +
+                    "Each loan can have only one row per tax year — choose a different tax year.");
+            }
+
             long taxArrearKey = 0;
             if (_hasTaxArrearKeyColumn)
             {
@@ -198,20 +206,17 @@ namespace kingsightapi.Services
             {
                 ValidateUpdateItem(item);
 
-                var rowsChanged = item.TaxArrearKey > 0 && _hasTaxArrearKeyColumn
-                    ? await ExecuteUpdateAsync(BuildUpdateByKeySql(), item, auditDisplayName, connection, cancellationToken)
-                    : 0;
-
-                if (rowsChanged == 0 && !string.IsNullOrWhiteSpace(item.LoanCode))
+                if (string.IsNullOrWhiteSpace(item.LoanCode))
                 {
-                    rowsChanged = await ExecuteUpdateAsync(
-                        BuildUpdateByLoanCodeSql(),
-                        item,
-                        auditDisplayName,
-                        connection,
-                        cancellationToken);
+                    continue;
                 }
 
+                // Natural key for loan_tax_details is (loan_code, tax_year) — there is no tax_arrear_key.
+                var rowsChanged = await UpdateByLoanCodeAndYearAsync(
+                    item,
+                    auditDisplayName,
+                    connection,
+                    cancellationToken);
                 affectedRows += rowsChanged;
             }
 
@@ -225,6 +230,67 @@ namespace kingsightapi.Services
             return false;
         }
 
+        /// <summary>
+        /// Updates by natural key (loan_code + tax_year). If legacy duplicate rows share that key,
+        /// they are collapsed to a single row before applying the change.
+        /// </summary>
+        private async Task<int> UpdateByLoanCodeAndYearAsync(
+            TaxArrearsUpdateItem item,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            var loanCode = item.LoanCode!.Trim();
+            var originalYear = NormalizeOptional(item.OriginalTaxYear ?? item.TaxYear);
+            var targetYear = NormalizeOptional(item.TaxYear);
+            var yearChanging = !string.Equals(targetYear, originalYear, StringComparison.OrdinalIgnoreCase);
+
+            if (yearChanging
+                && await ExistsLoanAndTaxYearAsync(connection, loanCode, item.TaxYear, cancellationToken))
+            {
+                var yearLabel = string.IsNullOrWhiteSpace(item.TaxYear) ? "(none)" : item.TaxYear.Trim();
+                throw new InvalidOperationException(
+                    $"Tax arrears for loan {loanCode} and tax year {yearLabel} already exists. " +
+                    "Each loan can have only one row per tax year.");
+            }
+
+            var matchCount = await CountByLoanAndYearAsync(
+                connection,
+                loanCode,
+                item.OriginalTaxYear ?? item.TaxYear,
+                cancellationToken);
+
+            if (matchCount == 0)
+            {
+                throw new InvalidOperationException(
+                    $"No tax arrears row found for loan {loanCode} and tax year {originalYear ?? "(none)"}.");
+            }
+
+            if (matchCount > 1)
+            {
+                _logger.LogWarning(
+                    "Collapsing {Count} duplicate tax arrears rows for loan {LoanCode} year {TaxYear} into one.",
+                    matchCount,
+                    loanCode,
+                    originalYear);
+                await DeleteByLoanAndYearAsync(
+                    connection,
+                    loanCode,
+                    item.OriginalTaxYear ?? item.TaxYear,
+                    cancellationToken);
+
+                await InsertUpdatedRowAsync(connection, loanCode, item, auditDisplayName, cancellationToken);
+                return 1;
+            }
+
+            return await ExecuteUpdateAsync(
+                BuildUpdateByLoanCodeSql(),
+                item,
+                auditDisplayName,
+                connection,
+                cancellationToken);
+        }
+
         private async Task<int> ExecuteUpdateAsync(
             string sql,
             TaxArrearsUpdateItem item,
@@ -233,7 +299,8 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken)
         {
             await using var command = new SqlCommand(sql, connection);
-            if (item.TaxArrearKey > 0)
+            // tax_arrear_key is optional legacy support only; natural key is loan_code + tax_year.
+            if (item.TaxArrearKey > 0 && sql.Contains("@tax_arrear_key", StringComparison.Ordinal))
             {
                 command.Parameters.AddWithValue("@tax_arrear_key", item.TaxArrearKey);
             }
@@ -253,6 +320,95 @@ namespace kingsightapi.Services
             _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task InsertUpdatedRowAsync(
+            SqlConnection connection,
+            string loanCode,
+            TaxArrearsUpdateItem item,
+            string auditDisplayName,
+            CancellationToken cancellationToken)
+        {
+            var createRequest = new TaxArrearsCreateRequest
+            {
+                LoanCode = loanCode,
+                TaxMemoDate = item.TaxMemoDate,
+                TaxArrears = item.TaxArrears,
+                TaxYear = item.TaxYear,
+                Notes = item.Notes,
+                UserUpdatedBy = auditDisplayName,
+            };
+
+            long taxArrearKey = 0;
+            if (_hasTaxArrearKeyColumn)
+            {
+                taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
+            }
+
+            await using var insertCommand = new SqlCommand(BuildInsertSql(), connection);
+            if (_hasTaxArrearKeyColumn)
+            {
+                insertCommand.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
+            }
+
+            AddTaxArrearParameters(insertCommand, loanCode, createRequest);
+            _auditColumns.AddUpdateParameters(insertCommand, auditDisplayName, DateTime.UtcNow);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<int> CountByLoanAndYearAsync(
+            SqlConnection connection,
+            string loanCode,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select count(1)
+                from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
+            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is int count ? count : Convert.ToInt32(result);
+        }
+
+        private async Task DeleteByLoanAndYearAsync(
+            SqlConnection connection,
+            string loanCode,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                delete from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
+            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<bool> ExistsLoanAndTaxYearAsync(
+            SqlConnection connection,
+            string loanCode,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select top (1) 1
+                from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
+            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null;
         }
 
         private async Task<IReadOnlyList<TaxArrearsRowDto>> ReadRowsAsync(
@@ -300,8 +456,15 @@ namespace kingsightapi.Services
                         user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression("a")},
                         user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression("a")}
                  from {_tblTaxArrears} a
-                 inner join {_tblLoanAliasRelationship} b
-                     on a.loan_code = b.loan_code
+                 cross apply (
+                     select top (1)
+                            r.loan_code,
+                            r.loan_description,
+                            r.loan_alias_name
+                     from {_tblLoanAliasRelationship} r
+                     where r.loan_code = a.loan_code
+                     order by r.loan_alias_name
+                 ) b
                  left join {_tblDimLoan} l
                      on b.loan_code = l.loan_code
                  """);
@@ -378,16 +541,6 @@ namespace kingsightapi.Services
                 """;
         }
 
-        private string BuildUpdateByKeySql() =>
-            $"""
-                update {_tblTaxArrears}
-                set tax_memo_date = @tax_memo_date,
-                    tax_arrears = @tax_arrears,
-                    tax_year = @tax_year,
-                    tax_notes = @notes{_auditColumns.BuildUpdateSetClause()}
-                where tax_arrear_key = @tax_arrear_key
-                """;
-
         private string BuildUpdateByLoanCodeSql() =>
             $"""
                 update {_tblTaxArrears}
@@ -409,6 +562,10 @@ namespace kingsightapi.Services
             await EnsureTableAvailableAsync(cancellationToken);
 
             _hasTaxArrearKeyColumn = await ColumnExistsAsync("tax_arrear_key", cancellationToken);
+            _logger.LogInformation(
+                "Tax arrears schema probe complete. table={Table}, hasTaxArrearKey={HasKey}",
+                _tblTaxArrears,
+                _hasTaxArrearKeyColumn);
             _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
                 _connectionString,
                 _tblTaxArrears,
@@ -585,8 +742,15 @@ namespace kingsightapi.Services
                        user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression("a")},
                        user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression("a")}
                 from {_tblTaxArrears} a
-                inner join {_tblLoanAliasRelationship} b
-                    on a.loan_code = b.loan_code
+                cross apply (
+                    select top (1)
+                           r.loan_code,
+                           r.loan_description,
+                           r.loan_alias_name
+                    from {_tblLoanAliasRelationship} r
+                    where r.loan_code = a.loan_code
+                    order by r.loan_alias_name
+                ) b
                 left join {_tblDimLoan} l
                     on b.loan_code = l.loan_code
                 {whereClause}
@@ -632,9 +796,14 @@ namespace kingsightapi.Services
 
         private static void ValidateUpdateItem(TaxArrearsUpdateItem item)
         {
-            if (item.TaxArrearKey <= 0 && string.IsNullOrWhiteSpace(item.LoanCode))
+            if (string.IsNullOrWhiteSpace(item.LoanCode))
             {
-                throw new InvalidOperationException("Tax arrear key or loan code is required.");
+                throw new InvalidOperationException("Loan code is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(item.OriginalTaxYear) && string.IsNullOrWhiteSpace(item.TaxYear))
+            {
+                throw new InvalidOperationException("Tax year is required.");
             }
 
             if (item.Notes is { Length: > 500 })
