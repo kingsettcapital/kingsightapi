@@ -2,7 +2,9 @@ namespace kingsightapi.Entities
 {
     /// <summary>
     /// Loan alias security value row for the Security Value screen.
-    /// Collateral is summed from mort.dim_loan; other fields are stored on mort.loan_alias_master.
+    /// Collateral Per Yardi is the latest Real Estate collateral_amount sum from Yardi;
+    /// security_value / units / acres / SF are stored on loan_alias_master
+    /// (security_value falls back to collateral when null or 0).
     /// </summary>
     public sealed class LoanSecurityValueDto
     {

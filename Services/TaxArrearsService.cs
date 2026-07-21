@@ -149,12 +149,12 @@ namespace kingsightapi.Services
                     $"Loan {loanCode} is not assigned in loan_alias_relationship.");
             }
 
-            if (await ExistsLoanAndTaxYearAsync(connection, loanCode, request.TaxYear, cancellationToken))
+            if (await ExistsLoanAndTaxMemoDateAsync(connection, loanCode, request.TaxMemoDate, cancellationToken))
             {
-                var yearLabel = string.IsNullOrWhiteSpace(request.TaxYear) ? "(none)" : request.TaxYear.Trim();
+                var dateLabel = request.TaxMemoDate!.Value.ToString("yyyy-MM-dd");
                 throw new InvalidOperationException(
-                    $"Tax arrears for loan {loanCode} and tax year {yearLabel} already exists. " +
-                    "Each loan can have only one row per tax year — choose a different tax year.");
+                    $"Tax arrears for loan {loanCode} and tax memo date {dateLabel} already exists. " +
+                    "Each loan can have only one row per tax memo date — choose a different tax memo date.");
             }
 
             long taxArrearKey = 0;
@@ -177,7 +177,7 @@ namespace kingsightapi.Services
 
             var row = _hasTaxArrearKeyColumn && taxArrearKey > 0
                 ? await ReadByKeyAsync(connection, taxArrearKey, cancellationToken)
-                : await ReadByLoanCodeAndYearAsync(connection, loanCode, request.TaxYear, cancellationToken);
+                : await ReadByLoanCodeAndMemoDateAsync(connection, loanCode, request.TaxMemoDate, cancellationToken);
 
             if (row is null)
             {
@@ -211,8 +211,8 @@ namespace kingsightapi.Services
                     continue;
                 }
 
-                // Natural key for loan_tax_details is (loan_code, tax_year) — there is no tax_arrear_key.
-                var rowsChanged = await UpdateByLoanCodeAndYearAsync(
+                // Natural key for loan_tax_details is (loan_code, tax_memo_date).
+                var rowsChanged = await UpdateByLoanCodeAndMemoDateAsync(
                     item,
                     auditDisplayName,
                     connection,
@@ -231,52 +231,52 @@ namespace kingsightapi.Services
         }
 
         /// <summary>
-        /// Updates by natural key (loan_code + tax_year). If legacy duplicate rows share that key,
+        /// Updates by natural key (loan_code + tax_memo_date). If legacy duplicate rows share that key,
         /// they are collapsed to a single row before applying the change.
         /// </summary>
-        private async Task<int> UpdateByLoanCodeAndYearAsync(
+        private async Task<int> UpdateByLoanCodeAndMemoDateAsync(
             TaxArrearsUpdateItem item,
             string auditDisplayName,
             SqlConnection connection,
             CancellationToken cancellationToken)
         {
             var loanCode = item.LoanCode!.Trim();
-            var originalYear = NormalizeOptional(item.OriginalTaxYear ?? item.TaxYear);
-            var targetYear = NormalizeOptional(item.TaxYear);
-            var yearChanging = !string.Equals(targetYear, originalYear, StringComparison.OrdinalIgnoreCase);
+            var originalMemoDate = item.OriginalTaxMemoDate?.Date ?? item.TaxMemoDate?.Date;
+            var targetMemoDate = item.TaxMemoDate?.Date;
+            var memoDateChanging = originalMemoDate != targetMemoDate;
 
-            if (yearChanging
-                && await ExistsLoanAndTaxYearAsync(connection, loanCode, item.TaxYear, cancellationToken))
+            if (memoDateChanging
+                && await ExistsLoanAndTaxMemoDateAsync(connection, loanCode, item.TaxMemoDate, cancellationToken))
             {
-                var yearLabel = string.IsNullOrWhiteSpace(item.TaxYear) ? "(none)" : item.TaxYear.Trim();
+                var dateLabel = targetMemoDate?.ToString("yyyy-MM-dd") ?? "(none)";
                 throw new InvalidOperationException(
-                    $"Tax arrears for loan {loanCode} and tax year {yearLabel} already exists. " +
-                    "Each loan can have only one row per tax year.");
+                    $"Tax arrears for loan {loanCode} and tax memo date {dateLabel} already exists. " +
+                    "Each loan can have only one row per tax memo date.");
             }
 
-            var matchCount = await CountByLoanAndYearAsync(
+            var matchCount = await CountByLoanAndMemoDateAsync(
                 connection,
                 loanCode,
-                item.OriginalTaxYear ?? item.TaxYear,
+                originalMemoDate,
                 cancellationToken);
 
             if (matchCount == 0)
             {
                 throw new InvalidOperationException(
-                    $"No tax arrears row found for loan {loanCode} and tax year {originalYear ?? "(none)"}.");
+                    $"No tax arrears row found for loan {loanCode} and tax memo date {originalMemoDate?.ToString("yyyy-MM-dd") ?? "(none)"}.");
             }
 
             if (matchCount > 1)
             {
                 _logger.LogWarning(
-                    "Collapsing {Count} duplicate tax arrears rows for loan {LoanCode} year {TaxYear} into one.",
+                    "Collapsing {Count} duplicate tax arrears rows for loan {LoanCode} memo date {TaxMemoDate} into one.",
                     matchCount,
                     loanCode,
-                    originalYear);
-                await DeleteByLoanAndYearAsync(
+                    originalMemoDate);
+                await DeleteByLoanAndMemoDateAsync(
                     connection,
                     loanCode,
-                    item.OriginalTaxYear ?? item.TaxYear,
+                    originalMemoDate,
                     cancellationToken);
 
                 await InsertUpdatedRowAsync(connection, loanCode, item, auditDisplayName, cancellationToken);
@@ -299,7 +299,7 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken)
         {
             await using var command = new SqlCommand(sql, connection);
-            // tax_arrear_key is optional legacy support only; natural key is loan_code + tax_year.
+            // tax_arrear_key is optional legacy support only; natural key is loan_code + tax_memo_date.
             if (item.TaxArrearKey > 0 && sql.Contains("@tax_arrear_key", StringComparison.Ordinal))
             {
                 command.Parameters.AddWithValue("@tax_arrear_key", item.TaxArrearKey);
@@ -307,8 +307,12 @@ namespace kingsightapi.Services
 
             command.Parameters.AddWithValue("@loan_code", item.LoanCode?.Trim() ?? string.Empty);
             command.Parameters.AddWithValue(
-                "@original_tax_year",
-                ToDbValue(NormalizeOptional(item.OriginalTaxYear ?? item.TaxYear)));
+                "@original_tax_memo_date",
+                item.OriginalTaxMemoDate.HasValue
+                    ? item.OriginalTaxMemoDate.Value.Date
+                    : item.TaxMemoDate.HasValue
+                        ? item.TaxMemoDate.Value.Date
+                        : DBNull.Value);
             command.Parameters.AddWithValue(
                 "@tax_memo_date",
                 item.TaxMemoDate.HasValue ? item.TaxMemoDate.Value.Date : DBNull.Value);
@@ -356,57 +360,72 @@ namespace kingsightapi.Services
             await insertCommand.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        private async Task<int> CountByLoanAndYearAsync(
+        private async Task<int> CountByLoanAndMemoDateAsync(
             SqlConnection connection,
             string loanCode,
-            string? taxYear,
+            DateTime? taxMemoDate,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 select count(1)
                 from {_tblTaxArrears}
                 where loan_code = @loan_code
-                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                  and (
+                        (@tax_memo_date is null and tax_memo_date is null)
+                     or cast(tax_memo_date as date) = cast(@tax_memo_date as date)
+                  )
                 """;
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
-            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                taxMemoDate.HasValue ? taxMemoDate.Value.Date : DBNull.Value);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is int count ? count : Convert.ToInt32(result);
         }
 
-        private async Task DeleteByLoanAndYearAsync(
+        private async Task DeleteByLoanAndMemoDateAsync(
             SqlConnection connection,
             string loanCode,
-            string? taxYear,
+            DateTime? taxMemoDate,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 delete from {_tblTaxArrears}
                 where loan_code = @loan_code
-                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                  and (
+                        (@tax_memo_date is null and tax_memo_date is null)
+                     or cast(tax_memo_date as date) = cast(@tax_memo_date as date)
+                  )
                 """;
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
-            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                taxMemoDate.HasValue ? taxMemoDate.Value.Date : DBNull.Value);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        private async Task<bool> ExistsLoanAndTaxYearAsync(
+        private async Task<bool> ExistsLoanAndTaxMemoDateAsync(
             SqlConnection connection,
             string loanCode,
-            string? taxYear,
+            DateTime? taxMemoDate,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 select top (1) 1
                 from {_tblTaxArrears}
                 where loan_code = @loan_code
-                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                  and (
+                        (@tax_memo_date is null and tax_memo_date is null)
+                     or cast(tax_memo_date as date) = cast(@tax_memo_date as date)
+                  )
                 """;
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
-            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                taxMemoDate.HasValue ? taxMemoDate.Value.Date : DBNull.Value);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
         }
@@ -549,7 +568,10 @@ namespace kingsightapi.Services
                     tax_year = @tax_year,
                     tax_notes = @notes{_auditColumns.BuildUpdateSetClause()}
                 where loan_code = @loan_code
-                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@original_tax_year as varchar(20)), '')
+                  and (
+                        (@original_tax_memo_date is null and tax_memo_date is null)
+                     or cast(tax_memo_date as date) = cast(@original_tax_memo_date as date)
+                  )
                 """;
 
         private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
@@ -704,20 +726,25 @@ namespace kingsightapi.Services
             return await reader.ReadAsync(cancellationToken) ? MapRow(reader) : null;
         }
 
-        private async Task<TaxArrearsRowDto?> ReadByLoanCodeAndYearAsync(
+        private async Task<TaxArrearsRowDto?> ReadByLoanCodeAndMemoDateAsync(
             SqlConnection connection,
             string loanCode,
-            string? taxYear,
+            DateTime? taxMemoDate,
             CancellationToken cancellationToken)
         {
             var sql = BuildSelectSql(
                 """
                 where a.loan_code = @loan_code
-                  and isnull(cast(a.tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                  and (
+                        (@tax_memo_date is null and a.tax_memo_date is null)
+                     or cast(a.tax_memo_date as date) = cast(@tax_memo_date as date)
+                  )
                 """);
             await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
-            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                taxMemoDate.HasValue ? taxMemoDate.Value.Date : DBNull.Value);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             return await reader.ReadAsync(cancellationToken) ? MapRow(reader) : null;
@@ -788,6 +815,11 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("Loan key or loan code is required.");
             }
 
+            if (!request.TaxMemoDate.HasValue)
+            {
+                throw new InvalidOperationException("Tax memo date is required.");
+            }
+
             if (request.Notes is { Length: > 500 })
             {
                 throw new InvalidOperationException("Notes must be 500 characters or fewer.");
@@ -801,9 +833,9 @@ namespace kingsightapi.Services
                 throw new InvalidOperationException("Loan code is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(item.OriginalTaxYear) && string.IsNullOrWhiteSpace(item.TaxYear))
+            if (!item.OriginalTaxMemoDate.HasValue && !item.TaxMemoDate.HasValue)
             {
-                throw new InvalidOperationException("Tax year is required.");
+                throw new InvalidOperationException("Tax memo date is required.");
             }
 
             if (item.Notes is { Length: > 500 })

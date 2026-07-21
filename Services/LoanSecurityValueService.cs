@@ -50,6 +50,14 @@ namespace kingsightapi.Services
 
         private readonly string _tblDimStatus;
 
+        private readonly string _tblYardiCollateralValue;
+
+        private readonly string _tblYardiCollateralXref;
+
+        private readonly string _tblYardiCollateral;
+
+        private readonly string _tblYardiLookupValues;
+
         private readonly ILogger<LoanSecurityValueService> _logger;
 
 
@@ -89,6 +97,14 @@ namespace kingsightapi.Services
             _tblLoanAliasRelationship = subjective.LoanAliasRelationship;
 
             _tblDimStatus = subjective.DimStatus;
+
+            _tblYardiCollateralValue = tables.Yardi("Collateral_Value");
+
+            _tblYardiCollateralXref = tables.Yardi("collateral_xref");
+
+            _tblYardiCollateral = tables.Yardi("collateral");
+
+            _tblYardiLookupValues = tables.Yardi("Lookup_Values");
         }
 
 
@@ -443,13 +459,97 @@ namespace kingsightapi.Services
 
                 $"""
 
+                 with latest_collateral_value as (
+
+                     select collateral_id, valuation_date, collateral_amount
+
+                     from (
+
+                         select collateral_id, valuation_date, collateral_amount,
+
+                                row_number() over (partition by collateral_id order by valuation_date desc) as rn
+
+                         from {_tblYardiCollateralValue}
+
+                     ) t
+
+                     where rn = 1
+
+                 ),
+
+                 dataset as (
+
+                     select e.loan_alias_name,
+
+                            e.loan_code,
+
+                            col.collateral_name,
+
+                            cv.collateral_amount,
+
+                            row_number() over (
+
+                                partition by e.loan_alias_name, col.collateral_name
+
+                                order by e.loan_alias_name, col.collateral_name
+
+                            ) as rn
+
+                     from {_tblLoanAliasRelationship} e
+
+                     inner join {_tblDimLoan} f
+
+                         on {SubjectiveInputSql.EqualsVarchar("e", "loan_code", "f", "loan_code")}
+
+                     inner join {_tblLoanAliasMaster} g
+
+                         on e.loan_alias_name = g.loan_alias_name
+
+                     left join (
+
+                         select distinct collateral_id, loan_id
+
+                         from {_tblYardiCollateralXref}
+
+                     ) xref on xref.loan_id = f.loan_id
+
+                     left join {_tblYardiCollateral} col
+
+                         on xref.collateral_id = col.collateral_id
+
+                     inner join {_tblYardiLookupValues} lv
+
+                         on col.collateral_type = lv.lookup_sk
+
+                        and lv.lookup_value = 'Real Estate'
+
+                     left join latest_collateral_value cv
+
+                         on col.collateral_id = cv.collateral_id
+
+                 ),
+
+                 dataset2 as (
+
+                     select loan_alias_name,
+
+                            sum(collateral_amount) as collateral
+
+                     from dataset
+
+                     where rn = 1
+
+                     group by loan_alias_name
+
+                 )
+
                  select a.loan_alias_id,
 
                         a.loan_alias_name,
 
                         collateral = isnull(b.collateral, 0),
 
-                        a.security_value,
+                        security_value = coalesce(nullif(a.security_value, 0), b.collateral),
 
                         a.units,
 
@@ -459,17 +559,9 @@ namespace kingsightapi.Services
 
                  from {_tblLoanAliasMaster} a
 
-                 left join (
+                 left join dataset2 b
 
-                     select loan_alias_name,
-
-                            sum(collateral) as collateral
-
-                     from {_tblLoanAliasRelationship}
-
-                     group by loan_alias_name
-
-                 ) b on a.loan_alias_name = b.loan_alias_name
+                     on a.loan_alias_name = b.loan_alias_name
 
                  """);
 

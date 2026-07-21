@@ -38,4 +38,8 @@ public sealed class FabricWarehouseTables
     /// <summary>Mortgage dimension tables in <c>wh_gold1.mortgage</c>.</summary>
     public string Mortgage(string table) =>
         $"{_options.SubjectiveInputDatabase}.mortgage.{table}";
+
+    /// <summary>Yardi tables in <c>{SilverLakehouseDatabase}.yardi</c>.</summary>
+    public string Yardi(string table) =>
+        $"{_options.SilverLakehouseDatabase}.yardi.{table}";
 }
