@@ -360,11 +360,13 @@ namespace kingsightapi.Services
 
 
 
-            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
 
                 _connectionString,
 
                 _sql.LoanAliasRelationship,
+
+                SubjectiveInputAuditScreen.OtherCost,
 
                 cancellationToken);
 

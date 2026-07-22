@@ -217,9 +217,10 @@ namespace kingsightapi.Services
                 return;
             }
 
-            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
                 _connectionString,
                 _sql.LoanAliasRelationship,
+                SubjectiveInputAuditScreen.DefaultDate,
                 cancellationToken);
             _schemaProbed = true;
         }

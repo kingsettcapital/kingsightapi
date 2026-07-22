@@ -371,9 +371,10 @@ namespace kingsightapi.Services
                     _connectionString,
                     _loanAliasRelationship,
                     cancellationToken);
-                var audit = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+                var audit = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
                     _connectionString,
                     _loanAliasRelationship,
+                    SubjectiveInputAuditScreen.Ltv,
                     cancellationToken);
                 var qrSlideLink = await DimLoanColumnProbe.FindFirstAsync(
                     _connectionString,

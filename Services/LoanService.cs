@@ -7,7 +7,9 @@ namespace kingsightapi.Services
 {
     public interface ILoanService
     {
-        Task<IReadOnlyList<LoanDto>> GetAllAsync(CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<LoanDto>> GetAllAsync(
+            string? auditProfile = null,
+            CancellationToken cancellationToken = default);
         Task<LoanLookupsDto> GetLookupsAsync(CancellationToken cancellationToken = default);
         Task<bool> UpdateAsync(LoanUpdateBatchRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
     }
@@ -21,7 +23,8 @@ namespace kingsightapi.Services
         private readonly ILogger<LoanService> _logger;
 
         private bool _schemaProbed;
-        private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
+        private SubjectiveInputRelationshipAuditColumns _aliasAuditColumns = new();
+        private SubjectiveInputRelationshipAuditColumns _attributeAuditColumns = new();
         private string? _rankingColumn;
         private string? _dummyLoanLinkColumn;
         private string? _lateInterestApplicableColumn;
@@ -42,9 +45,12 @@ namespace kingsightapi.Services
             _sql = new SubjectiveInputSql(tables);
         }
 
-        public async Task<IReadOnlyList<LoanDto>> GetAllAsync(CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<LoanDto>> GetAllAsync(
+            string? auditProfile = null,
+            CancellationToken cancellationToken = default)
         {
             await EnsureSchemaAsync(cancellationToken);
+            var audit = ResolveAuditColumns(auditProfile, isAttributeUpdate: false);
 
             var rows = new List<LoanDto>();
 
@@ -60,7 +66,7 @@ namespace kingsightapi.Services
                 _logger.LogWarning(ex, "Failed to sync Non-KS loans into loan_alias_relationship before list.");
             }
 
-            await using var command = new SqlCommand(BuildListSql(), connection)
+            await using var command = new SqlCommand(BuildListSql(audit), connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
@@ -72,7 +78,10 @@ namespace kingsightapi.Services
                 rows.Add(MapRow(reader));
             }
 
-            _logger.LogInformation("Retrieved {Count} loan alias relationship rows.", rows.Count);
+            _logger.LogInformation(
+                "Retrieved {Count} loan alias relationship rows (audit={AuditScreen}).",
+                rows.Count,
+                audit.Screen);
             var unresolvedLoanKeys = rows.Count(row => row.LoanKey == 0);
             if (unresolvedLoanKeys > 0)
             {
@@ -129,18 +138,22 @@ namespace kingsightapi.Services
             {
                 // A missing or non-positive alias key means "remove the assigned alias".
                 var isClearingAlias = !loan.LoanAliasKey.HasValue || loan.LoanAliasKey.Value <= 0;
+                var isAttributeUpdate = IsAttributeUpdate(request, loan);
+                var audit = ResolveAuditColumns(request.AuditProfile, isAttributeUpdate);
 
                 if (isClearingAlias)
                 {
+                    // Clearing alias always stamps loan-alias audit columns.
+                    audit = _aliasAuditColumns;
                     var clearedRows = loan.LoanKey > 0
                         ? await ExecuteClearAliasAsync(
-                            BuildClearAliasByLoanKeySql(), loan, auditDisplayName, connection, cancellationToken)
+                            BuildClearAliasByLoanKeySql(audit), loan, audit, auditDisplayName, connection, cancellationToken)
                         : 0;
 
                     if (clearedRows == 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
                     {
                         clearedRows = await ExecuteClearAliasAsync(
-                            BuildClearAliasByLoanCodeSql(), loan, auditDisplayName, connection, cancellationToken);
+                            BuildClearAliasByLoanCodeSql(audit), loan, audit, auditDisplayName, connection, cancellationToken);
                     }
 
                     affectedRows += clearedRows;
@@ -152,26 +165,33 @@ namespace kingsightapi.Services
                 }
 
                 short? priorRanking = null;
-                if (loan.LoanRanking.HasValue)
+                if (isAttributeUpdate && loan.LoanRanking.HasValue)
                 {
                     priorRanking = await TryGetPriorRankingAsync(connection, loan, cancellationToken);
                 }
 
+                var updateSql = loan.LoanKey > 0
+                    ? BuildUpdateByLoanKeySql(audit, isAttributeUpdate)
+                    : BuildUpdateByLoanCodeSql(audit, isAttributeUpdate);
+
                 var rowsChanged = loan.LoanKey > 0
-                    ? await ExecuteUpdateAsync(BuildUpdateByLoanKeySql(), loan, auditDisplayName, connection, cancellationToken)
+                    ? await ExecuteUpdateAsync(
+                        updateSql, loan, audit, isAttributeUpdate, auditDisplayName, connection, cancellationToken)
                     : 0;
 
                 if (rowsChanged == 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
                 {
                     rowsChanged = await ExecuteUpdateAsync(
-                        BuildUpdateByLoanCodeSql(),
+                        BuildUpdateByLoanCodeSql(audit, isAttributeUpdate),
                         loan,
+                        audit,
+                        isAttributeUpdate,
                         auditDisplayName,
                         connection,
                         cancellationToken);
                 }
 
-                if (rowsChanged > 0 && loan.LoanRanking.HasValue)
+                if (rowsChanged > 0 && isAttributeUpdate && loan.LoanRanking.HasValue)
                 {
                     await _notificationService.CreateRankingUpdateAsync(
                         loan.LoanCode,
@@ -180,11 +200,13 @@ namespace kingsightapi.Services
                         auditDisplayName,
                         cancellationToken);
                 }
-                else if (rowsChanged > 0)
+                else if (rowsChanged > 0 && !isAttributeUpdate)
                 {
                     _logger.LogDebug(
-                        "Skipped ranking notification for {LoanCode}; loanRanking was not sent in the request.",
-                        loan.LoanCode);
+                        "Alias-only update for {LoanCode}; stamped {AuditBy}/{AuditDtm}.",
+                        loan.LoanCode,
+                        audit.UpdatedByColumn,
+                        audit.UpdatedDtmColumn);
                 }
 
                 affectedRows += rowsChanged;
@@ -255,6 +277,8 @@ namespace kingsightapi.Services
         private async Task<int> ExecuteUpdateAsync(
             string sql,
             LoanUpdateRequestDto loan,
+            SubjectiveInputRelationshipAuditColumns audit,
+            bool isAttributeUpdate,
             string auditDisplayName,
             SqlConnection connection,
             CancellationToken cancellationToken)
@@ -266,34 +290,38 @@ namespace kingsightapi.Services
             command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
             command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
             command.Parameters.AddWithValue("@loan_alias_key", loan.LoanAliasKey!.Value);
-            command.Parameters.AddWithValue(
-                "@loan_ranking",
-                loan.LoanRanking.HasValue ? loan.LoanRanking.Value : DBNull.Value);
 
-            if (_dummyLoanLinkColumn is not null)
-            {
-                command.Parameters.AddWithValue("@dummy_loan_link", loan.DummyLoanLink?.Trim() ?? string.Empty);
-            }
-
-            if (_lateInterestApplicableColumn is not null)
+            if (isAttributeUpdate)
             {
                 command.Parameters.AddWithValue(
-                    "@is_loan_interest_applicable",
-                    loan.IsLoanInterestApplicable.HasValue
-                        ? loan.IsLoanInterestApplicable.Value
-                        : DBNull.Value);
+                    "@loan_ranking",
+                    loan.LoanRanking.HasValue ? loan.LoanRanking.Value : DBNull.Value);
+
+                if (_dummyLoanLinkColumn is not null)
+                {
+                    command.Parameters.AddWithValue("@dummy_loan_link", loan.DummyLoanLink?.Trim() ?? string.Empty);
+                }
+
+                if (_lateInterestApplicableColumn is not null)
+                {
+                    command.Parameters.AddWithValue(
+                        "@is_loan_interest_applicable",
+                        loan.IsLoanInterestApplicable.HasValue
+                            ? loan.IsLoanInterestApplicable.Value
+                            : DBNull.Value);
+                }
+
+                if (_lateInterestOffNoteColumn is not null)
+                {
+                    command.Parameters.AddWithValue(
+                        "@late_interest_off_note",
+                        string.IsNullOrWhiteSpace(loan.LateInterestOffNote)
+                            ? DBNull.Value
+                            : loan.LateInterestOffNote.Trim());
+                }
             }
 
-            if (_lateInterestOffNoteColumn is not null)
-            {
-                command.Parameters.AddWithValue(
-                    "@late_interest_off_note",
-                    string.IsNullOrWhiteSpace(loan.LateInterestOffNote)
-                        ? DBNull.Value
-                        : loan.LateInterestOffNote.Trim());
-            }
-
-            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+            audit.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -301,6 +329,7 @@ namespace kingsightapi.Services
         private async Task<int> ExecuteClearAliasAsync(
             string sql,
             LoanUpdateRequestDto loan,
+            SubjectiveInputRelationshipAuditColumns audit,
             string auditDisplayName,
             SqlConnection connection,
             CancellationToken cancellationToken)
@@ -311,7 +340,7 @@ namespace kingsightapi.Services
             };
             command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
             command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
-            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+            audit.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -358,9 +387,15 @@ namespace kingsightapi.Services
                 return;
             }
 
-            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+            _aliasAuditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
                 _connectionString,
                 _sql.LoanAliasRelationship,
+                SubjectiveInputAuditScreen.LoanAlias,
+                cancellationToken);
+            _attributeAuditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
+                _connectionString,
+                _sql.LoanAliasRelationship,
+                SubjectiveInputAuditScreen.LoanAttribute,
                 cancellationToken);
             _rankingColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
@@ -383,7 +418,49 @@ namespace kingsightapi.Services
                 ["late_interest_note", "late_interest_off_note"],
                 cancellationToken);
 
+            _logger.LogInformation(
+                "Loan relationship audit columns: alias={AliasBy}/{AliasDtm}, attribute={AttrBy}/{AttrDtm}",
+                _aliasAuditColumns.UpdatedByColumn,
+                _aliasAuditColumns.UpdatedDtmColumn,
+                _attributeAuditColumns.UpdatedByColumn,
+                _attributeAuditColumns.UpdatedDtmColumn);
+
             _schemaProbed = true;
+        }
+
+        private SubjectiveInputRelationshipAuditColumns ResolveAuditColumns(
+            string? auditProfile,
+            bool isAttributeUpdate)
+        {
+            var normalized = auditProfile?.Trim().ToLowerInvariant();
+            if (normalized is "loan_attribute" or "attribute" or "loan-attribute")
+            {
+                return _attributeAuditColumns;
+            }
+
+            if (normalized is "loan_alias" or "alias" or "loan-alias")
+            {
+                return _aliasAuditColumns;
+            }
+
+            return isAttributeUpdate ? _attributeAuditColumns : _aliasAuditColumns;
+        }
+
+        private static bool IsAttributeUpdate(LoanUpdateBatchRequest request, LoanUpdateRequestDto loan)
+        {
+            var normalized = request.AuditProfile?.Trim().ToLowerInvariant();
+            if (normalized is "loan_attribute" or "attribute" or "loan-attribute")
+            {
+                return true;
+            }
+
+            if (normalized is "loan_alias" or "alias" or "loan-alias")
+            {
+                return false;
+            }
+
+            // Infer from payload: attribute screen always sends ranking and/or late-interest fields.
+            return loan.LoanRanking.HasValue || loan.IsLoanInterestApplicable.HasValue;
         }
 
         private string BuildRankingSelectExpression() =>
@@ -432,7 +509,7 @@ namespace kingsightapi.Services
                 ? "''"
                 : $"isnull(r.[{_lateInterestOffNoteColumn}], '')";
 
-        private string BuildListSql() =>
+        private string BuildListSql(SubjectiveInputRelationshipAuditColumns audit) =>
             $"""
                 select loan_key = isnull(l.loan_key, 0),
                        r.loan_code,
@@ -445,8 +522,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
-                       user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression()},
-                       user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression()}
+                       user_updated_by = {audit.BuildSelectUpdatedByExpression()},
+                       user_updated_date = {audit.BuildSelectUpdatedDtmExpression()}
                 from {_sql.LoanAliasRelationship} r
                 left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
                 left join {_sql.SharedDimLoan} l on r.loan_code = l.loan_code
@@ -455,10 +532,12 @@ namespace kingsightapi.Services
                 order by r.loan_code
                 """;
 
-        private string BuildUpdateByLoanKeySql() =>
+        private string BuildUpdateByLoanKeySql(
+            SubjectiveInputRelationshipAuditColumns audit,
+            bool isAttributeUpdate) =>
             $"""
                 update r
-                set loan_alias_name = m.loan_alias_name{BuildRankingUpdateSetClause()}{BuildDummyLoanLinkUpdateSetClause()}{BuildRelationshipAttributeUpdateSetClause()}{_auditColumns.BuildUpdateSetClause()}
+                set loan_alias_name = m.loan_alias_name{(isAttributeUpdate ? BuildRankingUpdateSetClause() + BuildDummyLoanLinkUpdateSetClause() + BuildRelationshipAttributeUpdateSetClause() : string.Empty)}{audit.BuildUpdateSetClause()}
                 from {_sql.LoanAliasRelationship} r
                 inner join {_sql.LoanAliasMaster} m
                     on m.loan_alias_id = @loan_alias_key
@@ -467,30 +546,32 @@ namespace kingsightapi.Services
                    and l.loan_code = r.loan_code
                 """;
 
-        private string BuildUpdateByLoanCodeSql() =>
+        private string BuildUpdateByLoanCodeSql(
+            SubjectiveInputRelationshipAuditColumns audit,
+            bool isAttributeUpdate) =>
             $"""
                 update r
-                set loan_alias_name = m.loan_alias_name{BuildRankingUpdateSetClause()}{BuildDummyLoanLinkUpdateSetClause()}{BuildRelationshipAttributeUpdateSetClause()}{_auditColumns.BuildUpdateSetClause()}
+                set loan_alias_name = m.loan_alias_name{(isAttributeUpdate ? BuildRankingUpdateSetClause() + BuildDummyLoanLinkUpdateSetClause() + BuildRelationshipAttributeUpdateSetClause() : string.Empty)}{audit.BuildUpdateSetClause()}
                 from {_sql.LoanAliasRelationship} r
                 inner join {_sql.LoanAliasMaster} m
                     on m.loan_alias_id = @loan_alias_key
                 where r.loan_code = @loan_code
                 """;
 
-        private string BuildClearAliasByLoanKeySql() =>
+        private string BuildClearAliasByLoanKeySql(SubjectiveInputRelationshipAuditColumns audit) =>
             $"""
                 update r
-                set r.loan_alias_name = null{_auditColumns.BuildUpdateSetClause()}
+                set r.loan_alias_name = null{audit.BuildUpdateSetClause()}
                 from {_sql.LoanAliasRelationship} r
                 inner join {_sql.SharedDimLoan} l
                     on l.loan_key = @loan_key
                    and l.loan_code = r.loan_code
                 """;
 
-        private string BuildClearAliasByLoanCodeSql() =>
+        private string BuildClearAliasByLoanCodeSql(SubjectiveInputRelationshipAuditColumns audit) =>
             $"""
                 update r
-                set r.loan_alias_name = null{_auditColumns.BuildUpdateSetClause()}
+                set r.loan_alias_name = null{audit.BuildUpdateSetClause()}
                 from {_sql.LoanAliasRelationship} r
                 where r.loan_code = @loan_code
                 """;
