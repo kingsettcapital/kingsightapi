@@ -23,21 +23,23 @@ namespace kingsightapi.Controllers
             _logger = logger;
         }
 
-        // GET: api/LtvValidation?loanAliasIds=1&statuses=2
+        // GET: api/LtvValidation?statuses=2&loanAliasIds=1
+        // loanAliasIds optional — omit / empty = all aliases; statuses filter via dim_loan.funding_status_*.
         [HttpGet]
         public async Task<ActionResult<List<LtvValidationRowDto>>> Get(
             [FromQuery] int[]? loanAliasIds,
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasIds is null || loanAliasIds.Length == 0 || loanAliasIds.Any(id => id <= 0))
+            if (loanAliasIds is not null && loanAliasIds.Any(id => id <= 0))
             {
-                return BadRequest("At least one valid loanAliasIds value is required.");
+                return BadRequest("loanAliasIds must contain positive integers.");
             }
 
             try
             {
-                var result = await _service.GetAsync(loanAliasIds, statuses, cancellationToken);
+                var aliasFilter = loanAliasIds?.Where(id => id > 0).ToArray() ?? [];
+                var result = await _service.GetAsync(aliasFilter, statuses, cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)

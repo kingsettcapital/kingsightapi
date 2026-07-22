@@ -44,6 +44,8 @@ namespace kingsightapi.Services
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
         private string? _loanStatusKeyColumn;
+        private string? _loanStatusDescriptionColumn;
+        private bool _loanStatusColumnsResolved;
         private LtvValidationSchema? _schema;
 
         public LtvValidationService(
@@ -95,9 +97,18 @@ namespace kingsightapi.Services
             var schema = await GetSchemaAsync(cancellationToken);
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
+            string? loanStatusDescriptionColumn = null;
             if (statusFilter.HasFilter)
             {
-                loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync(cancellationToken);
+                (loanStatusKeyColumn, loanStatusDescriptionColumn) =
+                    await TryResolveLoanStatusColumnsAsync(cancellationToken);
+
+                if (string.IsNullOrEmpty(loanStatusKeyColumn))
+                {
+                    throw new InvalidOperationException(
+                        "Status filter cannot be applied: shared.dim_loan has no funding_status_code "
+                        + "(or equivalent) column.");
+                }
             }
 
             return await ExecuteListQueryAsync(
@@ -105,6 +116,7 @@ namespace kingsightapi.Services
                 loanAliasIds,
                 statusFilter,
                 loanStatusKeyColumn,
+                loanStatusDescriptionColumn,
                 cancellationToken);
         }
 
@@ -113,9 +125,15 @@ namespace kingsightapi.Services
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn,
+            string? loanStatusDescriptionColumn,
             CancellationToken cancellationToken)
         {
-            var sql = BuildListSql(schema, loanAliasIds, statusFilter, loanStatusKeyColumn);
+            var sql = BuildListSql(
+                schema,
+                loanAliasIds,
+                statusFilter,
+                loanStatusKeyColumn,
+                loanStatusDescriptionColumn);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -410,8 +428,11 @@ namespace kingsightapi.Services
             LtvValidationSchema schema,
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
-            string? loanStatusKeyColumn)
+            string? loanStatusKeyColumn,
+            string? loanStatusDescriptionColumn)
         {
+            // Aligns with warehouse list shape: relationship + master + dim_loan + investor_alias.
+            // Status filter uses current dim_loan.funding_status_code / funding_status_description.
             var sql = new StringBuilder($"""
                 select {SubjectiveInputSql.LoanKeySelect("a", "l")},
                        parent_loan_code = isnull(l.parent_loan_code, ''),
@@ -447,7 +468,8 @@ namespace kingsightapi.Services
                     _subjectiveInputSql.SharedDimLoan,
                     loanStatusKeyColumn,
                     statusFilter,
-                    _tblDimStatus);
+                    _tblDimStatus,
+                    loanStatusDescriptionColumn);
             }
 
             sql.AppendLine();
@@ -468,9 +490,9 @@ namespace kingsightapi.Services
                 return;
             }
 
-            sql.Append(" and (a.loan_alias_name is null or b.loan_alias_id in (");
+            sql.Append(" and b.loan_alias_id in (");
             sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
-            sql.Append("))");
+            sql.Append(')');
         }
 
         private string BuildUpdateByLoanCodeSql(LtvValidationSchema schema)
@@ -535,11 +557,12 @@ namespace kingsightapi.Services
                 """;
         }
 
-        private async Task<string?> TryResolveLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
+        private async Task<(string? KeyColumn, string? DescriptionColumn)> TryResolveLoanStatusColumnsAsync(
+            CancellationToken cancellationToken)
         {
-            if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
+            if (_loanStatusColumnsResolved)
             {
-                return _loanStatusKeyColumn;
+                return (_loanStatusKeyColumn, _loanStatusDescriptionColumn);
             }
 
             try
@@ -549,20 +572,29 @@ namespace kingsightapi.Services
                     _tblSharedDimLoan,
                     cancellationToken);
 
-                _logger.LogInformation(
-                    "Using shared.dim_loan.{Column} for LTV validation status filter.",
-                    _loanStatusKeyColumn);
+                _loanStatusDescriptionColumn = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _tblSharedDimLoan,
+                    ["funding_status_description", "funding_status_desc", "loan_status_description"],
+                    cancellationToken);
 
-                return _loanStatusKeyColumn;
+                _logger.LogInformation(
+                    "Using shared.dim_loan.{Column} (desc={Desc}) for LTV validation status filter.",
+                    _loanStatusKeyColumn,
+                    _loanStatusDescriptionColumn ?? "(none)");
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(
                     ex,
                     "LTV validation status filter skipped; shared.dim_loan has no status column. "
-                    + "Rows are loaded from subjective_input without mort.dim_loan status filtering.");
-                return null;
+                    + "Rows are loaded from subjective_input without dim_loan status filtering.");
+                _loanStatusKeyColumn = null;
+                _loanStatusDescriptionColumn = null;
             }
+
+            _loanStatusColumnsResolved = true;
+            return (_loanStatusKeyColumn, _loanStatusDescriptionColumn);
         }
 
         private async Task<bool> IsLoanEligibleByCodeAsync(

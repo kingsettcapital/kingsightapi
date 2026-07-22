@@ -44,21 +44,27 @@ namespace kingsightapi.Controllers
             }
         }
 
-        // GET: api/Loans?auditProfile=loan_alias|loan_attribute
+        // GET: api/Loans?auditProfile=loan_alias|loan_attribute&statuses=2
         [HttpGet]
         public async Task<ActionResult<List<LoanDto>>> GetAll(
             [FromQuery] string? auditProfile = null,
+            [FromQuery] List<string>? statuses = null,
             CancellationToken cancellationToken = default)
         {
             try
             {
-                var result = await _service.GetAllAsync(auditProfile, cancellationToken);
+                var result = await _service.GetAllAsync(auditProfile, statuses, cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)
             {
                 _logger.LogInformation("Get all loan rows cancelled");
                 return StatusCode(499);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "Get all loan rows validation failed");
+                return BadRequest(ex.Message);
             }
             catch (Exception ex)
             {

@@ -70,18 +70,18 @@ public sealed class SubjectiveInputSql
                    ck.parent_loan_code,
                    ck.investor_code{extraSelect}
             from {SharedDimLoan} ck
-            where {EqualsLoanCode(relationshipAlias, "loan_code", "ck", "loan_code")}
+            where {EqualsVarchar(relationshipAlias, "loan_code", "ck", "loan_code")}
             order by {DimLoanCurrentSortRank("ck")}, ck.loan_key desc
         ) {dimLoanAlias}
         """;
     }
 
     public string SharedDimLoanJoinOnLoanCode(string relationshipAlias = "r", string dimLoanAlias = "l") =>
-        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsLoanCode(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")} and {DimLoanIsCurrent(dimLoanAlias)}";
+        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsVarchar(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")} and {DimLoanIsCurrent(dimLoanAlias)}";
 
     /// <summary>Unfiltered <c>shared.dim_loan</c> join on <c>loan_code</c>.</summary>
     public string SharedDimLoanJoinOnLoanCodeUnfiltered(string relationshipAlias = "r", string dimLoanAlias = "l") =>
-        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsLoanCode(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")}";
+        $"left join {SharedDimLoan} {dimLoanAlias} on {EqualsVarchar(relationshipAlias, "loan_code", dimLoanAlias, "loan_code")}";
 
     public string MortgageDimInvestorJoinOnInvestorCode(string dimLoanAlias = "l", string investorAlias = "i") =>
         $"left join {MortgageDimInvestor} {investorAlias} on {dimLoanAlias}.investor_code = {investorAlias}.investor_code";

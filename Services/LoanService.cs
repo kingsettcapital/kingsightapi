@@ -1,3 +1,4 @@
+using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +10,7 @@ namespace kingsightapi.Services
     {
         Task<IReadOnlyList<LoanDto>> GetAllAsync(
             string? auditProfile = null,
+            IReadOnlyList<string>? statuses = null,
             CancellationToken cancellationToken = default);
         Task<LoanLookupsDto> GetLookupsAsync(CancellationToken cancellationToken = default);
         Task<bool> UpdateAsync(LoanUpdateBatchRequest request, string auditDisplayName, CancellationToken cancellationToken = default);
@@ -29,6 +31,11 @@ namespace kingsightapi.Services
         private string? _dummyLoanLinkColumn;
         private string? _lateInterestApplicableColumn;
         private string? _lateInterestOffNoteColumn;
+        private string? _loanStatusKeyColumn;
+        private string? _loanStatusDescriptionColumn;
+        private string? _eslExtLoanCodeColumn;
+        private string? _eslAliasColumn;
+        private string? _eslDescriptionColumn;
 
         public LoanService(
             IConfiguration configuration,
@@ -47,29 +54,39 @@ namespace kingsightapi.Services
 
         public async Task<IReadOnlyList<LoanDto>> GetAllAsync(
             string? auditProfile = null,
+            IReadOnlyList<string>? statuses = null,
             CancellationToken cancellationToken = default)
         {
             await EnsureSchemaAsync(cancellationToken);
-            var audit = ResolveAuditColumns(auditProfile, isAttributeUpdate: false);
+            var useAliasList = IsAliasAuditProfile(auditProfile);
+            var audit = ResolveAuditColumns(auditProfile, isAttributeUpdate: !useAliasList);
+            var statusFilter = LoanStatusFilterParser.Parse(statuses);
+
+            if (statusFilter.HasFilter && string.IsNullOrWhiteSpace(_loanStatusKeyColumn))
+            {
+                throw new InvalidOperationException(
+                    "Status filter cannot be applied: shared.dim_loan has no funding_status_code "
+                    + "(or equivalent) column.");
+            }
 
             var rows = new List<LoanDto>();
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            try
-            {
-                await _nonKsLoanAliasBridge.EnsureMissingRelationshipRowsAsync(connection, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to sync Non-KS loans into loan_alias_relationship before list.");
-            }
+            // Alias Assignment: UNION list. Attribute Assignment: INNER JOIN dim_loan + status filter.
+            var listSql = useAliasList
+                ? BuildAliasAssignmentListSql(audit, statusFilter)
+                : BuildAttributeAssignmentListSql(audit, statusFilter);
 
-            await using var command = new SqlCommand(BuildListSql(audit), connection)
+            await using var command = new SqlCommand(listSql, connection)
             {
                 CommandType = System.Data.CommandType.Text
             };
+            if (statusFilter.HasFilter)
+            {
+                LoanStatusFilterParser.AddParameters(command, statusFilter);
+            }
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
@@ -79,18 +96,11 @@ namespace kingsightapi.Services
             }
 
             _logger.LogInformation(
-                "Retrieved {Count} loan alias relationship rows (audit={AuditScreen}).",
+                "Retrieved {Count} loan rows (audit={AuditScreen}, aliasList={AliasList}, statusFilter={HasStatus}).",
                 rows.Count,
-                audit.Screen);
-            var unresolvedLoanKeys = rows.Count(row => row.LoanKey == 0);
-            if (unresolvedLoanKeys > 0)
-            {
-                _logger.LogWarning(
-                    "{UnresolvedCount} of {TotalCount} loan rows did not resolve loan_key from {DimLoanTable}.",
-                    unresolvedLoanKeys,
-                    rows.Count,
-                    _sql.SharedDimLoan);
-            }
+                audit.Screen,
+                useAliasList,
+                statusFilter.HasFilter);
 
             return rows;
         }
@@ -134,12 +144,44 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
 
             var affectedRows = 0;
+            var isAliasAssignmentSave = IsAliasAuditProfile(request.AuditProfile)
+                || request.Loans.All(loan => !IsAttributeUpdate(request, loan));
+
             foreach (var loan in request.Loans)
             {
                 // A missing or non-positive alias key means "remove the assigned alias".
                 var isClearingAlias = !loan.LoanAliasKey.HasValue || loan.LoanAliasKey.Value <= 0;
                 var isAttributeUpdate = IsAttributeUpdate(request, loan);
                 var audit = ResolveAuditColumns(request.AuditProfile, isAttributeUpdate);
+
+                // Loan Alias Assignment: Non-KS writes external_serviced_loan; Yardi writes relationship.
+                if (isAliasAssignmentSave && !isAttributeUpdate)
+                {
+                    var isNonKs = await _nonKsLoanAliasBridge.ExistsInExternalServicedLoanAsync(
+                        connection,
+                        loan.LoanCode,
+                        cancellationToken);
+
+                    if (isNonKs)
+                    {
+                        string? aliasName = null;
+                        if (!isClearingAlias)
+                        {
+                            aliasName = await TryGetAliasNameByKeyAsync(
+                                connection,
+                                loan.LoanAliasKey!.Value,
+                                cancellationToken);
+                        }
+
+                        await _nonKsLoanAliasBridge.SyncAliasToExternalServicedLoanAsync(
+                            connection,
+                            loan.LoanCode,
+                            aliasName,
+                            cancellationToken);
+                        affectedRows++;
+                        continue;
+                    }
+                }
 
                 if (isClearingAlias)
                 {
@@ -157,10 +199,6 @@ namespace kingsightapi.Services
                     }
 
                     affectedRows += clearedRows;
-                    if (clearedRows > 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
-                    {
-                        await TrySyncExternalAliasAsync(connection, loan.LoanCode, null, cancellationToken);
-                    }
                     continue;
                 }
 
@@ -210,15 +248,8 @@ namespace kingsightapi.Services
                 }
 
                 affectedRows += rowsChanged;
-
-                if (rowsChanged > 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
-                {
-                    var aliasName = await TryGetAliasNameByKeyAsync(
-                        connection,
-                        loan.LoanAliasKey!.Value,
-                        cancellationToken);
-                    await TrySyncExternalAliasAsync(connection, loan.LoanCode, aliasName, cancellationToken);
-                }
+                // Yardi alias assignment writes relationship only.
+                // Non-KS is handled above via external_serviced_loan.
             }
 
             if (affectedRows > 0)
@@ -418,14 +449,57 @@ namespace kingsightapi.Services
                 ["late_interest_note", "late_interest_off_note"],
                 cancellationToken);
 
+            try
+            {
+                _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+                    _connectionString,
+                    _sql.SharedDimLoan,
+                    cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve dim_loan funding status column.");
+                _loanStatusKeyColumn = null;
+            }
+
+            _loanStatusDescriptionColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.SharedDimLoan,
+                ["funding_status_description", "funding_status_desc", "loan_status_description"],
+                cancellationToken);
+
+            _eslExtLoanCodeColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.ExternalServicedLoan,
+                ["ext_loan_code"],
+                cancellationToken);
+            _eslAliasColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.ExternalServicedLoan,
+                ["loan_alias_name"],
+                cancellationToken);
+            _eslDescriptionColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.ExternalServicedLoan,
+                ["description", "loan_description", "loan_name"],
+                cancellationToken);
+
             _logger.LogInformation(
-                "Loan relationship audit columns: alias={AliasBy}/{AliasDtm}, attribute={AttrBy}/{AttrDtm}",
+                "Loan relationship audit columns: alias={AliasBy}/{AliasDtm}, attribute={AttrBy}/{AttrDtm}, statusCol={StatusCol}, statusDesc={StatusDesc}",
                 _aliasAuditColumns.UpdatedByColumn,
                 _aliasAuditColumns.UpdatedDtmColumn,
                 _attributeAuditColumns.UpdatedByColumn,
-                _attributeAuditColumns.UpdatedDtmColumn);
+                _attributeAuditColumns.UpdatedDtmColumn,
+                _loanStatusKeyColumn,
+                _loanStatusDescriptionColumn);
 
             _schemaProbed = true;
+        }
+
+        private static bool IsAliasAuditProfile(string? auditProfile)
+        {
+            var normalized = auditProfile?.Trim().ToLowerInvariant();
+            return normalized is null or "" or "loan_alias" or "alias" or "loan-alias";
         }
 
         private SubjectiveInputRelationshipAuditColumns ResolveAuditColumns(
@@ -509,6 +583,153 @@ namespace kingsightapi.Services
                 ? "''"
                 : $"isnull(r.[{_lateInterestOffNoteColumn}], '')";
 
+        /// <summary>
+        /// Loan Alias Assignment list:
+        /// relationship (Yardi) UNION external_serviced_loan (Non-KS not already in relationship),
+        /// filtered per loan by dim_loan.funding_status_code / funding_status_description.
+        /// </summary>
+        private string BuildAliasAssignmentListSql(
+            SubjectiveInputRelationshipAuditColumns audit,
+            LoanStatusFilter statusFilter)
+        {
+            var sql = new StringBuilder();
+            sql.AppendLine(
+                $"""
+                select loan_key = isnull(l.loan_key, 0),
+                       r.loan_code,
+                       loan_desc = isnull(r.loan_description, ''),
+                       loan_alias_key = m.loan_alias_id,
+                       loan_alias_name = isnull(r.loan_alias_name, ''),
+                       investor_name = isnull(i.investor_name, ''),
+                       investor_alias_name = isnull(d.investor_alias_name, ''),
+                       loan_ranking = {BuildRankingSelectExpression()},
+                       dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
+                       is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
+                       late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
+                       user_updated_by = {audit.BuildSelectUpdatedByExpression()},
+                       user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
+                       is_non_ks = cast(0 as bit)
+                from {_sql.LoanAliasRelationship} r
+                left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
+                {_sql.SharedDimLoanOuterApplyOnLoanCode("r", "l")}
+                left join {_sql.MortgageDimInvestor} i on l.investor_code = i.investor_code
+                {_sql.InvestorAliasRelationshipJoinOnInvestorCode("l", "d")}
+                where 1 = 1
+                """);
+
+            if (statusFilter.HasFilter && !string.IsNullOrWhiteSpace(_loanStatusKeyColumn))
+            {
+                // Filter on current dim_loan row for this loan_code (not "any loan under the alias").
+                LoanStatusFilterParser.AppendExistsSqlCondition(
+                    sql,
+                    "r",
+                    _sql.SharedDimLoan,
+                    _loanStatusKeyColumn!,
+                    statusFilter,
+                    _sql.DimStatus,
+                    _loanStatusDescriptionColumn);
+            }
+
+            if (_eslExtLoanCodeColumn is not null)
+            {
+                var descExpr = _eslDescriptionColumn is null
+                    ? "cast('' as varchar(500))"
+                    : $"isnull(cast(e.[{_eslDescriptionColumn}] as varchar(500)), '')";
+                var aliasExpr = _eslAliasColumn is null
+                    ? "cast('' as varchar(200))"
+                    : $"isnull(cast(e.[{_eslAliasColumn}] as varchar(200)), '')";
+
+                sql.AppendLine(
+                    $"""
+                    union
+                    select loan_key = cast(0 as bigint),
+                           loan_code = cast(e.[{_eslExtLoanCodeColumn}] as varchar(100)),
+                           loan_desc = {descExpr},
+                           loan_alias_key = m.loan_alias_id,
+                           loan_alias_name = {aliasExpr},
+                           investor_name = '',
+                           investor_alias_name = '',
+                           loan_ranking = cast(null as smallint),
+                           dummy_loan_link = '',
+                           is_loan_interest_applicable = cast(null as bit),
+                           late_interest_off_note = '',
+                           user_updated_by = '',
+                           user_updated_date = cast(null as datetime2),
+                           is_non_ks = cast(1 as bit)
+                    from {_sql.ExternalServicedLoan} e
+                    left join {_sql.LoanAliasMaster} m
+                        on {aliasExpr} = m.loan_alias_name
+                    where e.[{_eslExtLoanCodeColumn}] is not null
+                      and ltrim(rtrim(cast(e.[{_eslExtLoanCodeColumn}] as varchar(100)))) <> ''
+                      and not exists (
+                          select 1
+                          from {_sql.LoanAliasRelationship} r
+                          where cast(r.loan_code as varchar(100)) collate database_default
+                              = cast(e.[{_eslExtLoanCodeColumn}] as varchar(100)) collate database_default
+                      )
+                    """);
+
+                // Non-KS rows typically have no dim_loan funding status — exclude them when a status is selected.
+                if (statusFilter.HasFilter)
+                {
+                    sql.AppendLine("  and 1 = 0");
+                }
+            }
+
+            sql.AppendLine("order by loan_code");
+            return sql.ToString();
+        }
+
+        /// <summary>
+        /// Loan Attribute Assignment list — relationship INNER JOIN current dim_loan,
+        /// filtered per loan by funding_status_code / funding_status_description.
+        /// </summary>
+        private string BuildAttributeAssignmentListSql(
+            SubjectiveInputRelationshipAuditColumns audit,
+            LoanStatusFilter statusFilter)
+        {
+            var sql = new StringBuilder(
+                $"""
+                select loan_key = isnull(l.loan_key, 0),
+                       r.loan_code,
+                       loan_desc = isnull(r.loan_description, ''),
+                       loan_alias_key = m.loan_alias_id,
+                       loan_alias_name = isnull(r.loan_alias_name, ''),
+                       investor_name = isnull(i.investor_name, ''),
+                       investor_alias_name = isnull(d.investor_alias_name, ''),
+                       loan_ranking = {BuildRankingSelectExpression()},
+                       dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
+                       is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
+                       late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
+                       user_updated_by = {audit.BuildSelectUpdatedByExpression()},
+                       user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
+                       is_non_ks = cast(0 as bit)
+                from {_sql.LoanAliasRelationship} r
+                inner join {_sql.SharedDimLoan} l
+                    on {SubjectiveInputSql.EqualsVarchar("r", "loan_code", "l", "loan_code")}
+                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
+                left join {_sql.MortgageDimInvestor} i on l.investor_code = i.investor_code
+                {_sql.InvestorAliasRelationshipJoinOnInvestorCode("l", "d")}
+                where 1 = 1
+                """);
+
+            if (statusFilter.HasFilter && !string.IsNullOrWhiteSpace(_loanStatusKeyColumn))
+            {
+                LoanStatusFilterParser.AppendJoinedDimLoanStatusCondition(
+                    sql,
+                    "l",
+                    _loanStatusKeyColumn!,
+                    statusFilter,
+                    _sql.DimStatus,
+                    _loanStatusDescriptionColumn);
+            }
+
+            sql.AppendLine();
+            sql.Append(" order by r.loan_code");
+            return sql.ToString();
+        }
+
         private string BuildListSql(SubjectiveInputRelationshipAuditColumns audit) =>
             $"""
                 select loan_key = isnull(l.loan_key, 0),
@@ -523,7 +744,8 @@ namespace kingsightapi.Services
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
-                       user_updated_date = {audit.BuildSelectUpdatedDtmExpression()}
+                       user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
+                       is_non_ks = cast(0 as bit)
                 from {_sql.LoanAliasRelationship} r
                 left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
                 left join {_sql.SharedDimLoan} l on r.loan_code = l.loan_code
@@ -610,7 +832,10 @@ namespace kingsightapi.Services
                 IsLoanInterestApplicable = interestApplicable,
                 LateInterestOffNote = reader.GetStringOrEmpty("late_interest_off_note"),
                 UserUpdatedBy = reader.GetStringOrEmpty("user_updated_by"),
-                UserUpdatedDate = updatedDate
+                UserUpdatedDate = updatedDate,
+                IsNonKs = reader.TryGetOrdinal("is_non_ks", out var nonKsOrd)
+                    && !reader.IsDBNull(nonKsOrd)
+                    && Convert.ToBoolean(reader.GetValue(nonKsOrd))
             };
         }
     }
