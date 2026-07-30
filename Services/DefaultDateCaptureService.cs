@@ -222,6 +222,7 @@ namespace kingsightapi.Services
                 _sql.LoanAliasRelationship,
                 SubjectiveInputAuditScreen.DefaultDate,
                 cancellationToken);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
             _schemaProbed = true;
         }
 
@@ -268,7 +269,9 @@ namespace kingsightapi.Services
                         _sql.SharedDimLoan,
                         loanStatusKeyColumn!,
                         statusFilter,
-                        _sql.DimStatus);
+                        _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
                 }
             }
             else if (needsStatusJoin)
@@ -280,7 +283,9 @@ namespace kingsightapi.Services
                     _sql.SharedDimLoan,
                     loanStatusKeyColumn!,
                     statusFilter,
-                    _sql.DimStatus);
+                    _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();
@@ -296,7 +301,7 @@ namespace kingsightapi.Services
                 inner join {_sql.SharedDimLoan} l
                     on l.loan_key = @loan_key
                    and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                   and {_sql.DimLoanIsCurrent("l")}
                 """;
 
         private string BuildUpdateByLoanCodeSql() =>

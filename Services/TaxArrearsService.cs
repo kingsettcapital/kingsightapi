@@ -548,7 +548,9 @@ namespace kingsightapi.Services
                         _tblDimLoan,
                         loanStatusKeyColumn!,
                         statusFilter,
-                        _tblDimStatus);
+                        _tblDimStatus,
+                        null,
+                        _sql.DimLoanCurrentIndicatorColumn);
                 }
             }
             else if (needsStatusJoin)
@@ -560,7 +562,9 @@ namespace kingsightapi.Services
                     _tblDimLoan,
                     loanStatusKeyColumn!,
                     statusFilter,
-                    _tblDimStatus);
+                    _tblDimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();
@@ -630,6 +634,7 @@ namespace kingsightapi.Services
                 _connectionString,
                 _tblTaxArrears,
                 cancellationToken);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
             _schemaProbed = true;
         }
 

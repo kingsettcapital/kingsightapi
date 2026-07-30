@@ -248,6 +248,7 @@ namespace kingsightapi.Services
                 _sql.LoanAliasRelationship,
                 "maturity_date",
                 cancellationToken);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
 
             _logger.LogInformation(
                 "Default subjective analytics schema: dimLoanMaturity={DimMaturity}, relationshipMaturity={RelMaturity}, auditBy={AuditBy}.",
@@ -352,7 +353,9 @@ namespace kingsightapi.Services
                         _sql.SharedDimLoan,
                         loanStatusKeyColumn!,
                         statusFilter,
-                        _sql.DimStatus);
+                        _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
                 }
             }
             else if (needsStatusJoin)
@@ -364,7 +367,9 @@ namespace kingsightapi.Services
                     _sql.SharedDimLoan,
                     loanStatusKeyColumn!,
                     statusFilter,
-                    _sql.DimStatus);
+                    _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();
@@ -409,7 +414,7 @@ namespace kingsightapi.Services
                         {maturitySelect}
                     from {_sql.SharedDimLoan} ck
                     where {SubjectiveInputSql.EqualsLoanCode("r", "loan_code", "ck", "loan_code")}
-                      and {SubjectiveInputSql.DimLoanIsCurrent("ck")}
+                      and {_sql.DimLoanIsCurrent("ck")}
                 ) l
                 """;
         }
@@ -425,7 +430,7 @@ namespace kingsightapi.Services
                 inner join {_sql.SharedDimLoan} l
                     on l.loan_key = @loan_key
                    and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                   and {_sql.DimLoanIsCurrent("l")}
                 """;
 
         private string BuildUpdateByLoanCodeSql() =>

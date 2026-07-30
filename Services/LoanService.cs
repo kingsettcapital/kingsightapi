@@ -468,6 +468,9 @@ namespace kingsightapi.Services
                 ["funding_status_description", "funding_status_desc", "loan_status_description"],
                 cancellationToken);
 
+            // Dev dim_loan may have one row per loan (no scd_cur_ind / is_current).
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
+
             _eslExtLoanCodeColumn = await DimLoanColumnProbe.FindFirstAsync(
                 _connectionString,
                 _sql.ExternalServicedLoan,
@@ -627,7 +630,8 @@ namespace kingsightapi.Services
                     _loanStatusKeyColumn!,
                     statusFilter,
                     _sql.DimStatus,
-                    _loanStatusDescriptionColumn);
+                    _loanStatusDescriptionColumn,
+                    _sql.DimLoanCurrentIndicatorColumn);
             }
 
             if (_eslExtLoanCodeColumn is not null)
@@ -707,7 +711,7 @@ namespace kingsightapi.Services
                 from {_sql.LoanAliasRelationship} r
                 inner join {_sql.SharedDimLoan} l
                     on {SubjectiveInputSql.EqualsVarchar("r", "loan_code", "l", "loan_code")}
-                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                   and {_sql.DimLoanIsCurrent("l")}
                 left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
                 left join {_sql.MortgageDimInvestor} i on l.investor_code = i.investor_code
                 {_sql.InvestorAliasRelationshipJoinOnInvestorCode("l", "d")}

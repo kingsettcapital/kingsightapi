@@ -370,6 +370,8 @@ namespace kingsightapi.Services
 
                 cancellationToken);
 
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
+
             _schemaProbed = true;
 
         }
@@ -448,7 +450,9 @@ namespace kingsightapi.Services
 
                     statusFilter,
 
-                    _sql.DimStatus);
+                    _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
 
             }
 
@@ -484,7 +488,7 @@ namespace kingsightapi.Services
 
                    and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
 
-                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                   and {_sql.DimLoanIsCurrent("l")}
 
                 """;
 

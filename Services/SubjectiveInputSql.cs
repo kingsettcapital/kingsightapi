@@ -1,3 +1,5 @@
+using Microsoft.Data.SqlClient;
+
 namespace kingsightapi.Services;
 
 /// <summary>
@@ -5,6 +7,16 @@ namespace kingsightapi.Services;
 /// </summary>
 public sealed class SubjectiveInputSql
 {
+    private static readonly string[] DimLoanCurrentIndicatorCandidates =
+    [
+        "is_current",
+        "scd_cur_ind",
+        "current_ind",
+        "scd_current_ind"
+    ];
+
+    private bool _dimLoanCurrentProbed;
+
     public SubjectiveInputSql(FabricWarehouseTables tables)
     {
         LoanAliasMaster = tables.SubjectiveInput("loan_alias_master");
@@ -30,6 +42,33 @@ public sealed class SubjectiveInputSql
     public string LegacyDimInvestor { get; }
     public string DimStatus { get; }
 
+    /// <summary>
+    /// Current-row indicator on <c>shared.dim_loan</c>, or null when the table has one row per loan
+    /// (no SCD current flag).
+    /// </summary>
+    public string? DimLoanCurrentIndicatorColumn { get; private set; }
+
+    /// <summary>
+    /// Probe once for a current-row column. Prefer <c>is_current</c>; fall back to legacy SCD names.
+    /// When none exist, joins skip a current filter (warehouse is one row per loan).
+    /// </summary>
+    public async Task EnsureDimLoanCurrentIndicatorAsync(
+        string connectionString,
+        CancellationToken cancellationToken = default)
+    {
+        if (_dimLoanCurrentProbed)
+        {
+            return;
+        }
+
+        DimLoanCurrentIndicatorColumn = await DimLoanColumnProbe.FindFirstAsync(
+            connectionString,
+            SharedDimLoan,
+            DimLoanCurrentIndicatorCandidates,
+            cancellationToken);
+        _dimLoanCurrentProbed = true;
+    }
+
     /// <summary>Resolve loan_key for API DTOs via <c>shared.dim_loan</c>.</summary>
     public static string LoanKeySelect(string relationshipAlias = "r", string dimLoanAlias = "l") =>
         $"loan_key = isnull({dimLoanAlias}.loan_key, 0)";
@@ -42,17 +81,37 @@ public sealed class SubjectiveInputSql
     public static string EqualsLoanCodeParam(string tableAlias, string column, string parameterName) =>
         $"{tableAlias}.{column} = {parameterName}";
 
-    /// <summary>Current SCD row — compare as varchar so Fabric does not coerce <c>Y</c>/<c>N</c> to int.</summary>
-    public static string DimLoanIsCurrent(string dimLoanAlias) =>
-        $"cast({dimLoanAlias}.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')";
+    /// <summary>
+    /// Current-row predicate. When <paramref name="currentIndicatorColumn"/> is null, returns
+    /// <c>1 = 1</c> (one row per loan — no SCD filter).
+    /// </summary>
+    public static string DimLoanIsCurrent(string dimLoanAlias, string? currentIndicatorColumn)
+    {
+        if (string.IsNullOrWhiteSpace(currentIndicatorColumn))
+        {
+            return "1 = 1";
+        }
 
-    /// <summary>Prefer current SCD rows when ordering (0 = current).</summary>
-    public static string DimLoanCurrentSortRank(string dimLoanAlias) =>
-        $"case when {DimLoanIsCurrent(dimLoanAlias)} then 0 else 1 end";
+        // Compare as varchar so Fabric does not coerce Y/N to int.
+        return $"cast({dimLoanAlias}.[{currentIndicatorColumn}] as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')";
+    }
+
+    /// <summary>Current-row predicate using the probed column (or no-op when absent).</summary>
+    public string DimLoanIsCurrent(string dimLoanAlias) =>
+        DimLoanIsCurrent(dimLoanAlias, DimLoanCurrentIndicatorColumn);
+
+    /// <summary>
+    /// Prefer current rows when ordering (0 = current).
+    /// Uses a CASE expression (not a bare integer) so SQL Server does not treat it as an ORDER BY ordinal.
+    /// </summary>
+    public string DimLoanCurrentSortRank(string dimLoanAlias) =>
+        string.IsNullOrWhiteSpace(DimLoanCurrentIndicatorColumn)
+            ? "case when 1 = 1 then 0 else 1 end"
+            : $"case when {DimLoanIsCurrent(dimLoanAlias)} then 0 else 1 end";
 
     /// <summary>
     /// Best <c>shared.dim_loan</c> row per relationship <c>loan_code</c> using direct equality.
-    /// Current SCD first, then highest <c>loan_key</c>.
+    /// Current row first (when an indicator exists), then highest <c>loan_key</c>.
     /// </summary>
     public string SharedDimLoanOuterApplyOnLoanCode(
         string relationshipAlias = "r",
@@ -63,6 +122,11 @@ public sealed class SubjectiveInputSql
             ? ", " + string.Join(", ", extraColumns.Select(column => $"ck.[{column}]"))
             : string.Empty;
 
+        // Bare integer ORDER BY n is a select-list ordinal in SQL Server; always use an expression.
+        var orderBy = string.IsNullOrWhiteSpace(DimLoanCurrentIndicatorColumn)
+            ? "ck.loan_key desc"
+            : $"{DimLoanCurrentSortRank("ck")}, ck.loan_key desc";
+
         return $"""
         outer apply (
             select top (1)
@@ -71,7 +135,7 @@ public sealed class SubjectiveInputSql
                    ck.investor_code{extraSelect}
             from {SharedDimLoan} ck
             where {EqualsVarchar(relationshipAlias, "loan_code", "ck", "loan_code")}
-            order by {DimLoanCurrentSortRank("ck")}, ck.loan_key desc
+            order by {orderBy}
         ) {dimLoanAlias}
         """;
     }

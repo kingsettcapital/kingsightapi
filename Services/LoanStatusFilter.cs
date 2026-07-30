@@ -130,7 +130,8 @@ namespace kingsightapi.Services
             string loanStatusKeyColumn,
             LoanStatusFilter filter,
             string dimStatusTable,
-            string? loanStatusDescriptionColumn = null)
+            string? loanStatusDescriptionColumn = null,
+            string? dimLoanCurrentIndicatorColumn = null)
         {
             if (!filter.HasFilter)
             {
@@ -156,7 +157,7 @@ namespace kingsightapi.Services
             sql.Append(sharedDimLoanTable);
             sql.Append($" {dimLoanAlias} where ");
             sql.Append(SubjectiveInputSql.EqualsVarchar(relationshipAlias, "loan_code", dimLoanAlias, "loan_code"));
-            sql.Append($" and {SubjectiveInputSql.DimLoanIsCurrent(dimLoanAlias)}");
+            sql.Append($" and {SubjectiveInputSql.DimLoanIsCurrent(dimLoanAlias, dimLoanCurrentIndicatorColumn)}");
             sql.Append(" and (");
             sql.Append(string.Join(" or ", conditions));
             sql.Append("))");

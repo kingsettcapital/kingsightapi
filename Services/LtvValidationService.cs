@@ -85,7 +85,7 @@ namespace kingsightapi.Services
                 select top (1) ck.loan_key
                 from {_tblSharedDimLoan} ck
                 where {SubjectiveInputSql.EqualsLoanCodeParam("ck", "loan_code", "@loan_code")}
-                order by {SubjectiveInputSql.DimLoanCurrentSortRank("ck")}, ck.loan_key desc
+                order by ck.loan_key desc
                 """;
         }
 
@@ -401,6 +401,9 @@ namespace kingsightapi.Services
                     cancellationToken);
 
                 _schema = new LtvValidationSchema(optional, audit, qrSlideLink);
+                await _subjectiveInputSql.EnsureDimLoanCurrentIndicatorAsync(
+                    _connectionString,
+                    cancellationToken);
                 _logger.LogInformation(
                     "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, auditBy={AuditBy}.",
                     optional.LtvColumn ?? "(none)",
@@ -469,7 +472,8 @@ namespace kingsightapi.Services
                     loanStatusKeyColumn,
                     statusFilter,
                     _tblDimStatus,
-                    loanStatusDescriptionColumn);
+                    loanStatusDescriptionColumn,
+                    _subjectiveInputSql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();

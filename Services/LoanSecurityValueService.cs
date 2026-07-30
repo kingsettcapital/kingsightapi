@@ -42,6 +42,8 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
 
+        private readonly SubjectiveInputSql _sql;
+
         private readonly string _tblDimLoan;
 
         private readonly string _tblLoanAliasMaster;
@@ -88,15 +90,15 @@ namespace kingsightapi.Services
 
 
 
-            var subjective = new SubjectiveInputSql(tables);
+            _sql = new SubjectiveInputSql(tables);
 
-            _tblDimLoan = subjective.SharedDimLoan;
+            _tblDimLoan = _sql.SharedDimLoan;
 
-            _tblLoanAliasMaster = subjective.LoanAliasMaster;
+            _tblLoanAliasMaster = _sql.LoanAliasMaster;
 
-            _tblLoanAliasRelationship = subjective.LoanAliasRelationship;
+            _tblLoanAliasRelationship = _sql.LoanAliasRelationship;
 
-            _tblDimStatus = subjective.DimStatus;
+            _tblDimStatus = _sql.DimStatus;
 
             _tblYardiCollateralValue = tables.Yardi("Collateral_Value");
 
@@ -380,6 +382,7 @@ namespace kingsightapi.Services
             _auditColumns = await SubjectiveInputMasterAuditColumns.ProbeAsync(
                 _connectionString,
                 _tblLoanAliasMaster);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString);
             _schemaProbed = true;
         }
 
@@ -597,7 +600,7 @@ namespace kingsightapi.Services
 
                 existsSql.Append(
 
-                    $" inner join {_tblDimLoan} lf on {SubjectiveInputSql.EqualsVarchar("lf", "loan_code", "rf", "loan_code")} and {SubjectiveInputSql.DimLoanIsCurrent("lf")}");
+                    $" inner join {_tblDimLoan} lf on {SubjectiveInputSql.EqualsVarchar("lf", "loan_code", "rf", "loan_code")} and {_sql.DimLoanIsCurrent("lf")}");
 
                 existsSql.Append(" where rf.loan_alias_name = a.loan_alias_name");
 
