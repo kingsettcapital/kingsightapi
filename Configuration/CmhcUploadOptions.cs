@@ -13,10 +13,16 @@ public sealed class CmhcUploadOptions
     /// <summary>OneLake DFS endpoint.</summary>
     public string FabricServiceUri { get; set; } = "https://onelake.dfs.fabric.microsoft.com";
 
-    /// <summary>Fabric workspace (group) id.</summary>
+    /// <summary>
+    /// Fabric workspace (group) id.
+    /// Development and UAT values come from <c>appsettings.{Environment}.json</c>.
+    /// </summary>
     public string FabricWorkspaceId { get; set; } = "e9c14968-68a1-48d8-8bc8-b81663f54ce3";
 
-    /// <summary>Fabric lakehouse item id.</summary>
+    /// <summary>
+    /// Fabric lakehouse item id (<c>lh_bronze</c>).
+    /// Development and UAT values come from <c>appsettings.{Environment}.json</c>.
+    /// </summary>
     public string FabricLakehouseId { get; set; } = "b94eb6e4-ea19-46e1-926c-b5711f33f2ff";
 
     /// <summary>Parent folder under lakehouse <c>Files/</c> and local storage root.</summary>
