@@ -16,4 +16,9 @@ public sealed class FabricWarehouseOptions
     /// Subjective input schema database: <c>subjective_input.*</c> master and relationship tables.
     /// </summary>
     public string SubjectiveInputDatabase { get; set; } = "wh_gold1";
+
+    /// <summary>
+    /// Silver lakehouse with Yardi shortcuts (e.g. <c>yardi.collateral</c>, <c>yardi.Collateral_Value</c>).
+    /// </summary>
+    public string SilverLakehouseDatabase { get; set; } = "shortcut_lh_silver1";
 }

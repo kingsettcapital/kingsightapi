@@ -29,7 +29,6 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly string _tblExternalServicedLoan;
-        private readonly INonKsLoanAliasBridge _loanAliasBridge;
         private readonly INonKsInvestorAliasBridge _investorAliasBridge;
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
@@ -39,13 +38,11 @@ namespace kingsightapi.Services
             IConfiguration configuration,
             ILogger<NonKsServicedLoansService> logger,
             FabricWarehouseTables tables,
-            INonKsLoanAliasBridge loanAliasBridge,
             INonKsInvestorAliasBridge investorAliasBridge)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
-            _loanAliasBridge = loanAliasBridge;
             _investorAliasBridge = investorAliasBridge;
             _tblExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
         }
@@ -130,24 +127,6 @@ namespace kingsightapi.Services
                 columns.AddInsertAuditParameters(command, loan.UserUpdatedBy, auditUtc);
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
-
-                try
-                {
-                    await _loanAliasBridge.EnsureRelationshipRowAsync(
-                        connection,
-                        extLoanCode,
-                        loan.Description,
-                        ResolveLoanAliasName(loan),
-                        loan.UserUpdatedBy,
-                        cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        ex,
-                        "Non-KS loan {ExtLoanCode} created but failed to register on Loan Alias Assignment.",
-                        extLoanCode);
-                }
 
                 try
                 {

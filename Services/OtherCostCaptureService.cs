@@ -360,13 +360,17 @@ namespace kingsightapi.Services
 
 
 
-            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
 
                 _connectionString,
 
                 _sql.LoanAliasRelationship,
 
+                SubjectiveInputAuditScreen.OtherCost,
+
                 cancellationToken);
+
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
 
             _schemaProbed = true;
 
@@ -446,7 +450,9 @@ namespace kingsightapi.Services
 
                     statusFilter,
 
-                    _sql.DimStatus);
+                    _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
 
             }
 
@@ -482,7 +488,7 @@ namespace kingsightapi.Services
 
                    and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
 
-                   and {SubjectiveInputSql.DimLoanIsCurrent("l")}
+                   and {_sql.DimLoanIsCurrent("l")}
 
                 """;
 

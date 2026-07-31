@@ -1,5 +1,11 @@
+using Microsoft.Data.SqlClient;
+
 namespace kingsightapi.Services
 {
+    /// <summary>
+    /// Optional LTV Validation columns on subjective_input.loan_alias_relationship.
+    /// Matches warehouse fields: current_loan_to_value, prior_loan_to_value, user_update_*, ai_comments, etc.
+    /// </summary>
     internal sealed class LtvValidationOptionalColumns
     {
         public string? LtvColumn { get; init; }
@@ -14,53 +20,48 @@ namespace kingsightapi.Services
             string tableName,
             CancellationToken cancellationToken = default)
         {
-            var currentLoanToValue = await DimLoanColumnProbe.FindFirstAsync(
-                connectionString,
-                tableName,
-                ["current_loan_to_value"],
-                cancellationToken);
-            var loanToValue = await DimLoanColumnProbe.FindFirstAsync(
-                connectionString,
-                tableName,
-                ["loan_to_value"],
-                cancellationToken);
-            var legacyLtv = await DimLoanColumnProbe.FindFirstAsync(
-                connectionString,
-                tableName,
-                ["ltv", "loan_ltv"],
-                cancellationToken);
+            var columns = await LoadColumnNamesAsync(connectionString, tableName, cancellationToken);
 
-            var currentLtvColumn = currentLoanToValue ?? loanToValue ?? legacyLtv;
-            string? priorLtvColumn = null;
-            if (currentLoanToValue is not null && loanToValue is not null)
+            // Current LTV — prefer explicit current_* then legacy names.
+            var currentLtvColumn = FindColumn(
+                columns,
+                "current_loan_to_value",
+                "loan_to_value",
+                "ltv",
+                "loan_ltv");
+
+            // Prior LTV — prefer prior_loan_to_value (warehouse standard).
+            // Legacy: when both current_loan_to_value and loan_to_value exist, loan_to_value was prior.
+            var priorLtvColumn = FindColumn(columns, "prior_loan_to_value");
+            if (priorLtvColumn is null
+                && currentLtvColumn is not null
+                && string.Equals(currentLtvColumn, "current_loan_to_value", StringComparison.OrdinalIgnoreCase)
+                && FindColumn(columns, "loan_to_value") is { } legacyPrior)
             {
-                priorLtvColumn = loanToValue;
+                priorLtvColumn = legacyPrior;
             }
 
             return new LtvValidationOptionalColumns
             {
                 LtvColumn = currentLtvColumn,
                 PriorLtvColumn = priorLtvColumn,
-                UpdateReason = await DimLoanColumnProbe.FindFirstAsync(
-                    connectionString,
-                    tableName,
-                    ["user_update_reason", "update_reason", "ltv_update_reason"],
-                    cancellationToken),
-                UpdateComment = await DimLoanColumnProbe.FindFirstAsync(
-                    connectionString,
-                    tableName,
-                    ["user_update_comments", "user_update_comment", "update_comment", "ltv_update_comment"],
-                    cancellationToken),
-                AiComments = await DimLoanColumnProbe.FindFirstAsync(
-                    connectionString,
-                    tableName,
-                    ["ai_comments", "ai_commentary"],
-                    cancellationToken),
-                AiConfidenceScore = await DimLoanColumnProbe.FindFirstAsync(
-                    connectionString,
-                    tableName,
-                    ["ai_confidence_score", "confidence_score", "ai_confidence"],
-                    cancellationToken),
+                UpdateReason = FindColumn(
+                    columns,
+                    "user_update_reason",
+                    "update_reason",
+                    "ltv_update_reason"),
+                UpdateComment = FindColumn(
+                    columns,
+                    "user_update_comments",
+                    "user_update_comment",
+                    "update_comment",
+                    "ltv_update_comment"),
+                AiComments = FindColumn(columns, "ai_comments", "ai_commentary"),
+                AiConfidenceScore = FindColumn(
+                    columns,
+                    "ai_confidence_score",
+                    "confidence_score",
+                    "ai_confidence"),
             };
         }
 
@@ -101,7 +102,7 @@ namespace kingsightapi.Services
                 SelectAliasOrNull(UpdateReason, relationshipAlias, "update_reason", "varchar(500)"),
                 SelectAliasOrNull(UpdateComment, relationshipAlias, "update_comment", "varchar(500)"),
                 SelectAliasOrNull(AiComments, relationshipAlias, "ai_comments", "varchar(max)"),
-                SelectAliasOrNull(AiConfidenceScore, relationshipAlias, "ai_confidence_score", "decimal(5, 4)"),
+                SelectAliasOrNull(AiConfidenceScore, relationshipAlias, "ai_confidence_score", "decimal(18, 4)"),
             };
 
             return ",\n                       " + string.Join(",\n                       ", parts);
@@ -122,6 +123,79 @@ namespace kingsightapi.Services
             LtvColumn is null
                 ? "1 = 0"
                 : $"{relationshipAlias}.{Bracket(LtvColumn)} is not null";
+
+        private static async Task<HashSet<string>> LoadColumnNamesAsync(
+            string connectionString,
+            string tableName,
+            CancellationToken cancellationToken)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                await using var connection = new SqlConnection(connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand($"select top (0) * from {tableName}", connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                for (var i = 0; i < reader.FieldCount; i++)
+                {
+                    names.Add(reader.GetName(i));
+                }
+            }
+            catch (SqlException)
+            {
+                // Fall back to per-candidate probes below if top-0 * is blocked.
+            }
+
+            if (names.Count > 0)
+            {
+                return names;
+            }
+
+            // Fallback: individual candidate probes (legacy path).
+            foreach (var candidate in new[]
+                     {
+                         "current_loan_to_value", "prior_loan_to_value", "loan_to_value", "ltv", "loan_ltv",
+                         "user_update_reason", "update_reason", "ltv_update_reason",
+                         "user_update_comments", "user_update_comment", "update_comment", "ltv_update_comment",
+                         "ai_comments", "ai_commentary",
+                         "ai_confidence_score", "confidence_score", "ai_confidence",
+                     })
+            {
+                var found = await DimLoanColumnProbe.FindFirstAsync(
+                    connectionString,
+                    tableName,
+                    [candidate],
+                    cancellationToken);
+                if (found is not null)
+                {
+                    names.Add(found);
+                }
+            }
+
+            return names;
+        }
+
+        private static string? FindColumn(HashSet<string> columns, params string[] candidates)
+        {
+            foreach (var candidate in candidates)
+            {
+                if (columns.TryGetValue(candidate, out var actual))
+                {
+                    return actual;
+                }
+
+                // TryGetValue with OrdinalIgnoreCase comparer returns the stored casing.
+                foreach (var existing in columns)
+                {
+                    if (string.Equals(existing, candidate, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return existing;
+                    }
+                }
+            }
+
+            return null;
+        }
 
         private static void AddSet(List<string> sets, string? column, string alias, string parameter)
         {

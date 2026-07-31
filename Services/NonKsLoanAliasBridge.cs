@@ -29,6 +29,11 @@ namespace kingsightapi.Services
             string? loanAliasName,
             CancellationToken cancellationToken = default);
 
+        Task<bool> ExistsInExternalServicedLoanAsync(
+            SqlConnection connection,
+            string loanCode,
+            CancellationToken cancellationToken = default);
+
         Task<int> CascadeAliasRenameOnExternalServicedLoanAsync(
             SqlConnection connection,
             SqlTransaction? transaction,
@@ -160,6 +165,39 @@ namespace kingsightapi.Services
                     affected,
                     code);
             }
+        }
+
+        public async Task<bool> ExistsInExternalServicedLoanAsync(
+            SqlConnection connection,
+            string loanCode,
+            CancellationToken cancellationToken = default)
+        {
+            await EnsureSchemaAsync(cancellationToken);
+            if (_eslExtLoanCodeColumn is null)
+            {
+                return false;
+            }
+
+            var code = loanCode?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                return false;
+            }
+
+            var sql = $"""
+                select top 1 1
+                from {_sql.ExternalServicedLoan}
+                where cast([{_eslExtLoanCodeColumn}] as varchar(100)) collate database_default
+                    = cast(@loan_code as varchar(100)) collate database_default
+                """;
+
+            await using var command = new SqlCommand(sql, connection)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@loan_code", code);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null && result is not DBNull;
         }
 
         public async Task<int> CascadeAliasRenameOnExternalServicedLoanAsync(

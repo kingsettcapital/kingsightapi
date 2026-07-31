@@ -15,5 +15,11 @@ namespace kingsightapi.Entities
     public sealed class LoanUpdateBatchRequest
     {
         public List<LoanUpdateRequestDto> Loans { get; init; } = [];
+
+        /// <summary>
+        /// Which screen audit columns to stamp: loan_alias | loan_attribute.
+        /// When omitted, inferred from whether attribute fields are present.
+        /// </summary>
+        public string? AuditProfile { get; init; }
     }
 }

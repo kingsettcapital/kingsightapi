@@ -55,11 +55,13 @@ Writes update `loan_to_value` on `loan_alias_relationship`. Confirm stamps audit
 ```json
 "FabricWarehouse": {
   "Database": "wh_gold",
-  "SubjectiveInputDatabase": "wh_gold1"
+  "SubjectiveInputDatabase": "wh_gold1",
+  "SilverLakehouseDatabase": "shortcut_lh_silver1"
 }
 ```
 
 Use `FabricWarehouseTables.SubjectiveInput("table_name")` — never hard-code `wh_gold1`.
+Use `FabricWarehouseTables.Yardi("table_name")` for silver Yardi tables.
 
 ## Table → screen mapping
 
@@ -94,14 +96,40 @@ select a.loan_code, b.loan_description, b.loan_alias_name, a.tax_memo_date, a.ta
 from wh_gold1.subjective_input.loan_tax_details a
 inner join wh_gold1.subjective_input.loan_alias_relationship b on a.loan_code = b.loan_code;
 
--- Security Value
-select a.loan_alias_name, b.collateral, a.security_value, a.units, a.net_acres, a.square_feet
-from wh_gold1.subjective_input.loan_alias_master a
-left join (
-  select loan_alias_name, sum(collateral) collateral
-  from wh_gold1.subjective_input.loan_alias_relationship
+-- Security Value (Collateral Per Yardi from latest Real Estate Yardi collateral)
+with latest_collateral_value as (
+  select collateral_id, valuation_date, collateral_amount
+  from (
+    select collateral_id, valuation_date, collateral_amount,
+           row_number() over (partition by collateral_id order by valuation_date desc) as rn
+    from shortcut_lh_silver1.yardi.Collateral_Value
+  ) t
+  where rn = 1
+),
+dataset as (
+  select e.loan_alias_name, a.collateral_name, c.collateral_amount,
+         row_number() over (partition by e.loan_alias_name, a.collateral_name
+                            order by e.loan_alias_name, a.collateral_name) as rn
+  from wh_gold1.subjective_input.loan_alias_relationship e
+  inner join wh_gold1.shared.dim_loan f on e.loan_code = f.loan_code
+  inner join wh_gold1.subjective_input.loan_alias_master g on e.loan_alias_name = g.loan_alias_name
+  left join (select distinct collateral_id, loan_id from shortcut_lh_silver1.yardi.collateral_xref) d
+    on d.loan_id = f.loan_id
+  left join shortcut_lh_silver1.yardi.collateral a on d.collateral_id = a.collateral_id
+  inner join shortcut_lh_silver1.yardi.Lookup_Values b
+    on a.collateral_type = b.lookup_sk and b.lookup_value = 'Real Estate'
+  left join latest_collateral_value c on a.collateral_id = c.collateral_id
+),
+dataset2 as (
+  select loan_alias_name, sum(collateral_amount) as collateral
+  from dataset where rn = 1
   group by loan_alias_name
-) b on a.loan_alias_name = b.loan_alias_name;
+)
+select b.loan_alias_name, a.collateral,
+       coalesce(nullif(b.security_value, 0), a.collateral) as security_value,
+       b.units, b.net_acres, b.square_feet
+from wh_gold1.subjective_input.loan_alias_master b
+left join dataset2 a on a.loan_alias_name = b.loan_alias_name;
 
 -- Other cost / default date / default subjective
 select * from wh_gold1.subjective_input.loan_alias_relationship;
