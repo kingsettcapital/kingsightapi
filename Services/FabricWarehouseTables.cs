@@ -31,15 +31,22 @@ public sealed class FabricWarehouseTables
     public string SubjectiveInput(string table) =>
         $"{_options.SubjectiveInputDatabase}.subjective_input.{table}";
 
-    /// <summary>Shared dimension tables in <c>wh_gold1.shared</c>.</summary>
+    /// <summary>Shared dimension tables in <c>{SubjectiveInputDatabase}.shared</c>.</summary>
     public string Shared(string table) =>
         $"{_options.SubjectiveInputDatabase}.shared.{table}";
 
-    /// <summary>Mortgage dimension tables in <c>wh_gold1.mortgage</c>.</summary>
+    /// <summary>Mortgage dimension tables in <c>{SubjectiveInputDatabase}.mortgage</c>.</summary>
     public string Mortgage(string table) =>
         $"{_options.SubjectiveInputDatabase}.mortgage.{table}";
 
     /// <summary>Yardi tables in <c>{SilverLakehouseDatabase}.yardi</c>.</summary>
     public string Yardi(string table) =>
         $"{_options.SilverLakehouseDatabase}.yardi.{table}";
+
+    /// <summary>Bronze lakehouse database name from config.</summary>
+    public string BronzeLakehouseDatabase => _options.BronzeLakehouseDatabase;
+
+    /// <summary>External files tables in <c>{BronzeLakehouseDatabase}.external_files</c>.</summary>
+    public string ExternalFiles(string table) =>
+        $"{_options.BronzeLakehouseDatabase}.external_files.{table}";
 }

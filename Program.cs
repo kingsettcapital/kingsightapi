@@ -108,11 +108,24 @@ namespace kingsightapi
                 .GetSection(FabricWarehouseOptions.SectionName)
                 .Get<FabricWarehouseOptions>() ?? new FabricWarehouseOptions();
             WarehouseTables.Configure(warehouseOptions);
+            var cmhcUploadOptions = configuration
+                .GetSection(CmhcUploadOptions.SectionName)
+                .Get<CmhcUploadOptions>() ?? new CmhcUploadOptions();
 
             var app = builder.Build();
 
             var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
             startupLogger.LogInformation("Kingsight API started. Log file directory: {LogDirectory}", logDirectory);
+            startupLogger.LogInformation(
+                "Environment={Environment}; FabricWarehouse SubjectiveInputDatabase={SubjectiveDb}, Database={Database}, Silver={Silver}, Bronze={Bronze}; CmhcUpload Workspace={WorkspaceId} Lakehouse={LakehouseId} Path=Files/{UploadPath}",
+                app.Environment.EnvironmentName,
+                warehouseOptions.SubjectiveInputDatabase,
+                warehouseOptions.Database,
+                warehouseOptions.SilverLakehouseDatabase,
+                warehouseOptions.BronzeLakehouseDatabase,
+                cmhcUploadOptions.FabricWorkspaceId,
+                cmhcUploadOptions.FabricLakehouseId,
+                cmhcUploadOptions.UploadParentDirectory);
 
             if (string.IsNullOrWhiteSpace(fabricConnectionString))
             {
