@@ -289,7 +289,10 @@ namespace kingsightapi.Services
             }
 
             var users = await _userService.GetAllAsync(cancellationToken);
-            var usersById = users.ToDictionary(user => user.UserId);
+            // user_master may have duplicate/null user_id rows (often 0); keep the first per id.
+            var usersById = users
+                .GroupBy(user => user.UserId)
+                .ToDictionary(group => group.Key, group => group.First());
 
             foreach (var row in rows)
             {
