@@ -655,9 +655,10 @@ namespace kingsightapi.Services
 
         private static void ValidateLtv(decimal? ltv)
         {
-            if (ltv is < 0 or > 100)
+            // Current and Prior LTV are percent points and may exceed 100 (underwater / high-risk).
+            if (ltv is < 0 or > 999)
             {
-                throw new InvalidOperationException("LTV must be between 0 and 100.");
+                throw new InvalidOperationException("LTV must be between 0 and 999.");
             }
         }
 
