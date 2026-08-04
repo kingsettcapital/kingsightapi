@@ -1,8 +1,12 @@
 using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
+using log4net;
+using log4net.Config;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Swashbuckle.AspNetCore.SwaggerGen;
+using System.Configuration;
 
 namespace kingsightapi.Controllers
 {
@@ -13,15 +17,23 @@ namespace kingsightapi.Controllers
         private readonly IInvestorAliasService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<InvestorAliasController> _logger;
-
+        private static readonly ILog log = LogManager.GetLogger(typeof(InvestorAliasController));
         public InvestorAliasController(
             IInvestorAliasService service,
             ICurrentUserResolver currentUserResolver,
-            ILogger<InvestorAliasController> logger)
+            ILogger<InvestorAliasController> logger,
+            IConfiguration config)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
             _logger = logger;
+            var log4netConfigPath = config.GetSection("log4netConfigFile")?.Value;
+            if (string.IsNullOrWhiteSpace(log4netConfigPath))
+            {
+                throw new InvalidOperationException("log4netConfigFile is not configured in appsettings.");
+            }
+            XmlConfigurator.Configure(new FileInfo(log4netConfigPath));
+            log.Info("InvestorAliasController initialized with log4net configuration");
         }
 
         // GET: api/InvestorAlias
@@ -30,6 +42,7 @@ namespace kingsightapi.Controllers
         {
             try
             {
+                log.Info("Retrieving all investor alias rows");
                 var result = await _service.GetAllAsync();
                 return Ok(result);
             }
