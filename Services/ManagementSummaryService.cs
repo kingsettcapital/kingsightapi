@@ -61,6 +61,9 @@ namespace kingsightapi.Services
         private readonly string _tblLtvValidation;
         private readonly string _tblTaxArrears;
         private readonly string _tblCmhcDefaultWatchlist;
+        private readonly string _vwLoanAttributes;
+        private readonly string _fnExposure;
+        private readonly string _tblSubjectiveLoanAliasMaster;
         private readonly ILogger<ManagementSummaryService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -91,7 +94,10 @@ namespace kingsightapi.Services
             _tblDimStatus = tables.Mort("dim_status");
             _tblLtvValidation = tables.Mort("ltv_validation");
             _tblTaxArrears = tables.Mort("tax_arrears");
-            _tblCmhcDefaultWatchlist = tables.Mort("cmhc_default_watchlist");
+            _tblCmhcDefaultWatchlist = tables.ExternalFiles("cmhc_default");
+            _vwLoanAttributes = tables.Mortgage("vw_loan_attributes");
+            _fnExposure = tables.MortgageObject("fn_exposure");
+            _tblSubjectiveLoanAliasMaster = tables.SubjectiveInput("loan_alias_master");
         }
 
         public async Task<IReadOnlyList<ManagementSummaryRowDto>> GetSummaryAsync(
@@ -552,7 +558,15 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            return Convert.ToInt32(reader.GetValue(ordinal));
+            var value = reader.GetValue(ordinal);
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch (Exception)
+            {
+                return int.TryParse(Convert.ToString(value), out var parsed) ? parsed : null;
+            }
         }
 
         private static decimal? GetNullableDecimal(SqlDataReader reader, string name)
@@ -563,7 +577,15 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            return Convert.ToDecimal(reader.GetValue(ordinal));
+            var value = reader.GetValue(ordinal);
+            try
+            {
+                return Convert.ToDecimal(value);
+            }
+            catch (Exception)
+            {
+                return decimal.TryParse(Convert.ToString(value), out var parsed) ? parsed : null;
+            }
         }
 
         private static DateTime? GetNullableDateTime(SqlDataReader reader, string name)
@@ -574,7 +596,13 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            return reader.GetDateTime(ordinal);
+            var value = reader.GetValue(ordinal);
+            return value switch
+            {
+                DateTime dateTime => dateTime,
+                DateOnly dateOnly => dateOnly.ToDateTime(TimeOnly.MinValue),
+                _ => DateTime.TryParse(Convert.ToString(value), out var parsed) ? parsed : null
+            };
         }
     }
 }

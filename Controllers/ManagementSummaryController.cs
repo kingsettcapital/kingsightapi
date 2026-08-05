@@ -76,7 +76,12 @@ namespace kingsightapi.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving management summary dashboard");
-                return StatusCode(500, "An error occurred while retrieving management summary dashboard.");
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving management summary dashboard.",
+                    detail = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
             }
         }
 

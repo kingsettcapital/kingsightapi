@@ -54,6 +54,8 @@ namespace kingsightapi.Entities
         public ManagementSummaryOutstandingInterestDto OutstandingInterest { get; init; } = new();
         public IReadOnlyList<LoanAliasSummaryRowDto> LoanAliasRows { get; init; } = [];
         public IReadOnlyList<CmhcWatchlistRowDto> WatchlistRows { get; init; } = [];
+        /// <summary>Latest <c>report_date</c> from bronze <c>cmhc_default</c> (watchlist As At).</summary>
+        public DateTime? WatchlistAsAt { get; init; }
         public ManagementSummaryFilterOptionsDto FilterOptions { get; init; } = new();
         public ManagementSummaryChartsPhase2Dto ChartsPhase2 { get; init; } = new();
     }
@@ -115,6 +117,7 @@ namespace kingsightapi.Entities
         public string? StatusUpdate { get; init; }
         public string? Conclusion { get; init; }
         public string Status { get; init; } = "NO CONCERNS";
+        public DateTime? ReportDate { get; init; }
     }
 
     public sealed class ManagementSummaryFilterOptionsDto
