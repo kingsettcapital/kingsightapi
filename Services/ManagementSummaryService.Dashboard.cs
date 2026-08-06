@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
@@ -113,6 +114,7 @@ namespace kingsightapi.Services
         private DashboardColumnMap? _dashboardColumns;
         private bool? _taxArrearsTableAvailable;
         private bool? _watchlistTableAvailable;
+        private readonly ConcurrentDictionary<string, ManagementSummaryFilterOptionsDto> _filterOptionsCache = new(StringComparer.Ordinal);
 
         public async Task<ManagementSummaryDashboardDto> GetDashboardAsync(
             ManagementSummaryDashboardQuery query,
@@ -120,17 +122,23 @@ namespace kingsightapi.Services
         {
             var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
 
-            var kpisAndInterest = await LoadDashboardKpisAsync(query.AsOfDate, fundingStatus, cancellationToken);
-            var aliasRows = await LoadDashboardAliasRowsAsync(query.AsOfDate, fundingStatus, cancellationToken);
-            aliasRows = ApplyDashboardFilters(aliasRows, query);
-
-            var watchlistRows = DeduplicateWatchlistRows(
-                await TryLoadWatchlistTableRowsAsync(null, cancellationToken) ?? []);
-            var filterOptions = await LoadMortgageViewFilterOptionsAsync(fundingStatus, cancellationToken);
-            var investorSlices = await LoadDashboardInvestorSummaryAsync(
+            // Independent Fabric round-trips — run concurrently so wall time ≈ max(query), not sum.
+            var kpisTask = LoadDashboardKpisAsync(query.AsOfDate, fundingStatus, cancellationToken);
+            var aliasTask = LoadDashboardAliasRowsAsync(query.AsOfDate, fundingStatus, cancellationToken);
+            var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
+            var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatus, cancellationToken);
+            var investorTask = LoadDashboardInvestorSummaryAsync(
                 query.AsOfDate,
                 fundingStatus,
                 cancellationToken);
+
+            await Task.WhenAll(kpisTask, aliasTask, watchlistTask, filterOptionsTask, investorTask);
+
+            var kpisAndInterest = await kpisTask;
+            var aliasRows = ApplyDashboardFilters(await aliasTask, query);
+            var watchlistRows = DeduplicateWatchlistRows(await watchlistTask ?? []);
+            var filterOptions = await filterOptionsTask;
+            var investorSlices = await investorTask;
 
             var watchlistDates = watchlistRows
                 .Select(row => row.ReportDate)
@@ -488,6 +496,12 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
+            var cacheKey = fundingStatus ?? string.Empty;
+            if (_filterOptionsCache.TryGetValue(cacheKey, out var cached))
+            {
+                return cached;
+            }
+
             var sql = $"""
                 select distinct
                     sponsor = ltrim(rtrim(sponsor)),
@@ -529,11 +543,13 @@ namespace kingsightapi.Services
                 }
             }
 
-            return new ManagementSummaryFilterOptionsDto
+            var options = new ManagementSummaryFilterOptionsDto
             {
                 Sponsors = sponsors.ToList(),
                 InvestorAliases = investors.ToList()
             };
+            _filterOptionsCache[cacheKey] = options;
+            return options;
         }
 
         private static void AddAsOfDateParameter(SqlCommand command, DateOnly asOfDate) =>
@@ -1626,19 +1642,22 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            var probe = $"select top 0 ks_loan_no from {_tblCmhcDefaultWatchlist}";
-            try
+            if (_watchlistTableAvailable != true)
             {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var probeCmd = new SqlCommand(probe, connection);
-                await probeCmd.ExecuteReaderAsync(cancellationToken);
-                _watchlistTableAvailable = true;
-            }
-            catch (SqlException)
-            {
-                _watchlistTableAvailable = false;
-                return null;
+                var probe = $"select top 0 ks_loan_no from {_tblCmhcDefaultWatchlist}";
+                try
+                {
+                    await using var connection = new SqlConnection(_connectionString);
+                    await connection.OpenAsync(cancellationToken);
+                    await using var probeCmd = new SqlCommand(probe, connection);
+                    await probeCmd.ExecuteReaderAsync(cancellationToken);
+                    _watchlistTableAvailable = true;
+                }
+                catch (SqlException)
+                {
+                    _watchlistTableAvailable = false;
+                    return null;
+                }
             }
 
             // Source: {BronzeLakehouse}.external_files.cmhc_default (Dev: shortcut_lh_bronze1).
