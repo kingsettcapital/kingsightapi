@@ -92,7 +92,7 @@ namespace kingsightapi.Services
             _tblLoanAliasMaster = tables.Mort("loan_alias_master");
             _tblDimInvestor = tables.Mort("dim_investor");
             _tblInvestorAliasMaster = tables.Mort("investor_alias_master");
-            _tblDimStatus = tables.Mort("dim_status");
+            _tblDimStatus = tables.Shared("dim_status");
             _tblLtvValidation = tables.Mort("ltv_validation");
             _tblTaxArrears = tables.Mort("tax_arrears");
             _tblCmhcDefaultWatchlist = tables.ExternalFiles("cmhc_default");

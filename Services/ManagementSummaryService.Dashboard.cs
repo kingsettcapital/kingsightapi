@@ -185,8 +185,8 @@ namespace kingsightapi.Services
 
         private static string? ResolveFundingStatusDescription(IReadOnlyList<string>? statuses)
         {
-            // New portfolio queries leave funding_status filter commented out (all loans).
-            // Only apply a Fabric status predicate when the UI explicitly narrows status.
+            // Filter vw_loan_attributes.funding_status_description using shared.dim_status
+            // status_code (e.g. DEFAULT). UI may send status_name or status_code.
             if (statuses is null or { Count: 0 })
             {
                 return null;
@@ -197,25 +197,23 @@ namespace kingsightapi.Services
                 return null;
             }
 
-            if (statuses.Any(status =>
-                    status.Equals("In Default", StringComparison.OrdinalIgnoreCase)
-                    || status.Equals("Default", StringComparison.OrdinalIgnoreCase)
-                    || status.Equals("DEFAULT", StringComparison.OrdinalIgnoreCase)))
+            var token = statuses
+                .Select(status => status?.Trim())
+                .FirstOrDefault(status => !string.IsNullOrWhiteSpace(status));
+            if (string.IsNullOrWhiteSpace(token))
             {
-                return "DEFAULT";
+                return null;
             }
 
-            if (statuses.Any(status => status.Equals("Performing", StringComparison.OrdinalIgnoreCase)))
+            var normalized = token.ToUpperInvariant();
+            return normalized switch
             {
-                return "FUNDED";
-            }
-
-            if (statuses.Any(status => status.Equals("Watchlist", StringComparison.OrdinalIgnoreCase)))
-            {
-                return "WATCHLIST";
-            }
-
-            return null;
+                "ALL" => null,
+                "IN DEFAULT" or "DEFAULTED" => "DEFAULT",
+                "PERFORMING" => "FUNDED",
+                // status_name uppercases to status_code for Unfunded/Funded/Default/Repaid
+                _ => normalized
+            };
         }
 
         private static string AppendFundingStatusFilter(string sql, string? fundingStatus, string columnExpression)
@@ -1095,29 +1093,68 @@ namespace kingsightapi.Services
                 command.Parameters.AddWithValue("@funding_status", fundingStatus);
             }
 
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            while (await reader.ReadAsync(cancellationToken))
+            await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
             {
-                var sponsor = GetNullableString(reader, "sponsor");
-                if (!string.IsNullOrWhiteSpace(sponsor))
+                while (await reader.ReadAsync(cancellationToken))
                 {
-                    sponsors.Add(sponsor);
-                }
+                    var sponsor = GetNullableString(reader, "sponsor");
+                    if (!string.IsNullOrWhiteSpace(sponsor))
+                    {
+                        sponsors.Add(sponsor);
+                    }
 
-                var investor = GetNullableString(reader, "investor_name");
-                if (!string.IsNullOrWhiteSpace(investor))
-                {
-                    investors.Add(investor);
+                    var investor = GetNullableString(reader, "investor_name");
+                    if (!string.IsNullOrWhiteSpace(investor))
+                    {
+                        investors.Add(investor);
+                    }
                 }
             }
+
+            var statuses = await LoadDimStatusFilterLabelsAsync(connection, cancellationToken);
 
             var options = new ManagementSummaryFilterOptionsDto
             {
                 Sponsors = sponsors.ToList(),
-                InvestorAliases = investors.ToList()
+                InvestorAliases = investors.ToList(),
+                Statuses = statuses
             };
             _filterOptionsCache[cacheKey] = options;
             return options;
+        }
+
+        private async Task<IReadOnlyList<string>> LoadDimStatusFilterLabelsAsync(
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            var statuses = new List<string>();
+            var statusSql = $"""
+                select s.status_name
+                from {_tblDimStatus} s
+                where isnull(s.is_active, 1) = 1
+                  and isnull(s.status_type, 'FUNDING') = 'FUNDING'
+                  and s.status_name is not null
+                  and ltrim(rtrim(s.status_name)) <> ''
+                order by isnull(s.sort_order, 999999), s.status_name
+                """;
+
+            try
+            {
+                await using var statusCmd = new SqlCommand(statusSql, connection);
+                await using var statusReader = await statusCmd.ExecuteReaderAsync(cancellationToken);
+                while (await statusReader.ReadAsync(cancellationToken))
+                {
+                    statuses.Add(statusReader.GetString(0).Trim());
+                }
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogDebug(ex, "Status filter options skipped; shared.dim_status unavailable.");
+                statuses.AddRange(["Unfunded", "Funded", "Default", "Repaid"]);
+            }
+
+            statuses.Add("All");
+            return statuses;
         }
 
         private static void AddAsOfDateParameter(SqlCommand command, DateOnly asOfDate) =>
@@ -2625,27 +2662,14 @@ namespace kingsightapi.Services
                 }
             }
 
-            var statusSql = $"""
-                select s.status_name
-                from {_tblDimStatus} s
-                where s.status_name is not null
-                  and s.status_name <> ''
-                order by s.status_name
-                """;
-
-            try
+            var dimStatuses = await LoadDimStatusFilterLabelsAsync(connection, cancellationToken);
+            // LoadDimStatusFilterLabelsAsync already appends All; legacy path pre-seeds All.
+            foreach (var status in dimStatuses)
             {
-                await using var statusCmd = new SqlCommand(statusSql, connection);
-                await using var statusReader = await statusCmd.ExecuteReaderAsync(cancellationToken);
-                while (await statusReader.ReadAsync(cancellationToken))
+                if (!statuses.Contains(status, StringComparer.OrdinalIgnoreCase))
                 {
-                    statuses.Add(statusReader.GetString(0).Trim());
+                    statuses.Add(status);
                 }
-            }
-            catch (SqlException ex)
-            {
-                _logger.LogDebug(ex, "Status filter options skipped; mort.dim_status unavailable.");
-                statuses.AddRange(["In Default", "Watchlist", "Performing"]);
             }
 
             return new ManagementSummaryFilterOptionsDto

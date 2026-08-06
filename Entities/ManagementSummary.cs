@@ -141,7 +141,7 @@ namespace kingsightapi.Entities
         public IReadOnlyList<string> RiskLevels { get; init; } =
             ["ALL", "HIGH", "ELEVATED", "MODERATE", "LOW"];
         public IReadOnlyList<string> Statuses { get; init; } =
-            ["In Default", "Watchlist", "Performing", "All"];
+            ["Unfunded", "Funded", "Default", "Repaid", "All"];
     }
 
     public sealed class ManagementSummaryChartsPhase2Dto
