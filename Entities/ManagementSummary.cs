@@ -53,6 +53,7 @@ namespace kingsightapi.Entities
         public ManagementSummaryKpisDto Kpis { get; init; } = new();
         public ManagementSummaryOutstandingInterestDto OutstandingInterest { get; init; } = new();
         public IReadOnlyList<LoanAliasSummaryRowDto> LoanAliasRows { get; init; } = [];
+        public IReadOnlyList<ExposureAnalysisRowDto> ExposureAnalysisRows { get; init; } = [];
         public IReadOnlyList<CmhcWatchlistRowDto> WatchlistRows { get; init; } = [];
         /// <summary>Latest <c>report_date</c> from bronze <c>cmhc_default</c> (watchlist As At).</summary>
         public DateTime? WatchlistAsAt { get; init; }
@@ -99,6 +100,19 @@ namespace kingsightapi.Entities
         public decimal TotalExposure { get; init; }
         public decimal? Ltv { get; init; }
         public string Risk { get; init; } = "LOW";
+    }
+
+    public sealed class ExposureAnalysisRowDto
+    {
+        public int LoanAliasKey { get; init; }
+        public string LoanAlias { get; init; } = string.Empty;
+        public string Sponsor { get; init; } = string.Empty;
+        public decimal ExternalBalance { get; init; }
+        public decimal SmfBalance { get; init; }
+        public decimal MlpBalance { get; init; }
+        public decimal TotalKsExposure { get; init; }
+        public decimal SubordinateExposure { get; init; }
+        public decimal? Ltv { get; init; }
     }
 
     public sealed class CmhcWatchlistRowDto
@@ -242,6 +256,8 @@ namespace kingsightapi.Entities
         public string Label { get; init; } = string.Empty;
         public decimal Value { get; init; }
         public decimal? SharePercent { get; init; }
+        public int? Count { get; init; }
+        public decimal? AverageLtv { get; init; }
     }
 
     public sealed class TaxArrearsByYearDto

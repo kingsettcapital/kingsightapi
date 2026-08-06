@@ -64,6 +64,7 @@ namespace kingsightapi.Services
         private readonly string _vwLoanAttributes;
         private readonly string _fnExposure;
         private readonly string _tblSubjectiveLoanAliasMaster;
+        private readonly string _tblFactAmortizationSchedule;
         private readonly ILogger<ManagementSummaryService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -98,6 +99,7 @@ namespace kingsightapi.Services
             _vwLoanAttributes = tables.Mortgage("vw_loan_attributes");
             _fnExposure = tables.MortgageObject("fn_exposure");
             _tblSubjectiveLoanAliasMaster = tables.SubjectiveInput("loan_alias_master");
+            _tblFactAmortizationSchedule = tables.Mortgage("fact_amortization_schedule");
         }
 
         public async Task<IReadOnlyList<ManagementSummaryRowDto>> GetSummaryAsync(
