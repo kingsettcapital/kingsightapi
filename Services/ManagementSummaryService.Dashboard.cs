@@ -1358,9 +1358,6 @@ namespace kingsightapi.Services
                 propertyStats.Units.HasValue ? (int?)Math.Round(propertyStats.Units.Value) : null,
                 propertyStats.SquareFeet,
                 propertyStats.Acres);
-            int? ranking = portfolioRows.Any(row => row.Rank.HasValue)
-                ? portfolioRows.Where(row => row.Rank.HasValue).Min(row => row.Rank)
-                : null;
 
             decimal? percentInterestPaid = null;
             var totalInterestDue = interestOverLife.TotalInterestDue;
@@ -1391,10 +1388,8 @@ namespace kingsightapi.Services
                 {
                     MainLoanId = reportDetails.ParentLoanCodes,
                     LoanType = null,
-                    InvestorAlias = portfolioRows
-                        .Select(row => row.Investor)
-                        .FirstOrDefault(investor => !string.IsNullOrWhiteSpace(investor)),
-                    Ranking = ranking
+                    InvestorCount = reportDetails.InvestorCount,
+                    Sponsor = reportDetails.Sponsors
                 },
                 KeyDates = new LoanDetailReportKeyDatesDto
                 {

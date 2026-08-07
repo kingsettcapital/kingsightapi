@@ -185,8 +185,10 @@ namespace kingsightapi.Entities
     {
         public string? MainLoanId { get; init; }
         public string? LoanType { get; init; }
-        public string? InvestorAlias { get; init; }
-        public int? Ranking { get; init; }
+        /// <summary>Unique investor count for the loan alias (shown as "# of Investors").</summary>
+        public int? InvestorCount { get; init; }
+        /// <summary>Unique sponsors concatenated for the loan alias.</summary>
+        public string? Sponsor { get; init; }
     }
 
     public sealed class LoanDetailReportKeyDatesDto
