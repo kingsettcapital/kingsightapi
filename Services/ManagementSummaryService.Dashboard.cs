@@ -109,11 +109,25 @@ namespace kingsightapi.Services
         private static readonly string[] WatchlistStatusColumnCandidates =
             ["cmhc_watchlist_status", "watchlist_status", "default_subjective_status"];
 
+        private static readonly string[] WatchlistColourColumnCandidates =
+        [
+            "colour_input",
+            "color_input",
+            "colour",
+            "color",
+            "row_colour",
+            "row_color",
+            "Colour Input",
+            "Color Input"
+        ];
+
         private const string DefaultedStatusName = "Defaulted";
 
         private DashboardColumnMap? _dashboardColumns;
         private bool? _taxArrearsTableAvailable;
         private bool? _watchlistTableAvailable;
+        private string? _watchlistColourColumn;
+        private bool _watchlistColourColumnResolved;
         private readonly ConcurrentDictionary<string, ManagementSummaryFilterOptionsDto> _filterOptionsCache = new(StringComparer.Ordinal);
         private IReadOnlyDictionary<string, int>? _loanAliasKeyLookup;
         private readonly SemaphoreSlim _loanAliasKeyLookupLock = new(1, 1);
@@ -148,10 +162,18 @@ namespace kingsightapi.Services
             var investorSlices = await investorTask;
             var exposureAnalysisRows = ApplyExposureAnalysisFilters(await exposureAnalysisTask, query);
 
+            var filteredAliasNames = new HashSet<string>(
+                aliasRows.Select(row => row.LoanAlias),
+                StringComparer.OrdinalIgnoreCase);
+            var chartExposureAnalysisRows = exposureAnalysisRows
+                .Where(row => filteredAliasNames.Contains(row.LoanAlias))
+                .ToList();
+
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
-                investorSlices,
-                kpisAndBreakdown.ExposureBreakdown);
+                FilterInvestorSummary(investorSlices, query),
+                kpisAndBreakdown.ExposureBreakdown,
+                chartExposureAnalysisRows);
 
             var watchlistDates = watchlistRows
                 .Select(row => row.ReportDate)
@@ -335,7 +357,8 @@ namespace kingsightapi.Services
         private static ManagementSummaryChartsPhase2Dto BuildDashboardChartsFromAliasRows(
             IReadOnlyList<LoanAliasSummaryRowDto> aliasRows,
             IReadOnlyList<ChartSliceDto> investorSummary,
-            IReadOnlyList<ChartSliceDto> exposureBreakdown)
+            IReadOnlyList<ChartSliceDto> exposureBreakdown,
+            IReadOnlyList<ExposureAnalysisRowDto> exposureAnalysisRows)
         {
             var totalExposure = aliasRows.Sum(row => row.TotalExposure);
 
@@ -370,36 +393,108 @@ namespace kingsightapi.Services
                 })
                 .ToList();
 
-            var sponsorSummary = aliasRows
-                .GroupBy(row => string.IsNullOrWhiteSpace(row.Sponsor) ? "(Unknown)" : row.Sponsor!)
+            // Unique sponsor totals from exposure-analysis grain (loan alias × sponsor),
+            // not concatenated sponsor strings on detailed loan-summary rows.
+            var sponsorSummary = exposureAnalysisRows
+                .GroupBy(row => string.IsNullOrWhiteSpace(row.Sponsor) ? "(Unknown)" : row.Sponsor.Trim())
                 .Select(group =>
                 {
-                    var exposure = group.Sum(row => row.TotalExposure);
+                    var exposure = group.Sum(row =>
+                        row.ExternalBalance
+                        + row.SmfBalance
+                        + row.MlpBalance
+                        + row.SubordinateExposure);
                     var ltvs = group.Where(row => row.Ltv.HasValue).Select(row => row.Ltv!.Value).ToList();
                     return new ChartSliceDto
                     {
                         Label = group.Key,
                         Value = exposure,
-                        Count = group.Count(),
+                        Count = group.Select(row => row.LoanAlias).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                         AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null,
-                        SharePercent = totalExposure > 0
-                            ? Math.Round(exposure / totalExposure * 100m, 1)
-                            : null
+                        SharePercent = null
                     };
                 })
                 .Where(slice => slice.Value > 0)
+                .ToList();
+
+            var sponsorTotal = sponsorSummary.Sum(slice => slice.Value);
+            sponsorSummary = sponsorSummary
+                .Select(slice => new ChartSliceDto
+                {
+                    Label = slice.Label,
+                    Value = slice.Value,
+                    Count = slice.Count,
+                    AverageLtv = slice.AverageLtv,
+                    SharePercent = sponsorTotal > 0
+                        ? Math.Round(slice.Value / sponsorTotal * 100m, 1)
+                        : null
+                })
                 .OrderByDescending(slice => slice.AverageLtv ?? decimal.MinValue)
                 .ToList();
+
+            var capitalStackTotal =
+                exposureAnalysisRows.Sum(row => row.ExternalBalance)
+                + exposureAnalysisRows.Sum(row => row.SmfBalance)
+                + exposureAnalysisRows.Sum(row => row.MlpBalance)
+                + exposureAnalysisRows.Sum(row => row.SubordinateExposure);
+
+            ChartSliceDto CapitalSlice(string label, decimal value) => new()
+            {
+                Label = label,
+                Value = value,
+                SharePercent = capitalStackTotal > 0
+                    ? Math.Round(value / capitalStackTotal * 100m, 1)
+                    : null
+            };
+
+            var capitalStack = new List<ChartSliceDto>
+            {
+                CapitalSlice("External", exposureAnalysisRows.Sum(row => row.ExternalBalance)),
+                CapitalSlice("SMF", exposureAnalysisRows.Sum(row => row.SmfBalance)),
+                CapitalSlice("MLP", exposureAnalysisRows.Sum(row => row.MlpBalance)),
+                CapitalSlice("Subordinate Exposure", exposureAnalysisRows.Sum(row => row.SubordinateExposure))
+            }.Where(slice => slice.Value != 0m).ToList();
 
             return new ManagementSummaryChartsPhase2Dto
             {
                 LtvRiskDistribution = ltvRiskDistribution,
                 Top5Exposures = top5Exposures,
                 ExposureBreakdown = exposureBreakdown,
+                CapitalStack = capitalStack,
                 ExposureAnalysis = [],
                 InvestorSummary = investorSummary,
                 SponsorSummary = sponsorSummary
             };
+        }
+
+        private static IReadOnlyList<ChartSliceDto> FilterInvestorSummary(
+            IReadOnlyList<ChartSliceDto> slices,
+            ManagementSummaryDashboardQuery query)
+        {
+            IEnumerable<ChartSliceDto> filtered = slices.Where(slice =>
+                !string.IsNullOrWhiteSpace(slice.Label)
+                && !slice.Label.Equals("(Unknown)", StringComparison.OrdinalIgnoreCase)
+                && !slice.Label.Equals("Unknown", StringComparison.OrdinalIgnoreCase));
+
+            if (query.InvestorAliases is { Count: > 0 }
+                && !query.InvestorAliases.Any(alias => alias.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                var aliases = new HashSet<string>(query.InvestorAliases, StringComparer.OrdinalIgnoreCase);
+                filtered = filtered.Where(slice => aliases.Contains(slice.Label));
+            }
+
+            var rows = filtered.Where(slice => slice.Value > 0).ToList();
+            var total = rows.Sum(slice => slice.Value);
+            return rows
+                .Select(slice => new ChartSliceDto
+                {
+                    Label = slice.Label,
+                    Value = slice.Value,
+                    Count = slice.Count,
+                    SharePercent = total > 0 ? Math.Round(slice.Value / total * 100m, 1) : null
+                })
+                .OrderByDescending(slice => slice.Value)
+                .ToList();
         }
 
         private async Task<(ManagementSummaryKpisDto Kpis, ManagementSummaryOutstandingInterestDto OutstandingInterest)>
@@ -651,22 +746,29 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Single fn_exposure evaluation; share % computed in C#.
-            var sql = AppendFundingStatusFilter(
-                $"""
+            // Group by investor alias (not legal investor name); exclude blank / Unknown.
+            var sql = $"""
                 select
-                    investor = isnull(nullif(ltrim(rtrim(v.investor_name)), ''), '(Unknown)'),
-                    loan_count = count(distinct v.loan_code),
+                    investor = ltrim(rtrim(v.investor_alias_name)),
+                    loan_count = count(distinct v.loan_alias_name),
                     exposure = sum(a.exposure)
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                """,
-                fundingStatus,
-                "v.funding_status_description");
+                where nullif(ltrim(rtrim(v.investor_alias_name)), '') is not null
+                  and ltrim(rtrim(v.investor_alias_name)) not in ('(Unknown)', 'Unknown')
+                """;
+
+            if (!string.IsNullOrEmpty(fundingStatus))
+            {
+                sql += """
+
+                  and v.funding_status_description = @funding_status
+                """;
+            }
 
             sql += """
 
-                group by isnull(nullif(ltrim(rtrim(v.investor_name)), ''), '(Unknown)')
+                group by ltrim(rtrim(v.investor_alias_name))
                 order by exposure desc
                 """;
 
@@ -1203,6 +1305,8 @@ namespace kingsightapi.Services
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var interestReserveTask = LoadLoanDetailInterestReserveAsync(
                 aliasName, fundingStatus, cancellationToken);
+            var interestOverLifeTask = LoadLoanDetailInterestOverLifeAsync(
+                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
@@ -1216,6 +1320,7 @@ namespace kingsightapi.Services
                 keyDatesTask,
                 propertyStatsTask,
                 interestReserveTask,
+                interestOverLifeTask,
                 exposureByInvestorTask,
                 exposureCompositionTask,
                 taxTask);
@@ -1226,6 +1331,7 @@ namespace kingsightapi.Services
             var keyDatesRaw = await keyDatesTask;
             var propertyStats = await propertyStatsTask;
             var interestReserve = await interestReserveTask;
+            var interestOverLife = await interestOverLifeTask;
             var exposureByInvestor = await exposureByInvestorTask;
             var exposureComposition = await exposureCompositionTask;
             var taxData = await taxTask;
@@ -1234,7 +1340,6 @@ namespace kingsightapi.Services
             var totalExposure = portfolioTotals.TotalExposure;
             var securityValue = topBar.SecurityValue ?? propertyStats.SecurityValue;
             var overallLtv = topBar.AverageLtv;
-            var equityCushion = securityValue.HasValue ? securityValue - totalExposure : null;
 
             DateTime? dateOfDefault = keyDatesRaw.DefaultDate;
             int? daysInDefault = dateOfDefault.HasValue
@@ -1249,10 +1354,23 @@ namespace kingsightapi.Services
                 monthsCovered = Math.Round(reserveBalance / monthlyInterest, 1);
             }
 
-            var unitsLabel = propertyStats.Units?.ToString("G29");
+            var unitsLabel = BuildUnitsLabel(
+                propertyStats.Units.HasValue ? (int?)Math.Round(propertyStats.Units.Value) : null,
+                propertyStats.SquareFeet,
+                propertyStats.Acres);
             int? ranking = portfolioRows.Any(row => row.Rank.HasValue)
                 ? portfolioRows.Where(row => row.Rank.HasValue).Min(row => row.Rank)
                 : null;
+
+            decimal? percentInterestPaid = null;
+            var totalInterestDue = interestOverLife.TotalInterestDue;
+            if (totalInterestDue is > 0)
+            {
+                var paid =
+                    (interestOverLife.PaidByReservesOrInterCo ?? 0m)
+                    + (interestOverLife.PaidViaCash ?? 0m);
+                percentInterestPaid = Math.Round(paid / totalInterestDue.Value * 100m, 2);
+            }
 
             _logger.LogInformation(
                 "Loan detail report for alias {LoanAliasKey} ({AliasName}): {PortfolioCount} portfolio rows.",
@@ -1265,10 +1383,9 @@ namespace kingsightapi.Services
                 LoanAlias = aliasName,
                 Header = new LoanDetailReportHeaderDto
                 {
-                    SecurityValue = securityValue,
-                    OverallLtv = overallLtv,
-                    EquityCushion = equityCushion,
-                    Units = unitsLabel
+                    PrincipalBalance = portfolioTotals.Principal,
+                    PercentInterestPaid = percentInterestPaid,
+                    OverallLtv = overallLtv
                 },
                 ReportDetails = new LoanDetailReportDetailsDto
                 {
@@ -1281,25 +1398,28 @@ namespace kingsightapi.Services
                 },
                 KeyDates = new LoanDetailReportKeyDatesDto
                 {
+                    DateOfAdvance = keyDatesRaw.DateOfAdvance,
                     DateOfDefault = dateOfDefault,
                     DaysInDefault = daysInDefault > 0 ? daysInDefault : null,
                     MaturityDate = keyDatesRaw.MaturityDate,
+                    InterestOffDate = keyDatesRaw.InterestOffDate,
                     AsOfDate = query.AsOfDate
                 },
                 PropertyStats = new LoanDetailReportPropertyStatsDto
                 {
+                    SecurityValue = securityValue,
+                    UnitsSize = unitsLabel,
                     ValuePerUnit = propertyStats.ValuePerUnit,
-                    RiskStatus = MapDashboardRiskBand(overallLtv),
-                    PropertyType = null,
-                    Location = reportDetails.Sponsors
+                    ExposurePerUnit = propertyStats.ExposurePerUnit,
+                    RiskStatus = MapDashboardRiskBand(overallLtv)
                 },
                 InterestSummary = new LoanDetailReportInterestSummaryDto
                 {
                     InterestDisbursed = topBar.InterestDisbursed,
                     InterestNotDisbursed = topBar.InterestNotDisbursed,
-                    TotalOutstandingInterest = topBar.TotalOutstandingInterest,
                     MonthsInArrears = null
                 },
+                InterestOverLife = interestOverLife,
                 InterestReserve = new LoanDetailReportInterestReserveDto
                 {
                     CurrentInterestReserve = interestReserve.CurrentInterestReserve,
@@ -1381,7 +1501,7 @@ namespace kingsightapi.Services
                     v.loan_description,
                     v.investor_name,
                     v.ranking,
-                    cast(null as decimal(18, 6)) as rate,
+                    v.interest_rate as rate,
                     a.principal_balance,
                     a.outstanding_loan_interest,
                     a.accrued,
@@ -1394,9 +1514,55 @@ namespace kingsightapi.Services
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
                 {BuildLoanAliasWhere(fundingStatus)}
-                order by v.ranking, v.loan_code
+                order by
+                    case when v.ranking is null then 1 else 0 end,
+                    v.ranking,
+                    v.loan_code
                 """;
 
+            try
+            {
+                return await ReadLoanDetailPortfolioRowsAsync(sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogDebug(ex, "interest_rate unavailable on vw_loan_attributes; loading portfolio without rate.");
+                var fallbackSql = $"""
+                    select
+                        v.loan_code,
+                        v.loan_description,
+                        v.investor_name,
+                        v.ranking,
+                        cast(null as decimal(18, 6)) as rate,
+                        a.principal_balance,
+                        a.outstanding_loan_interest,
+                        a.accrued,
+                        a.outstanding_late_interest,
+                        a.monthly_interest_adjustment_amount,
+                        a.tax_arrears,
+                        (isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost,
+                        a.exposure,
+                        v.ltv
+                    from {_vwLoanAttributes} v
+                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                    {BuildLoanAliasWhere(fundingStatus)}
+                    order by
+                        case when v.ranking is null then 1 else 0 end,
+                        v.ranking,
+                        v.loan_code
+                    """;
+                return await ReadLoanDetailPortfolioRowsAsync(
+                    fallbackSql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+        }
+
+        private async Task<List<LoanPortfolioDetailRowDto>> ReadLoanDetailPortfolioRowsAsync(
+            string sql,
+            DateOnly asOfDate,
+            string loanAliasName,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
+        {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
@@ -1557,8 +1723,78 @@ namespace kingsightapi.Services
                 GetNullableDateTime(reader, "interest_off_date"));
         }
 
-        private async Task<(decimal? SecurityValue, decimal? Units, decimal? ValuePerUnit, decimal? ExposurePerUnit)>
+        private async Task<(
+            decimal? SecurityValue,
+            decimal? Units,
+            decimal? Acres,
+            decimal? SquareFeet,
+            decimal? ValuePerUnit,
+            decimal? ExposurePerUnit)>
             LoadLoanDetailPropertyStatsAsync(
+                DateOnly asOfDate,
+                string loanAliasName,
+                string? fundingStatus,
+                CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    max(v.security_value_loan_alias) as security_value,
+                    max(v.units_loan_alias) as units,
+                    max(v.net_acres_loan_alias) as acres,
+                    case
+                        when nullif(max(v.units_loan_alias), 0) is null then null
+                        else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
+                    end as value_per_unit,
+                    case
+                        when nullif(max(v.units_loan_alias), 0) is null then null
+                        else sum(a.exposure) / nullif(max(v.units_loan_alias), 0)
+                    end as exposure_per_unit
+                from {_vwLoanAttributes} v
+                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                {BuildLoanAliasWhere(fundingStatus)}
+                group by v.loan_alias_name
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+
+            try
+            {
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return (null, null, null, null, null, null);
+                }
+
+                var valuePerUnit = GetNullableDecimal(reader, "value_per_unit");
+                var exposurePerUnit = GetNullableDecimal(reader, "exposure_per_unit");
+                return (
+                    GetNullableDecimal(reader, "security_value"),
+                    GetNullableDecimal(reader, "units"),
+                    GetNullableDecimal(reader, "acres"),
+                    null,
+                    valuePerUnit.HasValue ? Math.Round(valuePerUnit.Value, 2) : null,
+                    exposurePerUnit.HasValue ? Math.Round(exposurePerUnit.Value, 2) : null);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                // Fallback when net_acres_loan_alias is not on the view.
+                _logger.LogDebug(ex, "Property stats acres column unavailable; retrying without it.");
+                return await LoadLoanDetailPropertyStatsCoreAsync(
+                    asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+        }
+
+        private async Task<(
+            decimal? SecurityValue,
+            decimal? Units,
+            decimal? Acres,
+            decimal? SquareFeet,
+            decimal? ValuePerUnit,
+            decimal? ExposurePerUnit)>
+            LoadLoanDetailPropertyStatsCoreAsync(
                 DateOnly asOfDate,
                 string loanAliasName,
                 string? fundingStatus,
@@ -1590,7 +1826,7 @@ namespace kingsightapi.Services
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
             {
-                return (null, null, null, null);
+                return (null, null, null, null, null, null);
             }
 
             var valuePerUnit = GetNullableDecimal(reader, "value_per_unit");
@@ -1598,8 +1834,103 @@ namespace kingsightapi.Services
             return (
                 GetNullableDecimal(reader, "security_value"),
                 GetNullableDecimal(reader, "units"),
+                null,
+                null,
                 valuePerUnit.HasValue ? Math.Round(valuePerUnit.Value, 2) : null,
                 exposurePerUnit.HasValue ? Math.Round(exposurePerUnit.Value, 2) : null);
+        }
+
+        private async Task<LoanDetailReportInterestOverLifeDto> LoadLoanDetailInterestOverLifeAsync(
+            DateOnly asOfDate,
+            string loanAliasName,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
+        {
+            // Paid by Reserves or InterCo uses columns named by the reporting spec.
+            // Total Interest Due / Paid via Cash / Interest Unpaid still need confirmed column names.
+            var sql = $"""
+                select
+                    sum(isnull(a.loan_reserve_payment_amount, 0)
+                        + isnull(a.monthly_loan_interest_ic_payment, 0)) as paid_by_reserves_or_interco,
+                    sum(a.total_interest_due) as total_interest_due,
+                    sum(a.paid_via_cash) as paid_via_cash,
+                    sum(a.interest_unpaid) as interest_unpaid
+                from {_vwLoanAttributes} v
+                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                {BuildLoanAliasWhere(fundingStatus)}
+                group by v.loan_alias_name
+                """;
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(sql, connection);
+                AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return new LoanDetailReportInterestOverLifeDto();
+                }
+
+                return new LoanDetailReportInterestOverLifeDto
+                {
+                    TotalInterestDue = GetNullableDecimal(reader, "total_interest_due"),
+                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves_or_interco"),
+                    PaidViaCash = GetNullableDecimal(reader, "paid_via_cash"),
+                    InterestUnpaid = GetNullableDecimal(reader, "interest_unpaid")
+                };
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "Interest-over-life columns unavailable on fn_exposure; returning empty values.");
+                return await LoadLoanDetailInterestOverLifePaidOnlyAsync(
+                    asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+        }
+
+        private async Task<LoanDetailReportInterestOverLifeDto> LoadLoanDetailInterestOverLifePaidOnlyAsync(
+            DateOnly asOfDate,
+            string loanAliasName,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    sum(isnull(a.loan_reserve_payment_amount, 0)
+                        + isnull(a.monthly_loan_interest_ic_payment, 0)) as paid_by_reserves_or_interco
+                from {_vwLoanAttributes} v
+                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                {BuildLoanAliasWhere(fundingStatus)}
+                group by v.loan_alias_name
+                """;
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(sql, connection);
+                AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (!await reader.ReadAsync(cancellationToken))
+                {
+                    return new LoanDetailReportInterestOverLifeDto();
+                }
+
+                return new LoanDetailReportInterestOverLifeDto
+                {
+                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves_or_interco")
+                };
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogDebug(ex, "Paid-by-reserves/InterCo columns unavailable on fn_exposure.");
+                return new LoanDetailReportInterestOverLifeDto();
+            }
         }
 
         private async Task<(decimal? CurrentInterestReserve, decimal? CurrentInterestReserveBalance)>
@@ -1673,12 +2004,13 @@ namespace kingsightapi.Services
         {
             var sql = $"""
                 select
-                    investor = isnull(nullif(ltrim(rtrim(v.investor_name)), ''), '(Unknown)'),
+                    investor = ltrim(rtrim(v.investor_name)),
                     exposure = sum(a.exposure)
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
                 {BuildLoanAliasWhere(fundingStatus)}
-                group by isnull(nullif(ltrim(rtrim(v.investor_name)), ''), '(Unknown)')
+                  and nullif(ltrim(rtrim(v.investor_name)), '') is not null
+                group by ltrim(rtrim(v.investor_name))
                 order by exposure desc
                 """;
 
@@ -2730,6 +3062,11 @@ namespace kingsightapi.Services
             }
 
             // Source: {BronzeLakehouse}.external_files.cmhc_default (Dev: shortcut_lh_bronze1).
+            var colourColumn = await ResolveWatchlistColourColumnAsync(cancellationToken);
+            var colourSelect = string.IsNullOrEmpty(colourColumn)
+                ? "cast(null as varchar(50)) as colour_input"
+                : $"cast([{colourColumn}] as varchar(100)) as colour_input";
+
             var sql = $"""
                 select [ks_loan_no],
                        [aggregator_investor],
@@ -2746,7 +3083,8 @@ namespace kingsightapi.Services
                        [created_by],
                        [updated_by],
                        [created_datetime],
-                       [updated_datetime]
+                       [updated_datetime],
+                       {colourSelect}
                 from {_tblCmhcDefaultWatchlist}
                 order by [report_date] desc, [ks_loan_no]
                 """;
@@ -2761,6 +3099,7 @@ namespace kingsightapi.Services
                 await using var reader = await command.ExecuteReaderAsync(cancellationToken);
                 while (await reader.ReadAsync(cancellationToken))
                 {
+                    var colourInput = GetNullableString(reader, "colour_input");
                     rows.Add(new CmhcWatchlistRowDto
                     {
                         LoanId = GetString(reader, "ks_loan_no"),
@@ -2776,9 +3115,16 @@ namespace kingsightapi.Services
                         Issue = GetNullableString(reader, "comments"),
                         StatusUpdate = null,
                         Conclusion = null,
-                        Status = "NO CONCERNS",
+                        Status = MapWatchlistStatusFromColour(colourInput),
                         ReportDate = ReadFlexibleDateTime(reader, "report_date")
                     });
+                }
+
+                if (string.IsNullOrEmpty(colourColumn))
+                {
+                    _logger.LogWarning(
+                        "CMHC watchlist colour column was not found on {Table}; statuses default to NO CONCERNS until Colour Input is ingested.",
+                        _tblCmhcDefaultWatchlist);
                 }
 
                 return rows;
@@ -3091,6 +3437,58 @@ namespace kingsightapi.Services
             };
         }
 
+        private async Task<string?> ResolveWatchlistColourColumnAsync(CancellationToken cancellationToken)
+        {
+            if (_watchlistColourColumnResolved)
+            {
+                return _watchlistColourColumn;
+            }
+
+            _watchlistColourColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _tblCmhcDefaultWatchlist,
+                WatchlistColourColumnCandidates,
+                cancellationToken);
+            _watchlistColourColumnResolved = true;
+            return _watchlistColourColumn;
+        }
+
+        private static string MapWatchlistStatusFromColour(string? colourOrStatus)
+        {
+            if (string.IsNullOrWhiteSpace(colourOrStatus))
+            {
+                return "NO CONCERNS";
+            }
+
+            var value = colourOrStatus.Trim();
+
+            // Excel Colour Input / row colour legend
+            if (value.Equals("Yellow", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("Y", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("yellow", StringComparison.OrdinalIgnoreCase))
+            {
+                return "CONCERN";
+            }
+
+            if (value.Equals("Green", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("G", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("green", StringComparison.OrdinalIgnoreCase))
+            {
+                return "NO CONCERNS";
+            }
+
+            if (value.Equals("Orange", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("Red", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("Orange/Red", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("orange", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("R", StringComparison.OrdinalIgnoreCase))
+            {
+                return "CLAIM EXPECTED";
+            }
+
+            return NormalizeWatchlistStatus(value);
+        }
+
         private static string NormalizeWatchlistStatus(string status)
         {
             if (string.IsNullOrWhiteSpace(status))
@@ -3098,10 +3496,23 @@ namespace kingsightapi.Services
                 return "NO CONCERNS";
             }
 
-            return status.Contains("CONCERN", StringComparison.OrdinalIgnoreCase)
-                && !status.Contains("NO", StringComparison.OrdinalIgnoreCase)
-                ? "CONCERN"
-                : status.ToUpperInvariant();
+            if (status.Contains("CLAIM", StringComparison.OrdinalIgnoreCase))
+            {
+                return "CLAIM EXPECTED";
+            }
+
+            if (status.Contains("NO CONCERN", StringComparison.OrdinalIgnoreCase)
+                || status.Equals("NO CONCERNS", StringComparison.OrdinalIgnoreCase))
+            {
+                return "NO CONCERNS";
+            }
+
+            if (status.Contains("CONCERN", StringComparison.OrdinalIgnoreCase))
+            {
+                return "CONCERN";
+            }
+
+            return status.ToUpperInvariant();
         }
 
         private sealed class DashboardColumnMap

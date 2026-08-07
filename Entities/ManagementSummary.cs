@@ -149,6 +149,7 @@ namespace kingsightapi.Entities
         public IReadOnlyList<ChartSliceDto> LtvRiskDistribution { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> Top5Exposures { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> ExposureBreakdown { get; init; } = [];
+        public IReadOnlyList<ChartSliceDto> CapitalStack { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> ExposureAnalysis { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> InvestorSummary { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> SponsorSummary { get; init; } = [];
@@ -162,6 +163,7 @@ namespace kingsightapi.Entities
         public LoanDetailReportKeyDatesDto KeyDates { get; init; } = new();
         public LoanDetailReportPropertyStatsDto PropertyStats { get; init; } = new();
         public LoanDetailReportInterestSummaryDto InterestSummary { get; init; } = new();
+        public LoanDetailReportInterestOverLifeDto InterestOverLife { get; init; } = new();
         public LoanDetailReportInterestReserveDto InterestReserve { get; init; } = new();
         public IReadOnlyList<LoanPortfolioDetailRowDto> PortfolioRows { get; init; } = [];
         public LoanPortfolioDetailTotalsDto? PortfolioTotals { get; init; }
@@ -174,10 +176,9 @@ namespace kingsightapi.Entities
 
     public sealed class LoanDetailReportHeaderDto
     {
-        public decimal? SecurityValue { get; init; }
+        public decimal? PrincipalBalance { get; init; }
+        public decimal? PercentInterestPaid { get; init; }
         public decimal? OverallLtv { get; init; }
-        public decimal? EquityCushion { get; init; }
-        public string? Units { get; init; }
     }
 
     public sealed class LoanDetailReportDetailsDto
@@ -190,26 +191,36 @@ namespace kingsightapi.Entities
 
     public sealed class LoanDetailReportKeyDatesDto
     {
+        public DateTime? DateOfAdvance { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public int? DaysInDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
+        public DateTime? InterestOffDate { get; init; }
         public DateOnly AsOfDate { get; init; }
     }
 
     public sealed class LoanDetailReportPropertyStatsDto
     {
+        public decimal? SecurityValue { get; init; }
+        public string? UnitsSize { get; init; }
         public decimal? ValuePerUnit { get; init; }
+        public decimal? ExposurePerUnit { get; init; }
         public string? RiskStatus { get; init; }
-        public string? PropertyType { get; init; }
-        public string? Location { get; init; }
     }
 
     public sealed class LoanDetailReportInterestSummaryDto
     {
         public decimal InterestDisbursed { get; init; }
         public decimal InterestNotDisbursed { get; init; }
-        public decimal TotalOutstandingInterest { get; init; }
         public int? MonthsInArrears { get; init; }
+    }
+
+    public sealed class LoanDetailReportInterestOverLifeDto
+    {
+        public decimal? TotalInterestDue { get; init; }
+        public decimal? PaidByReservesOrInterCo { get; init; }
+        public decimal? PaidViaCash { get; init; }
+        public decimal? InterestUnpaid { get; init; }
     }
 
     public sealed class LoanDetailReportInterestReserveDto
