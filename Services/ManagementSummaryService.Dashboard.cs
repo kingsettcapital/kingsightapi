@@ -1788,52 +1788,41 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
+            // Size metrics (units / SF / acres) come from subjective_input.loan_alias_master —
+            // the same source Loan Exposure Markers writes. Security + exposure stay on the
+            // mortgage view / fn_exposure for as-of consistency.
             var sql = $"""
                 select
                     max(v.security_value_loan_alias) as security_value,
-                    max(v.units_loan_alias) as units,
-                    max(v.net_acres_loan_alias) as acres,
+                    max(m.units) as units,
+                    max(m.net_acres) as acres,
+                    max(m.square_feet) as square_feet,
                     case
-                        when nullif(max(v.units_loan_alias), 0) is null then null
-                        else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
+                        when nullif(max(m.units), 0) is null then null
+                        else max(v.security_value_loan_alias) / nullif(max(m.units), 0)
                     end as value_per_unit,
                     case
-                        when nullif(max(v.units_loan_alias), 0) is null then null
-                        else sum(a.exposure) / nullif(max(v.units_loan_alias), 0)
+                        when nullif(max(m.units), 0) is null then null
+                        else sum(a.exposure) / nullif(max(m.units), 0)
                     end as exposure_per_unit
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                left join {_tblSubjectiveLoanAliasMaster} m
+                    on m.loan_alias_name = v.loan_alias_name
                 {BuildLoanAliasWhere(fundingStatus)}
                 group by v.loan_alias_name
                 """;
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-            await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
-
             try
             {
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                if (!await reader.ReadAsync(cancellationToken))
-                {
-                    return (null, null, null, null, null, null);
-                }
-
-                var valuePerUnit = GetNullableDecimal(reader, "value_per_unit");
-                var exposurePerUnit = GetNullableDecimal(reader, "exposure_per_unit");
-                return (
-                    GetNullableDecimal(reader, "security_value"),
-                    GetNullableDecimal(reader, "units"),
-                    GetNullableDecimal(reader, "acres"),
-                    null,
-                    valuePerUnit.HasValue ? Math.Round(valuePerUnit.Value, 2) : null,
-                    exposurePerUnit.HasValue ? Math.Round(exposurePerUnit.Value, 2) : null);
+                return await ReadLoanDetailPropertyStatsAsync(
+                    sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
             }
             catch (SqlException ex) when (ex.Number == 207)
             {
-                // Fallback when net_acres_loan_alias is not on the view.
-                _logger.LogDebug(ex, "Property stats acres column unavailable; retrying without it.");
+                _logger.LogDebug(
+                    ex,
+                    "Property stats size columns unavailable on loan_alias_master; falling back to view columns.");
                 return await LoadLoanDetailPropertyStatsCoreAsync(
                     asOfDate, loanAliasName, fundingStatus, cancellationToken);
             }
@@ -1856,6 +1845,8 @@ namespace kingsightapi.Services
                 select
                     max(v.security_value_loan_alias) as security_value,
                     max(v.units_loan_alias) as units,
+                    max(v.net_acres_loan_alias) as acres,
+                    cast(null as decimal(18, 2)) as square_feet,
                     case
                         when nullif(max(v.units_loan_alias), 0) is null then null
                         else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
@@ -1870,6 +1861,52 @@ namespace kingsightapi.Services
                 group by v.loan_alias_name
                 """;
 
+            try
+            {
+                return await ReadLoanDetailPropertyStatsAsync(
+                    sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogDebug(ex, "Property stats acres column unavailable on view; retrying without it.");
+                var fallbackSql = $"""
+                    select
+                        max(v.security_value_loan_alias) as security_value,
+                        max(v.units_loan_alias) as units,
+                        cast(null as decimal(18, 4)) as acres,
+                        cast(null as decimal(18, 2)) as square_feet,
+                        case
+                            when nullif(max(v.units_loan_alias), 0) is null then null
+                            else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
+                        end as value_per_unit,
+                        case
+                            when nullif(max(v.units_loan_alias), 0) is null then null
+                            else sum(a.exposure) / nullif(max(v.units_loan_alias), 0)
+                        end as exposure_per_unit
+                    from {_vwLoanAttributes} v
+                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                    {BuildLoanAliasWhere(fundingStatus)}
+                    group by v.loan_alias_name
+                    """;
+                return await ReadLoanDetailPropertyStatsAsync(
+                    fallbackSql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
+            }
+        }
+
+        private async Task<(
+            decimal? SecurityValue,
+            decimal? Units,
+            decimal? Acres,
+            decimal? SquareFeet,
+            decimal? ValuePerUnit,
+            decimal? ExposurePerUnit)>
+            ReadLoanDetailPropertyStatsAsync(
+                string sql,
+                DateOnly asOfDate,
+                string loanAliasName,
+                string? fundingStatus,
+                CancellationToken cancellationToken)
+        {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
@@ -1886,8 +1923,8 @@ namespace kingsightapi.Services
             return (
                 GetNullableDecimal(reader, "security_value"),
                 GetNullableDecimal(reader, "units"),
-                null,
-                null,
+                GetNullableDecimal(reader, "acres"),
+                GetNullableDecimal(reader, "square_feet"),
                 valuePerUnit.HasValue ? Math.Round(valuePerUnit.Value, 2) : null,
                 exposurePerUnit.HasValue ? Math.Round(exposurePerUnit.Value, 2) : null);
         }
@@ -3630,22 +3667,26 @@ namespace kingsightapi.Services
             return string.Join(" — ", new[] { plan, date }.Where(s => !string.IsNullOrWhiteSpace(s)));
         }
 
+        /// <summary>
+        /// Formats loan-alias size metrics for display: annotated, concatenated, omitting null/zero.
+        /// Example: "Units: 329 | SF: 535,000 | Acres: 15".
+        /// </summary>
         private static string? BuildUnitsLabel(int? units, decimal? squareFeet, decimal? acres)
         {
             var parts = new List<string>();
-            if (units.HasValue)
+            if (units is > 0)
             {
-                parts.Add($"Units: {units}");
+                parts.Add($"Units: {units.Value:N0}");
             }
 
-            if (squareFeet.HasValue)
+            if (squareFeet is > 0)
             {
-                parts.Add($"SF: {squareFeet:0}");
+                parts.Add($"SF: {squareFeet.Value:N0}");
             }
 
-            if (acres.HasValue)
+            if (acres is > 0)
             {
-                parts.Add($"Acres: {acres:0.##}");
+                parts.Add($"Acres: {acres.Value:0.##}");
             }
 
             return parts.Count > 0 ? string.Join(" | ", parts) : null;
