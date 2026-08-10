@@ -156,7 +156,12 @@ namespace kingsightapi.Services
                 exposureAnalysisTask);
 
             var kpisAndBreakdown = await kpisTask;
-            var aliasRows = ApplyDashboardFilters(await aliasTask, query);
+            var investorAliasNames = await LoadLoanAliasNamesForInvestorsAsync(
+                query.AsOfDate,
+                fundingStatus,
+                query.InvestorAliases,
+                cancellationToken);
+            var aliasRows = ApplyDashboardFilters(await aliasTask, query, investorAliasNames);
             var watchlistRows = DeduplicateWatchlistRows(await watchlistTask ?? []);
             var filterOptions = await filterOptionsTask;
             var investorSlices = await investorTask;
@@ -165,15 +170,49 @@ namespace kingsightapi.Services
             var filteredAliasNames = new HashSet<string>(
                 aliasRows.Select(row => row.LoanAlias),
                 StringComparer.OrdinalIgnoreCase);
-            var chartExposureAnalysisRows = exposureAnalysisRows
+            // Keep exposure-analysis / charts / KPIs on the same filtered alias universe.
+            exposureAnalysisRows = exposureAnalysisRows
                 .Where(row => filteredAliasNames.Contains(row.LoanAlias))
                 .ToList();
+
+            var kpis = kpisAndBreakdown.Kpis;
+            var outstanding = kpisAndBreakdown.OutstandingInterest;
+            var exposureBreakdown = kpisAndBreakdown.ExposureBreakdown;
+
+            // Always align header balance / LTV / outstanding interest with the alias table
+            // on screen (SQL KPI query can disagree or return zeros while alias rows have amounts).
+            var aliasMetrics = BuildMetricsFromAliasRows(aliasRows);
+            kpis = new ManagementSummaryKpisDto
+            {
+                NumberOfLoans = HasPostSqlDashboardFilters(query)
+                    ? aliasMetrics.Kpis.NumberOfLoans
+                    : kpisAndBreakdown.Kpis.NumberOfLoans,
+                TotalOutstandingBalance = aliasMetrics.Kpis.TotalOutstandingBalance,
+                AverageLtv = aliasMetrics.Kpis.AverageLtv ?? kpisAndBreakdown.Kpis.AverageLtv,
+                PercentOfFundings = HasPostSqlDashboardFilters(query)
+                    ? aliasMetrics.Kpis.PercentOfFundings
+                    : kpisAndBreakdown.Kpis.PercentOfFundings,
+                AverageLtvTrendLabel = kpisAndBreakdown.Kpis.AverageLtvTrendLabel,
+                MaxLtv = aliasMetrics.Kpis.MaxLtv ?? kpisAndBreakdown.Kpis.MaxLtv
+            };
+            outstanding = new ManagementSummaryOutstandingInterestDto
+            {
+                InterestDisbursed = HasPostSqlDashboardFilters(query)
+                    ? aliasMetrics.Outstanding.InterestDisbursed
+                    : kpisAndBreakdown.OutstandingInterest.InterestDisbursed,
+                InterestNotDisbursed = HasPostSqlDashboardFilters(query)
+                    ? aliasMetrics.Outstanding.InterestNotDisbursed
+                    : kpisAndBreakdown.OutstandingInterest.InterestNotDisbursed,
+                TotalOutstandingInterest = aliasMetrics.Outstanding.TotalOutstandingInterest,
+                TotalLateInterest = aliasMetrics.Outstanding.TotalLateInterest
+            };
+            exposureBreakdown = aliasMetrics.ExposureBreakdown;
 
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
                 FilterInvestorSummary(investorSlices, query),
-                kpisAndBreakdown.ExposureBreakdown,
-                chartExposureAnalysisRows);
+                exposureBreakdown,
+                exposureAnalysisRows);
 
             var watchlistDates = watchlistRows
                 .Select(row => row.ReportDate)
@@ -185,7 +224,7 @@ namespace kingsightapi.Services
             _logger.LogInformation(
                 "Management summary dashboard for {AsOfDate}: {LoanCount} loans, {AliasCount} alias rows, {WatchlistCount} watchlist rows, {ExposureAnalysisCount} exposure analysis rows.",
                 query.AsOfDate,
-                kpisAndBreakdown.Kpis.NumberOfLoans,
+                kpis.NumberOfLoans,
                 aliasRows.Count,
                 watchlistRows.Count,
                 exposureAnalysisRows.Count);
@@ -194,8 +233,8 @@ namespace kingsightapi.Services
             {
                 AsOfDate = query.AsOfDate,
                 ReportPeriodLabel = BuildReportPeriodLabel(query.AsOfDate),
-                Kpis = kpisAndBreakdown.Kpis,
-                OutstandingInterest = kpisAndBreakdown.OutstandingInterest,
+                Kpis = kpis,
+                OutstandingInterest = outstanding,
                 LoanAliasRows = aliasRows,
                 ExposureAnalysisRows = exposureAnalysisRows,
                 WatchlistRows = watchlistRows,
@@ -231,7 +270,7 @@ namespace kingsightapi.Services
             return normalized switch
             {
                 "ALL" => null,
-                "IN DEFAULT" or "DEFAULTED" => "DEFAULT",
+                "IN DEFAULT" or "DEFAULTED" or "IN_DEFAULT" or "INDEFAULT" => "DEFAULT",
                 "PERFORMING" => "FUNDED",
                 // status_name uppercases to status_code for Unfunded/Funded/Default/Repaid
                 _ => normalized
@@ -512,31 +551,50 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where funding_status_description = @funding_status";
-            var joinStatusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and v.funding_status_description = @funding_status";
+            // Funding status selects which aliases appear (deal has ≥1 loan in that status).
+            // Amounts roll up every loan under those aliases — same grain as Loan Detail /
+            // Loan Portfolio report — so Other Costs includes Cost to Complete on sibling
+            // loans even when those loans themselves are not in the selected status.
+            var hasStatusFilter = !string.IsNullOrEmpty(fundingStatus);
+            var qualifyingAliasesCte = hasStatusFilter
+                ? $"""
+                qualifying_aliases as (
+                    select distinct loan_alias_name
+                    from {_vwLoanAttributes}
+                    where upper(ltrim(rtrim(funding_status_description))) = @funding_status
+                ),
+                """
+                : string.Empty;
+            var aliasScopeFrom = hasStatusFilter
+                ? $"""
+                        from {_vwLoanAttributes} v
+                        inner join qualifying_aliases q on q.loan_alias_name = v.loan_alias_name
+                """
+                : $"""
+                        from {_vwLoanAttributes} v
+                """;
+            var aliasScopeJoin = hasStatusFilter
+                ? "inner join qualifying_aliases q on q.loan_alias_name = v.loan_alias_name"
+                : string.Empty;
 
             // Pre-aggregate text fields once (join), avoid correlated string_agg per alias row.
             var sql = $"""
-                with distinct_interest_status as (
+                with {qualifyingAliasesCte}
+                distinct_interest_status as (
                     select
                         loan_alias_name,
                         string_agg(interest_status, ', ') as interest_status_alias
                     from (
                         select distinct
-                            loan_alias_name,
+                            v.loan_alias_name,
                             case
-                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is not null
-                                    then concat(investor_alias_name, ': Accruing')
-                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is null
-                                    then investor_alias_name
+                                when v.investor_alias_name in ('SMF', 'MLP') and v.date_interest_turned_off is not null
+                                    then concat(v.investor_alias_name, ': Accruing')
+                                when v.investor_alias_name in ('SMF', 'MLP') and v.date_interest_turned_off is null
+                                    then v.investor_alias_name
                                 else null
                             end as interest_status
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
+                        {aliasScopeFrom}
                     ) d
                     where interest_status is not null
                     group by loan_alias_name
@@ -546,9 +604,8 @@ namespace kingsightapi.Services
                         loan_alias_name,
                         string_agg(sponsor, ', ') as sponsor
                     from (
-                        select distinct loan_alias_name, sponsor
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
+                        select distinct v.loan_alias_name, v.sponsor
+                        {aliasScopeFrom}
                     ) d
                     where sponsor is not null
                     group by loan_alias_name
@@ -558,9 +615,8 @@ namespace kingsightapi.Services
                         loan_alias_name,
                         string_agg(exit_plan, ', ') as ext
                     from (
-                        select distinct loan_alias_name, exit_plan
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
+                        select distinct v.loan_alias_name, v.exit_plan
+                        {aliasScopeFrom}
                     ) d
                     where exit_plan is not null
                     group by loan_alias_name
@@ -591,11 +647,10 @@ namespace kingsightapi.Services
                     end as risk_level
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
+                {aliasScopeJoin}
                 left join distinct_sponsor s on s.loan_alias_name = v.loan_alias_name
                 left join distinct_interest_status i on i.loan_alias_name = v.loan_alias_name
                 left join distinct_exit e on e.loan_alias_name = v.loan_alias_name
-                where 1 = 1
-                {joinStatusPredicate}
                 group by
                     v.loan_alias_name,
                     s.sponsor,
@@ -1173,7 +1228,7 @@ namespace kingsightapi.Services
             var sql = $"""
                 select distinct
                     sponsor = ltrim(rtrim(sponsor)),
-                    investor_name = ltrim(rtrim(investor_name))
+                    investor_alias_name = ltrim(rtrim(investor_alias_name))
                 from {_vwLoanAttributes}
                 """;
             if (!string.IsNullOrEmpty(fundingStatus))
@@ -1205,8 +1260,10 @@ namespace kingsightapi.Services
                         sponsors.Add(sponsor);
                     }
 
-                    var investor = GetNullableString(reader, "investor_name");
-                    if (!string.IsNullOrWhiteSpace(investor))
+                    var investor = GetNullableString(reader, "investor_alias_name");
+                    if (!string.IsNullOrWhiteSpace(investor)
+                        && !investor.Equals("(Unknown)", StringComparison.OrdinalIgnoreCase)
+                        && !investor.Equals("Unknown", StringComparison.OrdinalIgnoreCase))
                     {
                         investors.Add(investor);
                     }
@@ -1279,6 +1336,9 @@ namespace kingsightapi.Services
             LoanDetailReportQuery query,
             CancellationToken cancellationToken = default)
         {
+            // Loan Detail is deal-scoped by alias. Funding status on Management Summary decides
+            // which aliases appear; the detail report always rolls up the full alias portfolio
+            // (same grain as summary alias Other Costs / exposure).
             var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
             var aliasName = await ResolveLoanAliasNameAsync(loanAliasKey, cancellationToken);
             if (string.IsNullOrWhiteSpace(aliasName))
@@ -1322,21 +1382,27 @@ namespace kingsightapi.Services
                 exposureByInvestorTask,
                 taxTask);
 
-            var portfolioRows = await portfolioTask;
+            var portfolioRows = ApplyLoanDetailInvestorFilter(await portfolioTask, query.InvestorAliases);
             var topBar = await topBarTask;
             var reportDetails = await reportDetailsTask;
             var keyDatesRaw = await keyDatesTask;
             var propertyStats = await propertyStatsTask;
             var interestReserve = await interestReserveTask;
             var interestOverLife = await interestOverLifeTask;
-            var exposureByInvestor = await exposureByInvestorTask;
+            var exposureByInvestor = ApplyLoanDetailInvestorChartFilter(
+                await exposureByInvestorTask,
+                query.InvestorAliases);
             var taxData = await taxTask;
 
             var portfolioTotals = BuildPortfolioTotals(portfolioRows);
             var exposureComposition = BuildLoanDetailExposureComposition(portfolioTotals);
             var totalExposure = portfolioTotals.TotalExposure;
             var securityValue = topBar.SecurityValue ?? propertyStats.SecurityValue;
-            var overallLtv = topBar.AverageLtv;
+            // Prefer LTV from filtered portfolio when investor filter narrows rows.
+            var overallLtv = query.InvestorAliases is { Count: > 0 }
+                && !query.InvestorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase))
+                ? AveragePortfolioLtv(portfolioRows) ?? topBar.AverageLtv
+                : topBar.AverageLtv;
 
             DateTime? dateOfDefault = keyDatesRaw.DefaultDate;
             int? daysInDefault = dateOfDefault.HasValue
@@ -1457,13 +1523,12 @@ namespace kingsightapi.Services
 
         private static string BuildLoanAliasWhere(string? fundingStatus, string aliasColumn = "v.loan_alias_name")
         {
-            var sql = $"where {aliasColumn} = @loan_alias_name";
-            if (!string.IsNullOrEmpty(fundingStatus))
-            {
-                sql += " and v.funding_status_description = @funding_status";
-            }
-
-            return sql;
+            // Loan Detail is alias-scoped: once a deal is opened, show the full loan portfolio
+            // under that alias (same rollup grain as Management Summary alias rows).
+            // Funding status is applied on the summary to decide which aliases appear, not to
+            // strip sibling loans from the deal-level report.
+            _ = fundingStatus;
+            return $"where {aliasColumn} = @loan_alias_name";
         }
 
         private static void AddLoanAliasParameters(
@@ -1639,10 +1704,6 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and funding_status_description = @funding_status";
-
             var sql = $"""
                 select
                     string_agg(parent_loan_code, ', ') as parent_loan_codes,
@@ -1656,7 +1717,6 @@ namespace kingsightapi.Services
                         investor_code
                     from {_vwLoanAttributes}
                     where loan_alias_name = @loan_alias_name
-                    {statusPredicate}
                 ) x
                 group by loan_alias_name
                 """;
@@ -1931,10 +1991,6 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and v.funding_status_description = @funding_status";
-
             var sql = $"""
                 with interest_reserve as (
                     select
@@ -1957,7 +2013,6 @@ namespace kingsightapi.Services
                 from {_vwLoanAttributes} v
                 left join interest_reserve i on v.loan_code = i.loan_code
                 where v.loan_alias_name = @loan_alias_name
-                {statusPredicate}
                 group by v.loan_alias_name
                 """;
 
@@ -2640,11 +2695,224 @@ namespace kingsightapi.Services
                 .ToList();
         }
 
+        private static List<LoanPortfolioDetailRowDto> ApplyLoanDetailInvestorFilter(
+            List<LoanPortfolioDetailRowDto> rows,
+            IReadOnlyList<string>? investorAliases)
+        {
+            if (investorAliases is null or { Count: 0 }
+                || investorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return rows;
+            }
+
+            var investors = new HashSet<string>(
+                investorAliases.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+            return rows
+                .Where(r => !string.IsNullOrWhiteSpace(r.Investor) && investors.Contains(r.Investor))
+                .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> ApplyLoanDetailInvestorChartFilter(
+            IReadOnlyList<ChartSliceDto> slices,
+            IReadOnlyList<string>? investorAliases)
+        {
+            if (investorAliases is null or { Count: 0 }
+                || investorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return slices;
+            }
+
+            var investors = new HashSet<string>(
+                investorAliases.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+            var filtered = slices.Where(s => investors.Contains(s.Label)).ToList();
+            var total = filtered.Sum(s => s.Value);
+            return filtered
+                .Select(s => new ChartSliceDto
+                {
+                    Label = s.Label,
+                    Value = s.Value,
+                    Count = s.Count,
+                    SharePercent = total > 0 ? Math.Round(s.Value / total * 100m, 1) : null
+                })
+                .ToList();
+        }
+
+        private static decimal? AveragePortfolioLtv(IReadOnlyList<LoanPortfolioDetailRowDto> rows)
+        {
+            var ltvs = rows.Where(r => r.Ltv.HasValue).Select(r => r.Ltv!.Value).ToList();
+            return ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null;
+        }
+
+        private static bool HasPostSqlDashboardFilters(ManagementSummaryDashboardQuery query)
+        {
+            if (!string.IsNullOrWhiteSpace(query.Sponsor)
+                && !query.Sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (query.RiskLevels is { Count: > 0 }
+                && !query.RiskLevels.Any(r => r.Equals("ALL", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            if (query.DefaultDateFrom.HasValue
+                || query.DefaultDateTo.HasValue
+                || query.MaturityDateFrom.HasValue
+                || query.MaturityDateTo.HasValue)
+            {
+                return true;
+            }
+
+            if (query.InvestorAliases is { Count: > 0 }
+                && !query.InvestorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            return query.LoanAliasIds is { Count: > 0 };
+        }
+
+        private async Task<HashSet<string>?> LoadLoanAliasNamesForInvestorsAsync(
+            DateOnly asOfDate,
+            string? fundingStatus,
+            IReadOnlyList<string>? investorAliases,
+            CancellationToken cancellationToken)
+        {
+            if (investorAliases is null or { Count: 0 }
+                || investorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var selected = investorAliases
+                .Where(a => !string.IsNullOrWhiteSpace(a))
+                .Select(a => a.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (selected.Count == 0)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var paramNames = selected.Select((_, index) => $"@inv{index}").ToList();
+            var sql = $"""
+                select distinct v.loan_alias_name
+                from {_vwLoanAttributes} v
+                where nullif(ltrim(rtrim(v.loan_alias_name)), '') is not null
+                  and ltrim(rtrim(v.investor_alias_name)) in ({string.Join(", ", paramNames)})
+                """;
+            if (!string.IsNullOrEmpty(fundingStatus))
+            {
+                sql += """
+
+                  and v.funding_status_description = @funding_status
+                """;
+            }
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            for (var i = 0; i < selected.Count; i++)
+            {
+                command.Parameters.AddWithValue(paramNames[i], selected[i]);
+            }
+
+            AddFundingStatusParameter(command, fundingStatus);
+            // asOf retained for signature symmetry with other dashboard loaders; investor filter is status-scoped.
+            _ = asOfDate;
+
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var name = GetString(reader, "loan_alias_name");
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    names.Add(name);
+                }
+            }
+
+            return names;
+        }
+
+        private static (
+            ManagementSummaryKpisDto Kpis,
+            ManagementSummaryOutstandingInterestDto Outstanding,
+            IReadOnlyList<ChartSliceDto> ExposureBreakdown)
+            BuildMetricsFromAliasRows(IReadOnlyList<LoanAliasSummaryRowDto> aliasRows)
+        {
+            var ltvs = aliasRows.Where(r => r.Ltv.HasValue).Select(r => r.Ltv!.Value).ToList();
+            var principal = aliasRows.Sum(r => r.Principal);
+            var osInt = aliasRows.Sum(r => r.OsInt);
+            var accrued = aliasRows.Sum(r => r.Accrued);
+            var lateInt = aliasRows.Sum(r => r.LateInt);
+            var taxIns = aliasRows.Sum(r => r.TaxIns);
+            var intAdv = aliasRows.Sum(r => r.IntAdv);
+            var other = aliasRows.Sum(r => r.Other);
+            var totalExposure = aliasRows.Sum(r => r.TotalExposure);
+
+            var kpis = new ManagementSummaryKpisDto
+            {
+                // Filtered view is alias-grain; loan-code counts are unavailable after post-SQL filters.
+                NumberOfLoans = aliasRows.Count,
+                TotalOutstandingBalance = principal,
+                AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null,
+                PercentOfFundings = null,
+                MaxLtv = ltvs.Count > 0 ? ltvs.Max() : null
+            };
+
+            var outstanding = new ManagementSummaryOutstandingInterestDto
+            {
+                InterestDisbursed = 0m,
+                InterestNotDisbursed = 0m,
+                TotalOutstandingInterest = osInt,
+                TotalLateInterest = lateInt
+            };
+
+            var components = new (string Label, decimal Value)[]
+            {
+                ("Outstanding Interest", osInt),
+                ("Accrued", accrued),
+                ("Late Interest", lateInt),
+                ("Tax Arrears", taxIns),
+                ("Interest Adjustment", intAdv),
+                ("Other", other)
+            };
+            var denominator = totalExposure > 0 ? totalExposure : components.Sum(c => c.Value);
+            var breakdown = components
+                .Where(c => c.Value != 0m)
+                .Select(c => new ChartSliceDto
+                {
+                    Label = c.Label,
+                    Value = c.Value,
+                    SharePercent = denominator > 0 ? Math.Round(c.Value / denominator * 100m, 1) : null
+                })
+                .ToList();
+
+            return (kpis, outstanding, breakdown);
+        }
+
         private static List<LoanAliasSummaryRowDto> ApplyDashboardFilters(
             List<LoanAliasSummaryRowDto> rows,
-            ManagementSummaryDashboardQuery query)
+            ManagementSummaryDashboardQuery query,
+            IReadOnlySet<string>? investorMatchedAliasNames = null)
         {
             IEnumerable<LoanAliasSummaryRowDto> filtered = rows;
+
+            if (query.LoanAliasIds is { Count: > 0 })
+            {
+                var ids = new HashSet<int>(query.LoanAliasIds);
+                filtered = filtered.Where(r => ids.Contains(r.LoanAliasKey));
+            }
+
+            if (investorMatchedAliasNames is not null)
+            {
+                filtered = filtered.Where(r => investorMatchedAliasNames.Contains(r.LoanAlias));
+            }
 
             if (!string.IsNullOrWhiteSpace(query.Sponsor)
                 && !query.Sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))

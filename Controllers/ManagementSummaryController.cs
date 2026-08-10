@@ -91,6 +91,7 @@ namespace kingsightapi.Controllers
             int loanAliasKey,
             [FromQuery] DateOnly asOfDate,
             [FromQuery] string[]? statuses,
+            [FromQuery] string[]? investorAliases,
             CancellationToken cancellationToken)
         {
             if (loanAliasKey <= 0)
@@ -106,7 +107,8 @@ namespace kingsightapi.Controllers
             var query = new LoanDetailReportQuery
             {
                 AsOfDate = asOfDate,
-                Statuses = statuses
+                Statuses = statuses,
+                InvestorAliases = investorAliases
             };
 
             try

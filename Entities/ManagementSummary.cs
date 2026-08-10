@@ -44,6 +44,7 @@ namespace kingsightapi.Entities
     {
         public DateOnly AsOfDate { get; init; }
         public IReadOnlyList<string>? Statuses { get; init; }
+        public IReadOnlyList<string>? InvestorAliases { get; init; }
     }
 
     public sealed class ManagementSummaryDashboardDto
