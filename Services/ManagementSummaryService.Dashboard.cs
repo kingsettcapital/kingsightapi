@@ -1309,8 +1309,6 @@ namespace kingsightapi.Services
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
-            var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var taxTask = LoadTaxArrearsForAliasAsync(loanAliasKey, cancellationToken);
 
             await Task.WhenAll(
@@ -1322,7 +1320,6 @@ namespace kingsightapi.Services
                 interestReserveTask,
                 interestOverLifeTask,
                 exposureByInvestorTask,
-                exposureCompositionTask,
                 taxTask);
 
             var portfolioRows = await portfolioTask;
@@ -1333,10 +1330,10 @@ namespace kingsightapi.Services
             var interestReserve = await interestReserveTask;
             var interestOverLife = await interestOverLifeTask;
             var exposureByInvestor = await exposureByInvestorTask;
-            var exposureComposition = await exposureCompositionTask;
             var taxData = await taxTask;
 
             var portfolioTotals = BuildPortfolioTotals(portfolioRows);
+            var exposureComposition = BuildLoanDetailExposureComposition(portfolioTotals);
             var totalExposure = portfolioTotals.TotalExposure;
             var securityValue = topBar.SecurityValue ?? propertyStats.SecurityValue;
             var overallLtv = topBar.AverageLtv;
@@ -2045,6 +2042,7 @@ namespace kingsightapi.Services
         {
             var sql = $"""
                 select
+                    sum(a.principal_balance) as principal,
                     sum(a.exposure) as exposure,
                     sum(a.outstanding_loan_interest) as outstanding_interest,
                     sum(a.accrued) as accrued,
@@ -2070,22 +2068,56 @@ namespace kingsightapi.Services
             }
 
             var totalExposure = GetNullableDecimal(reader, "exposure") ?? 0m;
+            var outstandingInterest = GetNullableDecimal(reader, "outstanding_interest") ?? 0m;
+            var interestAdjustment = GetNullableDecimal(reader, "interest_adjustment") ?? 0m;
+            var osIntMerged = outstandingInterest + interestAdjustment;
+
+            // Principal + O/S Int (incl. Int. Adj) + Accrued + Late + Tax + Other.
+            // Int. Adj is merged into O/S Int so the pie never needs a negative slice.
             var components = new (string Label, decimal Value)[]
             {
-                ("Outstanding Interest", GetNullableDecimal(reader, "outstanding_interest") ?? 0m),
-                ("Accrued", GetNullableDecimal(reader, "accrued") ?? 0m),
-                ("Late Interest", GetNullableDecimal(reader, "late_interest") ?? 0m),
+                ("Principal", GetNullableDecimal(reader, "principal") ?? 0m),
+                ("O/S Int.", osIntMerged),
+                ("Accrued Int.", GetNullableDecimal(reader, "accrued") ?? 0m),
+                ("Late Int.", GetNullableDecimal(reader, "late_interest") ?? 0m),
                 ("Tax Arrears", GetNullableDecimal(reader, "tax_arrear") ?? 0m),
-                ("Interest Adjustment", GetNullableDecimal(reader, "interest_adjustment") ?? 0m),
-                ("Other", GetNullableDecimal(reader, "other_cost") ?? 0m)
+                ("Other Costs", GetNullableDecimal(reader, "other_cost") ?? 0m)
             };
 
-            var denominator = totalExposure > 0
-                ? totalExposure
-                : components.Sum(component => component.Value);
+            var positive = components.Where(component => component.Value > 0m).ToList();
+            var denominator = positive.Sum(component => component.Value);
 
-            return components
-                .Where(component => component.Value != 0m)
+            return positive
+                .Select(component => new ChartSliceDto
+                {
+                    Label = component.Label,
+                    Value = component.Value,
+                    SharePercent = denominator > 0
+                        ? Math.Round(component.Value / denominator * 100m, 1)
+                        : null
+                })
+                .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> BuildLoanDetailExposureComposition(
+            LoanPortfolioDetailTotalsDto totals)
+        {
+            // Int. Adj merged into O/S Int — pie charts cannot represent negative slices.
+            var osIntMerged = totals.DefInterest + totals.IntAdj;
+            var components = new (string Label, decimal Value)[]
+            {
+                ("Principal", totals.Principal),
+                ("O/S Int.", osIntMerged),
+                ("Accrued Int.", totals.AccruedInt),
+                ("Late Int.", totals.LateInt),
+                ("Tax Arrears", totals.TaxArrears),
+                ("Other Costs", totals.OtherCosts)
+            };
+
+            var positive = components.Where(component => component.Value > 0m).ToList();
+            var denominator = positive.Sum(component => component.Value);
+
+            return positive
                 .Select(component => new ChartSliceDto
                 {
                     Label = component.Label,
@@ -2905,15 +2937,21 @@ namespace kingsightapi.Services
                 .OrderByDescending(c => c.Value)
                 .ToList();
 
-            var composition = new List<ChartSliceDto>
+            var osIntMerged = portfolioRows.Sum(r => r.DefInterest) + portfolioRows.Sum(r => r.IntAdj);
+            var compositionParts = new (string Label, decimal Value)[]
             {
-                Slice("Principal", portfolioRows.Sum(r => r.Principal), total),
-                Slice("Default Interest", portfolioRows.Sum(r => r.DefInterest), total),
-                Slice("Accrued Interest", portfolioRows.Sum(r => r.AccruedInt), total),
-                Slice("Late Interest", portfolioRows.Sum(r => r.LateInt), total),
-                Slice("Tax Arrears", portfolioRows.Sum(r => r.TaxArrears), total),
-                Slice("Other Costs", portfolioRows.Sum(r => r.OtherCosts), total)
-            }.Where(c => c.Value > 0).ToList();
+                ("Principal", portfolioRows.Sum(r => r.Principal)),
+                ("O/S Int.", osIntMerged),
+                ("Accrued Int.", portfolioRows.Sum(r => r.AccruedInt)),
+                ("Late Int.", portfolioRows.Sum(r => r.LateInt)),
+                ("Tax Arrears", portfolioRows.Sum(r => r.TaxArrears)),
+                ("Other Costs", portfolioRows.Sum(r => r.OtherCosts))
+            };
+            var compositionPositive = compositionParts.Where(part => part.Value > 0m).ToList();
+            var compositionTotal = compositionPositive.Sum(part => part.Value);
+            var composition = compositionPositive
+                .Select(part => Slice(part.Label, part.Value, compositionTotal))
+                .ToList();
 
             return (byInvestor, composition, byInvestor);
         }
