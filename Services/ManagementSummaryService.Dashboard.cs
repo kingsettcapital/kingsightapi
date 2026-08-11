@@ -1999,15 +1999,13 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Paid by Reserves or InterCo uses columns named by the reporting spec.
-            // Total Interest Due / Paid via Cash / Interest Unpaid still need confirmed column names.
+            // Interest Over Life — reporting SQL (fn_exposure LTD columns).
             var sql = $"""
                 select
-                    sum(isnull(a.loan_reserve_payment_amount, 0)
-                        + isnull(a.monthly_loan_interest_ic_payment, 0)) as paid_by_reserves_or_interco,
-                    sum(a.total_interest_due) as total_interest_due,
-                    sum(a.paid_via_cash) as paid_via_cash,
-                    sum(a.interest_unpaid) as interest_unpaid
+                    sum(a.outstanding_loan_interest) as total_interest_due,
+                    sum(a.paid_by_reserve_ltd) as paid_by_reserves,
+                    sum(a.paid_by_cash_ltd) as paid_via_cash,
+                    sum(a.unpaid_amount) as interest_unpaid
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
                 {BuildLoanAliasWhere(fundingStatus)}
@@ -2030,58 +2028,17 @@ namespace kingsightapi.Services
                 return new LoanDetailReportInterestOverLifeDto
                 {
                     TotalInterestDue = GetNullableDecimal(reader, "total_interest_due"),
-                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves_or_interco"),
+                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves"),
                     PaidViaCash = GetNullableDecimal(reader, "paid_via_cash"),
                     InterestUnpaid = GetNullableDecimal(reader, "interest_unpaid")
                 };
             }
             catch (SqlException ex) when (ex.Number == 207)
             {
-                _logger.LogDebug(
+                _logger.LogWarning(
                     ex,
-                    "Interest-over-life columns unavailable on fn_exposure; returning empty values.");
-                return await LoadLoanDetailInterestOverLifePaidOnlyAsync(
-                    asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-        }
-
-        private async Task<LoanDetailReportInterestOverLifeDto> LoadLoanDetailInterestOverLifePaidOnlyAsync(
-            DateOnly asOfDate,
-            string loanAliasName,
-            string? fundingStatus,
-            CancellationToken cancellationToken)
-        {
-            var sql = $"""
-                select
-                    sum(isnull(a.loan_reserve_payment_amount, 0)
-                        + isnull(a.monthly_loan_interest_ic_payment, 0)) as paid_by_reserves_or_interco
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
-                """;
-
-            try
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = new SqlCommand(sql, connection);
-                AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
-
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                if (!await reader.ReadAsync(cancellationToken))
-                {
-                    return new LoanDetailReportInterestOverLifeDto();
-                }
-
-                return new LoanDetailReportInterestOverLifeDto
-                {
-                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves_or_interco")
-                };
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogDebug(ex, "Paid-by-reserves/InterCo columns unavailable on fn_exposure.");
+                    "Interest-over-life columns unavailable on fn_exposure for alias {LoanAliasName}.",
+                    loanAliasName);
                 return new LoanDetailReportInterestOverLifeDto();
             }
         }
