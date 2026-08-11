@@ -551,50 +551,33 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Funding status selects which aliases appear (deal has ≥1 loan in that status).
-            // Amounts roll up every loan under those aliases — same grain as Loan Detail /
-            // Loan Portfolio report — so Other Costs includes Cost to Complete on sibling
-            // loans even when those loans themselves are not in the selected status.
-            var hasStatusFilter = !string.IsNullOrEmpty(fundingStatus);
-            var qualifyingAliasesCte = hasStatusFilter
-                ? $"""
-                qualifying_aliases as (
-                    select distinct loan_alias_name
-                    from {_vwLoanAttributes}
-                    where upper(ltrim(rtrim(funding_status_description))) = @funding_status
-                ),
-                """
-                : string.Empty;
-            var aliasScopeFrom = hasStatusFilter
-                ? $"""
-                        from {_vwLoanAttributes} v
-                        inner join qualifying_aliases q on q.loan_alias_name = v.loan_alias_name
-                """
-                : $"""
-                        from {_vwLoanAttributes} v
-                """;
-            var aliasScopeJoin = hasStatusFilter
-                ? "inner join qualifying_aliases q on q.loan_alias_name = v.loan_alias_name"
-                : string.Empty;
+            // Loan-level funding status filter — same grain as Loan Detail drill-down so
+            // summary Other Costs / exposure match the filtered portfolio for an alias.
+            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
+                ? string.Empty
+                : "where upper(ltrim(rtrim(funding_status_description))) = @funding_status";
+            var joinStatusPredicate = string.IsNullOrEmpty(fundingStatus)
+                ? string.Empty
+                : "and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
 
             // Pre-aggregate text fields once (join), avoid correlated string_agg per alias row.
             var sql = $"""
-                with {qualifyingAliasesCte}
-                distinct_interest_status as (
+                with distinct_interest_status as (
                     select
                         loan_alias_name,
                         string_agg(interest_status, ', ') as interest_status_alias
                     from (
                         select distinct
-                            v.loan_alias_name,
+                            loan_alias_name,
                             case
-                                when v.investor_alias_name in ('SMF', 'MLP') and v.date_interest_turned_off is not null
-                                    then concat(v.investor_alias_name, ': Accruing')
-                                when v.investor_alias_name in ('SMF', 'MLP') and v.date_interest_turned_off is null
-                                    then v.investor_alias_name
+                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is not null
+                                    then concat(investor_alias_name, ': Accruing')
+                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is null
+                                    then investor_alias_name
                                 else null
                             end as interest_status
-                        {aliasScopeFrom}
+                        from {_vwLoanAttributes}
+                        {statusPredicate}
                     ) d
                     where interest_status is not null
                     group by loan_alias_name
@@ -604,8 +587,9 @@ namespace kingsightapi.Services
                         loan_alias_name,
                         string_agg(sponsor, ', ') as sponsor
                     from (
-                        select distinct v.loan_alias_name, v.sponsor
-                        {aliasScopeFrom}
+                        select distinct loan_alias_name, sponsor
+                        from {_vwLoanAttributes}
+                        {statusPredicate}
                     ) d
                     where sponsor is not null
                     group by loan_alias_name
@@ -615,8 +599,9 @@ namespace kingsightapi.Services
                         loan_alias_name,
                         string_agg(exit_plan, ', ') as ext
                     from (
-                        select distinct v.loan_alias_name, v.exit_plan
-                        {aliasScopeFrom}
+                        select distinct loan_alias_name, exit_plan
+                        from {_vwLoanAttributes}
+                        {statusPredicate}
                     ) d
                     where exit_plan is not null
                     group by loan_alias_name
@@ -647,10 +632,11 @@ namespace kingsightapi.Services
                     end as risk_level
                 from {_vwLoanAttributes} v
                 inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {aliasScopeJoin}
                 left join distinct_sponsor s on s.loan_alias_name = v.loan_alias_name
                 left join distinct_interest_status i on i.loan_alias_name = v.loan_alias_name
                 left join distinct_exit e on e.loan_alias_name = v.loan_alias_name
+                where 1 = 1
+                {joinStatusPredicate}
                 group by
                     v.loan_alias_name,
                     s.sponsor,
@@ -1336,9 +1322,8 @@ namespace kingsightapi.Services
             LoanDetailReportQuery query,
             CancellationToken cancellationToken = default)
         {
-            // Loan Detail is deal-scoped by alias. Funding status on Management Summary decides
-            // which aliases appear; the detail report always rolls up the full alias portfolio
-            // (same grain as summary alias Other Costs / exposure).
+            // Honor UI funding-status filter (including All → no status predicate).
+            // SPA sends Default explicitly when that is selected; empty/null means no filter.
             var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
             var aliasName = await ResolveLoanAliasNameAsync(loanAliasKey, cancellationToken);
             if (string.IsNullOrWhiteSpace(aliasName))
@@ -1523,12 +1508,14 @@ namespace kingsightapi.Services
 
         private static string BuildLoanAliasWhere(string? fundingStatus, string aliasColumn = "v.loan_alias_name")
         {
-            // Loan Detail is alias-scoped: once a deal is opened, show the full loan portfolio
-            // under that alias (same rollup grain as Management Summary alias rows).
-            // Funding status is applied on the summary to decide which aliases appear, not to
-            // strip sibling loans from the deal-level report.
-            _ = fundingStatus;
-            return $"where {aliasColumn} = @loan_alias_name";
+            var sql = $"where {aliasColumn} = @loan_alias_name";
+            if (!string.IsNullOrEmpty(fundingStatus))
+            {
+                // Same CI funding-status match as Management Summary (DEFAULT / Default / etc.).
+                sql += " and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
+            }
+
+            return sql;
         }
 
         private static void AddLoanAliasParameters(
@@ -1704,6 +1691,10 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
+            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
+                ? string.Empty
+                : "and upper(ltrim(rtrim(funding_status_description))) = @funding_status";
+
             var sql = $"""
                 select
                     string_agg(parent_loan_code, ', ') as parent_loan_codes,
@@ -1717,6 +1708,7 @@ namespace kingsightapi.Services
                         investor_code
                     from {_vwLoanAttributes}
                     where loan_alias_name = @loan_alias_name
+                    {statusPredicate}
                 ) x
                 group by loan_alias_name
                 """;
@@ -2028,6 +2020,10 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
+            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
+                ? string.Empty
+                : "and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
+
             var sql = $"""
                 with interest_reserve as (
                     select
@@ -2050,6 +2046,7 @@ namespace kingsightapi.Services
                 from {_vwLoanAttributes} v
                 left join interest_reserve i on v.loan_code = i.loan_code
                 where v.loan_alias_name = @loan_alias_name
+                {statusPredicate}
                 group by v.loan_alias_name
                 """;
 
