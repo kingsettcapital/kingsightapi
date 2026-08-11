@@ -561,6 +561,8 @@ namespace kingsightapi.Services
                 : "and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
 
             // Pre-aggregate text fields once (join), avoid correlated string_agg per alias row.
+            // Interest Status matches reporting SQL: for SMF/MLP only, take vw.interest_status
+            // (already formatted per DE0239/DE0240), distinct then string_agg.
             var sql = $"""
                 with distinct_interest_status as (
                     select
@@ -570,10 +572,8 @@ namespace kingsightapi.Services
                         select distinct
                             loan_alias_name,
                             case
-                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is not null
-                                    then concat(investor_alias_name, ': Accruing')
-                                when investor_alias_name in ('SMF', 'MLP') and date_interest_turned_off is null
-                                    then investor_alias_name
+                                when investor_alias_name in ('SMF', 'MLP')
+                                    then interest_status
                                 else null
                             end as interest_status
                         from {_vwLoanAttributes}
@@ -587,11 +587,12 @@ namespace kingsightapi.Services
                         loan_alias_name,
                         string_agg(sponsor, ', ') as sponsor
                     from (
-                        select distinct loan_alias_name, sponsor
+                        select distinct loan_alias_name, ltrim(rtrim(sponsor)) as sponsor
                         from {_vwLoanAttributes}
                         {statusPredicate}
                     ) d
                     where sponsor is not null
+                      and sponsor <> ''
                     group by loan_alias_name
                 ),
                 distinct_exit as (
@@ -1540,13 +1541,16 @@ namespace kingsightapi.Services
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
+            // Loan Portfolio grid — matches reporting SQL:
+            // vw_loan_attributes ⋈ fn_exposure(@as_of_date), rate from fn_exposure.
+            // Drill-down adds loan_alias_name; Filters status → funding_status_description.
             var sql = $"""
                 select
                     v.loan_code,
                     v.loan_description,
                     v.investor_name,
                     v.ranking,
-                    v.interest_rate as rate,
+                    a.rate,
                     a.principal_balance,
                     a.outstanding_loan_interest,
                     a.accrued,
@@ -1571,7 +1575,7 @@ namespace kingsightapi.Services
             }
             catch (SqlException ex) when (ex.Number == 207)
             {
-                _logger.LogDebug(ex, "interest_rate unavailable on vw_loan_attributes; loading portfolio without rate.");
+                _logger.LogDebug(ex, "rate unavailable on fn_exposure; loading portfolio without rate.");
                 var fallbackSql = $"""
                     select
                         v.loan_code,
