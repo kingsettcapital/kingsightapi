@@ -1700,31 +1700,90 @@ namespace kingsightapi.Services
                 ? string.Empty
                 : "and upper(ltrim(rtrim(funding_status_description))) = @funding_status";
 
-            var sql = $"""
-                select
-                    (select string_agg(x.parent_loan_code, ', ')
-                     from (
-                         select distinct nullif(ltrim(rtrim(parent_loan_code)), '') as parent_loan_code
-                         from {_vwLoanAttributes}
-                         where loan_alias_name = @loan_alias_name
-                         {statusPredicate}
-                           and nullif(ltrim(rtrim(parent_loan_code)), '') is not null
-                     ) x) as parent_loan_codes,
-                    (select string_agg(x.sponsor, ', ')
-                     from (
-                         select distinct nullif(ltrim(rtrim(sponsor)), '') as sponsor
-                         from {_vwLoanAttributes}
-                         where loan_alias_name = @loan_alias_name
-                         {statusPredicate}
-                           and nullif(ltrim(rtrim(sponsor)), '') is not null
-                     ) x) as sponsors,
-                    (select count(distinct investor_code)
-                     from {_vwLoanAttributes}
-                     where loan_alias_name = @loan_alias_name
-                     {statusPredicate}
-                       and nullif(ltrim(rtrim(investor_code)), '') is not null) as investor_count
-                """;
+            // Matches reporting Report Details SQL exactly:
+            // distinct main_loan_code / sponsor / count(distinct investor_code).
+            // No app-side exclusion of 'P' codes — use the warehouse main_loan_code as-is.
+            try
+            {
+                return await ReadLoanDetailReportDetailsAsync(
+                    BuildLoanDetailReportDetailsSql("main_loan_code", statusPredicate),
+                    loanAliasName,
+                    fundingStatus,
+                    cancellationToken);
+            }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                _logger.LogDebug(
+                    ex,
+                    "main_loan_code unavailable on vw_loan_attributes; falling back to parent_loan_code.");
+                return await ReadLoanDetailReportDetailsAsync(
+                    BuildLoanDetailReportDetailsSql("parent_loan_code", statusPredicate),
+                    loanAliasName,
+                    fundingStatus,
+                    cancellationToken);
+            }
+        }
 
+        private string BuildLoanDetailReportDetailsSql(string mainLoanCodeColumn, string statusPredicate) =>
+            $"""
+            with base as (
+                select distinct
+                    loan_alias_name,
+                    loan_code,
+                    nullif(ltrim(rtrim({mainLoanCodeColumn})), '') as main_loan_code,
+                    nullif(ltrim(rtrim(sponsor)), '') as sponsor,
+                    nullif(ltrim(rtrim(investor_code)), '') as investor_code
+                from {_vwLoanAttributes}
+                where loan_alias_name = @loan_alias_name
+                {statusPredicate}
+            ),
+            parent_codes as (
+                select
+                    loan_alias_name,
+                    string_agg(main_loan_code, ', ') as loan_codes
+                from (
+                    select distinct loan_alias_name, main_loan_code
+                    from base
+                    where main_loan_code is not null
+                ) x
+                group by loan_alias_name
+            ),
+            sponsors as (
+                select
+                    loan_alias_name,
+                    string_agg(sponsor, ', ') as sponsors
+                from (
+                    select distinct loan_alias_name, sponsor
+                    from base
+                    where sponsor is not null
+                ) x
+                group by loan_alias_name
+            ),
+            investors as (
+                select
+                    loan_alias_name,
+                    count(distinct investor_code) as investor_count
+                from base
+                where investor_code is not null
+                group by loan_alias_name
+            )
+            select
+                coalesce(p.loan_codes, '') as parent_loan_codes,
+                s.sponsors,
+                isnull(i.investor_count, 0) as investor_count
+            from (select distinct loan_alias_name from base) a
+            left join parent_codes p on a.loan_alias_name = p.loan_alias_name
+            left join sponsors s on a.loan_alias_name = s.loan_alias_name
+            left join investors i on a.loan_alias_name = i.loan_alias_name
+            """;
+
+        private async Task<(string? ParentLoanCodes, string? Sponsors, int InvestorCount)>
+            ReadLoanDetailReportDetailsAsync(
+                string sql,
+                string loanAliasName,
+                string? fundingStatus,
+                CancellationToken cancellationToken)
+        {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
@@ -1736,8 +1795,9 @@ namespace kingsightapi.Services
                 return (null, null, 0);
             }
 
+            var codes = GetNullableString(reader, "parent_loan_codes");
             return (
-                GetNullableString(reader, "parent_loan_codes"),
+                string.IsNullOrWhiteSpace(codes) ? null : codes,
                 GetNullableString(reader, "sponsors"),
                 GetInt32(reader, "investor_count"));
         }
