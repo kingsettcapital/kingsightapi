@@ -4,11 +4,11 @@ DELETE FROM [subjective_input].[role_master];
 GO
 
 INSERT INTO [subjective_input].[role_master]
-    ([role_id], [role_name], [is_active], [created_datetime], [created_by])
+    ([role_id], [role_name], [status])
 VALUES
-    (1, 'Administrator', 'Y', SYSUTCDATETIME(), 'system'),
-    (2, 'Kingsett User', 'Y', SYSUTCDATETIME(), 'system'),
-    (3, 'User A', 'Y', SYSUTCDATETIME(), 'system');
+    (1, 'admin', 'A'),
+    (2, 'Kingsett User', 'A'),
+    (3, 'User A', 'A');
 GO
 
 INSERT INTO [subjective_input].[user_master]

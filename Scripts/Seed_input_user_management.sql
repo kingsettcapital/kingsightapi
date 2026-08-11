@@ -6,7 +6,7 @@ DELETE FROM input.RoleMst;
 
 INSERT INTO input.RoleMst (RoleId, RoleName, Status)
 VALUES
-    (1, 'Administrator', 'A'),
+    (1, 'admin', 'A'),
     (2, 'Kingsett User', 'A'),
     (3, 'User A', 'A');
 

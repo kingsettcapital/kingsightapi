@@ -44,6 +44,7 @@ namespace kingsightapi.Entities
     {
         public DateOnly AsOfDate { get; init; }
         public IReadOnlyList<string>? Statuses { get; init; }
+        public IReadOnlyList<string>? InvestorAliases { get; init; }
     }
 
     public sealed class ManagementSummaryDashboardDto
@@ -53,7 +54,10 @@ namespace kingsightapi.Entities
         public ManagementSummaryKpisDto Kpis { get; init; } = new();
         public ManagementSummaryOutstandingInterestDto OutstandingInterest { get; init; } = new();
         public IReadOnlyList<LoanAliasSummaryRowDto> LoanAliasRows { get; init; } = [];
+        public IReadOnlyList<ExposureAnalysisRowDto> ExposureAnalysisRows { get; init; } = [];
         public IReadOnlyList<CmhcWatchlistRowDto> WatchlistRows { get; init; } = [];
+        /// <summary>Latest <c>report_date</c> from bronze <c>cmhc_default</c> (watchlist As At).</summary>
+        public DateTime? WatchlistAsAt { get; init; }
         public ManagementSummaryFilterOptionsDto FilterOptions { get; init; } = new();
         public ManagementSummaryChartsPhase2Dto ChartsPhase2 { get; init; } = new();
     }
@@ -99,6 +103,19 @@ namespace kingsightapi.Entities
         public string Risk { get; init; } = "LOW";
     }
 
+    public sealed class ExposureAnalysisRowDto
+    {
+        public int LoanAliasKey { get; init; }
+        public string LoanAlias { get; init; } = string.Empty;
+        public string Sponsor { get; init; } = string.Empty;
+        public decimal ExternalBalance { get; init; }
+        public decimal SmfBalance { get; init; }
+        public decimal MlpBalance { get; init; }
+        public decimal TotalKsExposure { get; init; }
+        public decimal SubordinateExposure { get; init; }
+        public decimal? Ltv { get; init; }
+    }
+
     public sealed class CmhcWatchlistRowDto
     {
         public string LoanId { get; init; } = string.Empty;
@@ -115,6 +132,7 @@ namespace kingsightapi.Entities
         public string? StatusUpdate { get; init; }
         public string? Conclusion { get; init; }
         public string Status { get; init; } = "NO CONCERNS";
+        public DateTime? ReportDate { get; init; }
     }
 
     public sealed class ManagementSummaryFilterOptionsDto
@@ -124,7 +142,7 @@ namespace kingsightapi.Entities
         public IReadOnlyList<string> RiskLevels { get; init; } =
             ["ALL", "HIGH", "ELEVATED", "MODERATE", "LOW"];
         public IReadOnlyList<string> Statuses { get; init; } =
-            ["In Default", "Watchlist", "Performing", "All"];
+            ["Unfunded", "Funded", "Default", "Repaid", "All"];
     }
 
     public sealed class ManagementSummaryChartsPhase2Dto
@@ -132,6 +150,7 @@ namespace kingsightapi.Entities
         public IReadOnlyList<ChartSliceDto> LtvRiskDistribution { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> Top5Exposures { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> ExposureBreakdown { get; init; } = [];
+        public IReadOnlyList<ChartSliceDto> CapitalStack { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> ExposureAnalysis { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> InvestorSummary { get; init; } = [];
         public IReadOnlyList<ChartSliceDto> SponsorSummary { get; init; } = [];
@@ -145,6 +164,7 @@ namespace kingsightapi.Entities
         public LoanDetailReportKeyDatesDto KeyDates { get; init; } = new();
         public LoanDetailReportPropertyStatsDto PropertyStats { get; init; } = new();
         public LoanDetailReportInterestSummaryDto InterestSummary { get; init; } = new();
+        public LoanDetailReportInterestOverLifeDto InterestOverLife { get; init; } = new();
         public LoanDetailReportInterestReserveDto InterestReserve { get; init; } = new();
         public IReadOnlyList<LoanPortfolioDetailRowDto> PortfolioRows { get; init; } = [];
         public LoanPortfolioDetailTotalsDto? PortfolioTotals { get; init; }
@@ -157,42 +177,53 @@ namespace kingsightapi.Entities
 
     public sealed class LoanDetailReportHeaderDto
     {
-        public decimal? SecurityValue { get; init; }
+        public decimal? PrincipalBalance { get; init; }
+        public decimal? PercentInterestPaid { get; init; }
         public decimal? OverallLtv { get; init; }
-        public decimal? EquityCushion { get; init; }
-        public string? Units { get; init; }
     }
 
     public sealed class LoanDetailReportDetailsDto
     {
         public string? MainLoanId { get; init; }
         public string? LoanType { get; init; }
-        public string? InvestorAlias { get; init; }
-        public int? Ranking { get; init; }
+        /// <summary>Unique investor count for the loan alias (shown as "# of Investors").</summary>
+        public int? InvestorCount { get; init; }
+        /// <summary>Unique sponsors concatenated for the loan alias.</summary>
+        public string? Sponsor { get; init; }
     }
 
     public sealed class LoanDetailReportKeyDatesDto
     {
+        public DateTime? DateOfAdvance { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public int? DaysInDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
+        public DateTime? InterestOffDate { get; init; }
         public DateOnly AsOfDate { get; init; }
     }
 
     public sealed class LoanDetailReportPropertyStatsDto
     {
+        public decimal? SecurityValue { get; init; }
+        public string? UnitsSize { get; init; }
         public decimal? ValuePerUnit { get; init; }
+        public decimal? ExposurePerUnit { get; init; }
         public string? RiskStatus { get; init; }
-        public string? PropertyType { get; init; }
-        public string? Location { get; init; }
     }
 
     public sealed class LoanDetailReportInterestSummaryDto
     {
         public decimal InterestDisbursed { get; init; }
         public decimal InterestNotDisbursed { get; init; }
-        public decimal TotalOutstandingInterest { get; init; }
         public int? MonthsInArrears { get; init; }
+    }
+
+    public sealed class LoanDetailReportInterestOverLifeDto
+    {
+        public decimal? TotalInterestDue { get; init; }
+        public decimal? PaidByReservesOrInterCo { get; init; }
+        public decimal? PaidViaCash { get; init; }
+        public decimal? InterestUnpaid { get; init; }
     }
 
     public sealed class LoanDetailReportInterestReserveDto
@@ -239,6 +270,8 @@ namespace kingsightapi.Entities
         public string Label { get; init; } = string.Empty;
         public decimal Value { get; init; }
         public decimal? SharePercent { get; init; }
+        public int? Count { get; init; }
+        public decimal? AverageLtv { get; init; }
     }
 
     public sealed class TaxArrearsByYearDto

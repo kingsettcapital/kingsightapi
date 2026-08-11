@@ -41,7 +41,7 @@ namespace kingsightapi.Services
             ListSql = $"""
                 select role_id,
                        role_name,
-                       is_active
+                       status
                 from {roleMaster}
                 order by role_id
                 """;
@@ -49,7 +49,7 @@ namespace kingsightapi.Services
             GetByIdSql = $"""
                 select role_id,
                        role_name,
-                       is_active
+                       status
                 from {roleMaster}
                 where role_id = @role_id
                 """;
@@ -59,17 +59,16 @@ namespace kingsightapi.Services
                 from {roleMaster}
                 """;
 
+            // Live role_master uses status (A/I), not is_active / audit columns from the older script.
             InsertSql = $"""
-                insert into {roleMaster} (role_id, role_name, is_active, created_datetime, created_by)
-                values (@role_id, @role_name, @is_active, sysutcdatetime(), @created_by)
+                insert into {roleMaster} (role_id, role_name, status)
+                values (@role_id, @role_name, @status)
                 """;
 
             UpdateSql = $"""
                 update {roleMaster}
                 set role_name = @role_name,
-                    is_active = @is_active,
-                    updated_datetime = sysutcdatetime(),
-                    updated_by = @updated_by
+                    status = @status
                 where role_id = @role_id
                 """;
 
@@ -130,8 +129,7 @@ namespace kingsightapi.Services
                 await using var command = new SqlCommand(InsertSql, connection, transaction);
                 command.Parameters.AddWithValue("@role_id", newId);
                 command.Parameters.AddWithValue("@role_name", request.RoleName.Trim());
-                command.Parameters.AddWithValue("@is_active", ToDbStatus(request.Status));
-                command.Parameters.AddWithValue("@created_by", "system");
+                command.Parameters.AddWithValue("@status", ToDbStatus(request.Status));
 
                 await command.ExecuteNonQueryAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
@@ -157,8 +155,7 @@ namespace kingsightapi.Services
             await using var command = new SqlCommand(UpdateSql, connection);
             command.Parameters.AddWithValue("@role_id", roleId);
             command.Parameters.AddWithValue("@role_name", request.RoleName.Trim());
-            command.Parameters.AddWithValue("@is_active", ToDbStatus(request.Status));
-            command.Parameters.AddWithValue("@updated_by", "system");
+            command.Parameters.AddWithValue("@status", ToDbStatus(request.Status));
 
             return await command.ExecuteNonQueryAsync(cancellationToken) > 0;
         }
@@ -205,7 +202,7 @@ namespace kingsightapi.Services
 
         private static RoleDto MapRow(SqlDataReader reader)
         {
-            var statusOrdinal = reader.GetOrdinal("is_active");
+            var statusOrdinal = reader.GetOrdinal("status");
             string? status = null;
             if (!reader.IsDBNull(statusOrdinal))
             {
@@ -226,13 +223,11 @@ namespace kingsightapi.Services
         {
             if (string.IsNullOrWhiteSpace(status))
             {
-                return SubjectiveInputActiveFlag.ToDbValue(true);
+                return "A";
             }
 
-            var normalized = status.Trim()[..1];
-            return SubjectiveInputActiveFlag.FromDbValue(normalized)
-                ? SubjectiveInputActiveFlag.ToDbValue(true)
-                : SubjectiveInputActiveFlag.ToDbValue(false);
+            var normalized = status.Trim()[..1].ToUpperInvariant();
+            return SubjectiveInputActiveFlag.FromDbValue(normalized) ? "A" : "I";
         }
 
         private static string GetString(SqlDataReader reader, string name)

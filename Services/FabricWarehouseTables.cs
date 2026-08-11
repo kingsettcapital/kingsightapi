@@ -39,6 +39,10 @@ public sealed class FabricWarehouseTables
     public string Mortgage(string table) =>
         $"{_options.SubjectiveInputDatabase}.mortgage.{table}";
 
+    /// <summary>Mortgage TVF/view-qualified name, e.g. <c>wh_gold1.mortgage.fn_exposure</c>.</summary>
+    public string MortgageObject(string name) =>
+        $"{_options.SubjectiveInputDatabase}.mortgage.{name}";
+
     /// <summary>Yardi tables in <c>{SilverLakehouseDatabase}.yardi</c>.</summary>
     public string Yardi(string table) =>
         $"{_options.SilverLakehouseDatabase}.yardi.{table}";
