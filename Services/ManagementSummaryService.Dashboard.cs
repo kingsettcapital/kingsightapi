@@ -1091,8 +1091,13 @@ namespace kingsightapi.Services
         {
             var statusPredicate = string.IsNullOrEmpty(fundingStatus)
                 ? string.Empty
-                : "where v.funding_status_description = @funding_status";
+                : "where upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
+            var sponsorStatusPredicate = string.IsNullOrEmpty(fundingStatus)
+                ? string.Empty
+                : "where upper(ltrim(rtrim(funding_status_description))) = @funding_status";
 
+            // One row per loan alias; unique sponsors concatenated (Exposure Analysis 1.1 / 1.2).
+            // ks_rank is alias-level only — do not join/group by sponsor.
             var sql = $"""
                 with base as (
                     select
@@ -1110,16 +1115,30 @@ namespace kingsightapi.Services
                 ks_rank as (
                     select
                         loan_alias_name,
-                        sponsor,
                         min(ranking) as ks_start_ranking,
                         max(ranking) as ks_end_ranking
                     from base
                     where investor_alias_name in ('SMF', 'MLP')
-                    group by loan_alias_name, sponsor
+                    group by loan_alias_name
+                ),
+                distinct_sponsor as (
+                    select
+                        loan_alias_name,
+                        string_agg(sponsor, ', ') as sponsor
+                    from (
+                        select distinct
+                            loan_alias_name,
+                            ltrim(rtrim(sponsor)) as sponsor
+                        from {_vwLoanAttributes}
+                        {sponsorStatusPredicate}
+                    ) d
+                    where sponsor is not null
+                      and sponsor <> ''
+                    group by loan_alias_name
                 )
                 select
                     b.loan_alias_name,
-                    b.sponsor,
+                    s.sponsor,
                     sum(case when b.ranking < k.ks_start_ranking then b.exposure else 0 end) as external_balance,
                     sum(case when b.investor_alias_name = 'SMF' then b.exposure else 0 end) as smf_balance,
                     sum(case when b.investor_alias_name = 'MLP' then b.exposure else 0 end) as mlp_balance,
@@ -1128,11 +1147,10 @@ namespace kingsightapi.Services
                         + sum(case when b.investor_alias_name in ('SMF', 'MLP') then b.exposure else 0 end) as total_ks_exposure,
                     avg(b.ltv) as ltv
                 from base b
-                inner join ks_rank k
-                    on b.loan_alias_name = k.loan_alias_name
-                    and isnull(b.sponsor, '') = isnull(k.sponsor, '')
-                group by b.loan_alias_name, b.sponsor
-                order by b.loan_alias_name, b.sponsor
+                inner join ks_rank k on b.loan_alias_name = k.loan_alias_name
+                left join distinct_sponsor s on s.loan_alias_name = b.loan_alias_name
+                group by b.loan_alias_name, s.sponsor
+                order by b.loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
