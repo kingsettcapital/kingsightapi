@@ -60,6 +60,7 @@ namespace kingsightapi.Services
         private readonly string _tblDimStatus;
         private readonly string _tblLtvValidation;
         private readonly string _tblTaxArrears;
+        private readonly string _tblLoanTaxDetails;
         private readonly string _tblCmhcDefaultWatchlist;
         private readonly string _vwLoanAttributes;
         private readonly string _fnExposure;
@@ -78,6 +79,7 @@ namespace kingsightapi.Services
         private string? _defaultStatusColumn;
         private bool? _defaultStatusColumnResolved;
         private bool? _ltvTableAvailable;
+        private bool? _loanTaxDetailsTableAvailable;
 
         public ManagementSummaryService(
             IConfiguration configuration,
@@ -95,6 +97,7 @@ namespace kingsightapi.Services
             _tblDimStatus = tables.Shared("dim_status");
             _tblLtvValidation = tables.Mort("ltv_validation");
             _tblTaxArrears = tables.Mort("tax_arrears");
+            _tblLoanTaxDetails = tables.SubjectiveInput("loan_tax_details");
             _tblCmhcDefaultWatchlist = tables.ExternalFiles("cmhc_default");
             _vwLoanAttributes = tables.Mortgage("vw_loan_attributes");
             _fnExposure = tables.MortgageObject("fn_exposure");

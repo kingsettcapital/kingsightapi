@@ -1354,7 +1354,8 @@ namespace kingsightapi.Services
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
                 query.AsOfDate, aliasName, fundingStatus, cancellationToken);
-            var taxTask = LoadTaxArrearsForAliasAsync(loanAliasKey, cancellationToken);
+            var taxTask = LoadTaxArrearsForAliasAsync(
+                query.AsOfDate, aliasName, cancellationToken);
 
             await Task.WhenAll(
                 portfolioTask,
@@ -1697,20 +1698,27 @@ namespace kingsightapi.Services
 
             var sql = $"""
                 select
-                    string_agg(parent_loan_code, ', ') as parent_loan_codes,
-                    string_agg(sponsor, ', ') as sponsors,
-                    count(distinct investor_code) as investor_count
-                from (
-                    select distinct
-                        loan_alias_name,
-                        parent_loan_code,
-                        sponsor,
-                        investor_code
-                    from {_vwLoanAttributes}
-                    where loan_alias_name = @loan_alias_name
-                    {statusPredicate}
-                ) x
-                group by loan_alias_name
+                    (select string_agg(x.parent_loan_code, ', ')
+                     from (
+                         select distinct nullif(ltrim(rtrim(parent_loan_code)), '') as parent_loan_code
+                         from {_vwLoanAttributes}
+                         where loan_alias_name = @loan_alias_name
+                         {statusPredicate}
+                           and nullif(ltrim(rtrim(parent_loan_code)), '') is not null
+                     ) x) as parent_loan_codes,
+                    (select string_agg(x.sponsor, ', ')
+                     from (
+                         select distinct nullif(ltrim(rtrim(sponsor)), '') as sponsor
+                         from {_vwLoanAttributes}
+                         where loan_alias_name = @loan_alias_name
+                         {statusPredicate}
+                           and nullif(ltrim(rtrim(sponsor)), '') is not null
+                     ) x) as sponsors,
+                    (select count(distinct investor_code)
+                     from {_vwLoanAttributes}
+                     where loan_alias_name = @loan_alias_name
+                     {statusPredicate}
+                       and nullif(ltrim(rtrim(investor_code)), '') is not null) as investor_count
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
@@ -2039,15 +2047,18 @@ namespace kingsightapi.Services
                         end) as current_interest_reserve_balance
                     from {_tblFactAmortizationSchedule} a
                     group by loan_key, loan_code
+                ),
+                alias_loans as (
+                    select distinct v.loan_code
+                    from {_vwLoanAttributes} v
+                    where v.loan_alias_name = @loan_alias_name
+                    {statusPredicate}
                 )
                 select
                     sum(i.current_interest_reserve) as current_interest_reserve,
                     sum(i.current_interest_reserve_balance) as current_interest_reserve_balance
-                from {_vwLoanAttributes} v
+                from alias_loans v
                 left join interest_reserve i on v.loan_code = i.loan_code
-                where v.loan_alias_name = @loan_alias_name
-                {statusPredicate}
-                group by v.loan_alias_name
                 """;
 
             try
@@ -3552,50 +3563,55 @@ namespace kingsightapi.Services
         }
 
         private async Task<(DateTime? AsAt, IReadOnlyList<TaxArrearsByYearDto> ByYear)> LoadTaxArrearsForAliasAsync(
-            int loanAliasKey,
+            DateOnly asOfDate,
+            string loanAliasName,
             CancellationToken cancellationToken)
         {
-            await EnsureTaxArrearsTableAvailableAsync(cancellationToken);
-            if (_taxArrearsTableAvailable != true)
+            await EnsureLoanTaxDetailsTableAvailableAsync(cancellationToken);
+            if (_loanTaxDetailsTableAvailable != true)
             {
                 return (null, []);
             }
 
+            // Matches the report tax query:
+            // tax_memo_date <= DATEADD(DAY, -1, EOMONTH(@as_of_date))
+            // Scoped to alias loan_codes only (no funding-status filter).
+            // distinct loan_code so multi-investor view rows do not inflate the sum.
             var sql = $"""
                 with alias_loans as (
-                    select l.loan_key
-                    from {_tblDimLoan} l
-                    where l.is_current = 1
-                      and (l.is_leaf = 1 or l.is_leaf is null)
-                      and l.loan_alias_key = @loan_alias_key
-                ),
-                latest_memo as (
-                    select max(ta.tax_memo_date) as tax_memo_date
-                    from {_tblTaxArrears} ta
-                    inner join alias_loans al on ta.loan_key = al.loan_key
+                    select distinct a.loan_code
+                    from {_vwLoanAttributes} a
+                    where a.loan_alias_name = @loan_alias_name
                 )
-                select ta.tax_year,
-                       sum(ta.tax_arrears) as tax_arrears,
-                       max(ta.tax_memo_date) as tax_memo_date
-                from {_tblTaxArrears} ta
-                inner join alias_loans al on ta.loan_key = al.loan_key
-                cross join latest_memo lm
-                where ta.tax_memo_date = lm.tax_memo_date
-                group by ta.tax_year
-                order by ta.tax_year desc
+                select
+                    b.tax_year,
+                    sum(isnull(b.tax_arrears, 0)) as tax_arrears,
+                    max(b.tax_memo_date) as tax_memo_date
+                from alias_loans a
+                inner join {_tblLoanTaxDetails} b
+                    on a.loan_code = b.loan_code
+                   and b.tax_memo_date <= dateadd(day, -1, eomonth(@as_of_date))
+                group by b.tax_year
+                order by b.tax_year desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_alias_key", loanAliasKey);
+            command.Parameters.AddWithValue("@as_of_date", asOfDate.ToDateTime(TimeOnly.MinValue));
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             DateTime? asAt = null;
             var byYear = new List<TaxArrearsByYearDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                asAt ??= GetNullableDateTime(reader, "tax_memo_date");
+                var memoDate = GetNullableDateTime(reader, "tax_memo_date");
+                if (memoDate.HasValue && (!asAt.HasValue || memoDate.Value > asAt.Value))
+                {
+                    asAt = memoDate;
+                }
+
                 byYear.Add(new TaxArrearsByYearDto
                 {
                     Year = GetInt32(reader, "tax_year"),
@@ -3604,6 +3620,31 @@ namespace kingsightapi.Services
             }
 
             return (asAt, byYear);
+        }
+
+        private async Task EnsureLoanTaxDetailsTableAvailableAsync(CancellationToken cancellationToken)
+        {
+            if (_loanTaxDetailsTableAvailable.HasValue)
+            {
+                return;
+            }
+
+            var probe = $"select top 0 loan_code from {_tblLoanTaxDetails}";
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(probe, connection);
+                await command.ExecuteReaderAsync(cancellationToken);
+                _loanTaxDetailsTableAvailable = true;
+            }
+            catch (SqlException)
+            {
+                _loanTaxDetailsTableAvailable = false;
+                _logger.LogWarning(
+                    "Tax arrears source {Table} unavailable; Loan Detail tax widget will be empty.",
+                    _tblLoanTaxDetails);
+            }
         }
 
         private async Task EnsureTaxArrearsTableAvailableAsync(CancellationToken cancellationToken)
