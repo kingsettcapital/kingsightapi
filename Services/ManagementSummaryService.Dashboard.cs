@@ -1281,11 +1281,11 @@ namespace kingsightapi.Services
             var interestOverLifeTask = LoadLoanDetailInterestOverLifeAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
-                query, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var taxTask = LoadTaxArrearsForAliasAsync(
-                query, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
 
             await Task.WhenAll(
                 portfolioTask,
@@ -1476,7 +1476,8 @@ namespace kingsightapi.Services
                     p.tax_arrears,
                     p.other_cost,
                     p.exposure,
-                    p.ltv
+                    p.ltv,
+                    p.months_in_arrears
                 from {_fnManagementDetailsLoanPortfolio}(
                     @as_of_date,
                     @default_date_from,
@@ -1487,12 +1488,7 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) p
-                where exists (
-                    select 1
-                    from {_vwLoanAttributes} v
-                    where v.loan_code = p.loan_code
-                      and v.loan_alias_name = @loan_alias_name
-                )
+                where p.loan_alias_name = @loan_alias_name
                 order by
                     case when p.ranking is null then 1 else 0 end,
                     p.ranking,
@@ -1533,7 +1529,7 @@ namespace kingsightapi.Services
                     OtherCosts = GetNullableDecimal(reader, "other_cost") ?? 0m,
                     TotalExposure = GetNullableDecimal(reader, "exposure") ?? 0m,
                     Ltv = ltv.HasValue ? Math.Round(ltv.Value, 2) : null,
-                    MonthsInArrears = null,
+                    MonthsInArrears = GetNullableInt32(reader, "months_in_arrears"),
                     TimesNsfd = null
                 });
             }
@@ -1838,6 +1834,7 @@ namespace kingsightapi.Services
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadLoanDetailExposureByInvestorAsync(
             LoanDetailReportQuery query,
+            string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
@@ -1855,7 +1852,8 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) e
-                where nullif(ltrim(rtrim(e.investor_name)), '') is not null
+                where e.loan_alias_name = @loan_alias_name
+                  and nullif(ltrim(rtrim(e.investor_name)), '') is not null
                 order by e.exposure desc
                 """;
 
@@ -1863,6 +1861,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -3288,6 +3287,7 @@ namespace kingsightapi.Services
 
         private async Task<(DateTime? AsAt, IReadOnlyList<TaxArrearsByYearDto> ByYear)> LoadTaxArrearsForAliasAsync(
             LoanDetailReportQuery query,
+            string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
@@ -3305,6 +3305,7 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) t
+                where t.loan_alias_name = @loan_alias_name
                 order by t.tax_year desc
                 """;
 
@@ -3312,6 +3313,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             var byYear = new List<TaxArrearsByYearDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
