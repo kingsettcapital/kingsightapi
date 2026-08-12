@@ -90,6 +90,12 @@ namespace kingsightapi.Controllers
         public async Task<ActionResult<LoanDetailReportDashboardDto>> GetLoanDetailReport(
             int loanAliasKey,
             [FromQuery] DateOnly asOfDate,
+            [FromQuery] DateOnly? defaultDateFrom,
+            [FromQuery] DateOnly? defaultDateTo,
+            [FromQuery] DateOnly? maturityDateFrom,
+            [FromQuery] DateOnly? maturityDateTo,
+            [FromQuery] string? sponsor,
+            [FromQuery] string[]? riskLevels,
             [FromQuery] string[]? statuses,
             [FromQuery] string[]? investorAliases,
             CancellationToken cancellationToken)
@@ -107,6 +113,12 @@ namespace kingsightapi.Controllers
             var query = new LoanDetailReportQuery
             {
                 AsOfDate = asOfDate,
+                DefaultDateFrom = defaultDateFrom,
+                DefaultDateTo = defaultDateTo,
+                MaturityDateFrom = maturityDateFrom,
+                MaturityDateTo = maturityDateTo,
+                Sponsor = sponsor,
+                RiskLevels = riskLevels,
                 Statuses = statuses,
                 InvestorAliases = investorAliases
             };

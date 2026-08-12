@@ -60,12 +60,28 @@ namespace kingsightapi.Services
         private readonly string _tblDimStatus;
         private readonly string _tblLtvValidation;
         private readonly string _tblTaxArrears;
-        private readonly string _tblLoanTaxDetails;
         private readonly string _tblCmhcDefaultWatchlist;
         private readonly string _vwLoanAttributes;
         private readonly string _fnExposure;
+        private readonly string _fnManagementDetailsLoanPortfolio;
+        private readonly string _fnManagementDetailTopbarSummary;
+        private readonly string _fnManagementDetailReport;
+        private readonly string _fnManagementDetailPropertyStats;
+        private readonly string _fnManagementDetailInterestReserve;
+        private readonly string _fnManagementDetailExposureByInvestor;
+        private readonly string _fnManagementDetailExposureComposition;
+        private readonly string _fnManagementDetailTaxArrearsByYear;
+        private readonly string _fnManagementDetailKeyDates;
+        private readonly string _fnManagementDetailInterestOverLife;
+        private readonly string _fnManagementSummaryPortfolioKpis;
+        private readonly string _fnManagementSummaryLoanAlias;
+        private readonly string _fnManagementSummaryRiskDistribution;
+        private readonly string _fnManagementSummaryTop5Exposure;
+        private readonly string _fnManagementSummaryExposureBreakdown;
+        private readonly string _fnManagementSummaryInvestorSummary;
+        private readonly string _fnManagementSummarySponsorSummary;
+        private readonly string _fnManagementSummaryExposureAnalysis;
         private readonly string _tblSubjectiveLoanAliasMaster;
-        private readonly string _tblFactAmortizationSchedule;
         private readonly ILogger<ManagementSummaryService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -79,7 +95,6 @@ namespace kingsightapi.Services
         private string? _defaultStatusColumn;
         private bool? _defaultStatusColumnResolved;
         private bool? _ltvTableAvailable;
-        private bool? _loanTaxDetailsTableAvailable;
 
         public ManagementSummaryService(
             IConfiguration configuration,
@@ -97,12 +112,46 @@ namespace kingsightapi.Services
             _tblDimStatus = tables.Shared("dim_status");
             _tblLtvValidation = tables.Mort("ltv_validation");
             _tblTaxArrears = tables.Mort("tax_arrears");
-            _tblLoanTaxDetails = tables.SubjectiveInput("loan_tax_details");
             _tblCmhcDefaultWatchlist = tables.ExternalFiles("cmhc_default");
             _vwLoanAttributes = tables.Mortgage("vw_loan_attributes");
             _fnExposure = tables.MortgageObject("fn_exposure");
+            _fnManagementDetailsLoanPortfolio =
+                tables.MortgageObject("fn_management_detail_loan_portfolio");
+            _fnManagementDetailTopbarSummary =
+                tables.MortgageObject("fn_management_detail_topbar_summary");
+            _fnManagementDetailReport =
+                tables.MortgageObject("fn_management_detail_report");
+            _fnManagementDetailPropertyStats =
+                tables.MortgageObject("fn_management_detail_property_stats");
+            _fnManagementDetailInterestReserve =
+                tables.MortgageObject("fn_management_detail_interest_reserve");
+            _fnManagementDetailExposureByInvestor =
+                tables.MortgageObject("fn_management_detail_exposure_by_investor");
+            _fnManagementDetailExposureComposition =
+                tables.MortgageObject("fn_management_detail_exposure_composition");
+            _fnManagementDetailTaxArrearsByYear =
+                tables.MortgageObject("fn_management_detail_tax_arrears_by_year");
+            _fnManagementDetailKeyDates =
+                tables.MortgageObject("fn_management_detail_key_dates");
+            _fnManagementDetailInterestOverLife =
+                tables.MortgageObject("fn_management_detail_interest_over_life");
+            _fnManagementSummaryPortfolioKpis =
+                tables.MortgageObject("fn_management_summary_portfolio_kpis");
+            _fnManagementSummaryLoanAlias =
+                tables.MortgageObject("fn_management_summary_loan_alias");
+            _fnManagementSummaryRiskDistribution =
+                tables.MortgageObject("fn_management_summary_risk_distribution");
+            _fnManagementSummaryTop5Exposure =
+                tables.MortgageObject("fn_management_summary_top5_exposure");
+            _fnManagementSummaryExposureBreakdown =
+                tables.MortgageObject("fn_management_summary_exposure_breakdown");
+            _fnManagementSummaryInvestorSummary =
+                tables.MortgageObject("fn_management_summary_investor_summary");
+            _fnManagementSummarySponsorSummary =
+                tables.MortgageObject("fn_management_summary_sponsor_summary");
+            _fnManagementSummaryExposureAnalysis =
+                tables.MortgageObject("fn_management_summary_exposure_analysis");
             _tblSubjectiveLoanAliasMaster = tables.SubjectiveInput("loan_alias_master");
-            _tblFactAmortizationSchedule = tables.Mortgage("fact_amortization_schedule");
         }
 
         public async Task<IReadOnlyList<ManagementSummaryRowDto>> GetSummaryAsync(

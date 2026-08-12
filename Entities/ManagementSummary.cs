@@ -43,6 +43,12 @@ namespace kingsightapi.Entities
     public sealed class LoanDetailReportQuery
     {
         public DateOnly AsOfDate { get; init; }
+        public DateOnly? DefaultDateFrom { get; init; }
+        public DateOnly? DefaultDateTo { get; init; }
+        public DateOnly? MaturityDateFrom { get; init; }
+        public DateOnly? MaturityDateTo { get; init; }
+        public string? Sponsor { get; init; }
+        public IReadOnlyList<string>? RiskLevels { get; init; }
         public IReadOnlyList<string>? Statuses { get; init; }
         public IReadOnlyList<string>? InvestorAliases { get; init; }
     }

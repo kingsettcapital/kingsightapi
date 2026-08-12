@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Data;
 using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
@@ -140,12 +141,20 @@ namespace kingsightapi.Services
 
             // Keep Fabric round-trips minimal: only queries that cannot be derived from alias rows.
             // LTV risk / top 5 / sponsor / exposure breakdown are computed in-memory from alias data.
-            var kpisTask = LoadDashboardKpisAndBreakdownAsync(query.AsOfDate, fundingStatus, cancellationToken);
-            var aliasTask = LoadDashboardAliasRowsAsync(query.AsOfDate, fundingStatus, cancellationToken);
+            var kpisTask = LoadDashboardKpisAndBreakdownAsync(query, fundingStatus, cancellationToken);
+            var aliasTask = LoadDashboardAliasRowsAsync(query, fundingStatus, cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatus, cancellationToken);
-            var investorTask = LoadDashboardInvestorSummaryAsync(query.AsOfDate, fundingStatus, cancellationToken);
-            var exposureAnalysisTask = LoadDashboardExposureAnalysisAsync(query.AsOfDate, fundingStatus, cancellationToken);
+            var investorTask = LoadDashboardInvestorSummaryAsync(query, fundingStatus, cancellationToken);
+            var exposureAnalysisTask = LoadDashboardExposureAnalysisAsync(query, fundingStatus, cancellationToken);
+            var riskDistributionTask = LoadDashboardLtvRiskDistributionAsync(
+                query, fundingStatus, cancellationToken);
+            var top5Task = LoadDashboardTop5ExposuresAsync(
+                query, fundingStatus, cancellationToken);
+            var exposureBreakdownTask = LoadDashboardExposureBreakdownAsync(
+                query, fundingStatus, cancellationToken);
+            var sponsorSummaryTask = LoadDashboardSponsorSummaryAsync(
+                query, fundingStatus, cancellationToken);
 
             await Task.WhenAll(
                 kpisTask,
@@ -153,7 +162,11 @@ namespace kingsightapi.Services
                 watchlistTask,
                 filterOptionsTask,
                 investorTask,
-                exposureAnalysisTask);
+                exposureAnalysisTask,
+                riskDistributionTask,
+                top5Task,
+                exposureBreakdownTask,
+                sponsorSummaryTask);
 
             var kpisAndBreakdown = await kpisTask;
             var investorAliasNames = await LoadLoanAliasNamesForInvestorsAsync(
@@ -177,7 +190,7 @@ namespace kingsightapi.Services
 
             var kpis = kpisAndBreakdown.Kpis;
             var outstanding = kpisAndBreakdown.OutstandingInterest;
-            var exposureBreakdown = kpisAndBreakdown.ExposureBreakdown;
+            var exposureBreakdown = await exposureBreakdownTask;
 
             // Always align header balance / LTV / outstanding interest with the alias table
             // on screen (SQL KPI query can disagree or return zeros while alias rows have amounts).
@@ -206,13 +219,14 @@ namespace kingsightapi.Services
                 TotalOutstandingInterest = aliasMetrics.Outstanding.TotalOutstandingInterest,
                 TotalLateInterest = aliasMetrics.Outstanding.TotalLateInterest
             };
-            exposureBreakdown = aliasMetrics.ExposureBreakdown;
-
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
                 FilterInvestorSummary(investorSlices, query),
                 exposureBreakdown,
-                exposureAnalysisRows);
+                exposureAnalysisRows,
+                await riskDistributionTask,
+                await top5Task,
+                await sponsorSummaryTask);
 
             var watchlistDates = watchlistRows
                 .Select(row => row.ReportDate)
@@ -298,43 +312,160 @@ namespace kingsightapi.Services
             }
         }
 
+        // Shared TVF filter args. Explicit SqlDbType so unused (NULL) dates stay date, not nvarchar.
+        private static void AddLoanDetailFilterParameters(
+            SqlCommand command,
+            LoanDetailReportQuery query,
+            string? fundingStatus)
+        {
+            AddTvfFilterParameters(
+                command,
+                query.AsOfDate,
+                query.DefaultDateFrom,
+                query.DefaultDateTo,
+                query.MaturityDateFrom,
+                query.MaturityDateTo,
+                query.Sponsor,
+                query.InvestorAliases,
+                query.RiskLevels,
+                fundingStatus);
+        }
+
+        private static void AddLoanDetailFilterParameters(
+            SqlCommand command,
+            ManagementSummaryDashboardQuery query,
+            string? fundingStatus)
+        {
+            AddTvfFilterParameters(
+                command,
+                query.AsOfDate,
+                query.DefaultDateFrom,
+                query.DefaultDateTo,
+                query.MaturityDateFrom,
+                query.MaturityDateTo,
+                query.Sponsor,
+                query.InvestorAliases,
+                query.RiskLevels,
+                fundingStatus);
+        }
+
+        private static void AddTvfFilterParameters(
+            SqlCommand command,
+            DateOnly asOfDate,
+            DateOnly? defaultDateFrom,
+            DateOnly? defaultDateTo,
+            DateOnly? maturityDateFrom,
+            DateOnly? maturityDateTo,
+            string? sponsor,
+            IReadOnlyList<string>? investorAliases,
+            IReadOnlyList<string>? riskLevels,
+            string? fundingStatus)
+        {
+            AddTvfDateParameter(command, "@as_of_date", asOfDate);
+            AddTvfDateParameter(command, "@default_date_from", defaultDateFrom);
+            AddTvfDateParameter(command, "@default_date_to", defaultDateTo);
+            AddTvfDateParameter(command, "@maturity_date_from", maturityDateFrom);
+            AddTvfDateParameter(command, "@maturity_date_to", maturityDateTo);
+            AddTvfNVarCharParameter(command, "@sponsor", ResolveTvfSponsor(sponsor), 255);
+            AddTvfNVarCharParameter(command, "@investor_alias", ResolveTvfInvestorAlias(investorAliases), 255);
+            AddTvfNVarCharParameter(command, "@risk", ResolveTvfRiskLevel(riskLevels), 50);
+            AddTvfNVarCharParameter(command, "@funding_status", fundingStatus, 50);
+        }
+
+        private static void AddTvfDateParameter(SqlCommand command, string name, DateOnly? value)
+        {
+            var parameter = command.Parameters.Add(name, SqlDbType.Date);
+            parameter.Value = value.HasValue
+                ? value.Value.ToDateTime(TimeOnly.MinValue)
+                : DBNull.Value;
+        }
+
+        private static void AddTvfNVarCharParameter(
+            SqlCommand command,
+            string name,
+            string? value,
+            int size)
+        {
+            var parameter = command.Parameters.Add(name, SqlDbType.NVarChar, size);
+            parameter.Value = string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
+        }
+
+        private static string? ResolveTvfSponsor(string? sponsor)
+        {
+            if (string.IsNullOrWhiteSpace(sponsor)
+                || sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return sponsor.Trim();
+        }
+
+        private static string? ResolveTvfInvestorAlias(IReadOnlyList<string>? investorAliases)
+        {
+            if (investorAliases is null or { Count: 0 }
+                || investorAliases.Any(alias => alias.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var selected = investorAliases
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias.Trim())
+                .ToList();
+            return selected.Count == 1 ? selected[0] : null;
+        }
+
+        private static string? ResolveTvfRiskLevel(IReadOnlyList<string>? riskLevels)
+        {
+            if (riskLevels is null or { Count: 0 }
+                || riskLevels.Any(risk => risk.Equals("ALL", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var selected = riskLevels
+                .Where(risk => !string.IsNullOrWhiteSpace(risk))
+                .Select(risk => risk.Trim().ToUpperInvariant())
+                .ToList();
+            return selected.Count == 1 ? selected[0] : null;
+        }
+
         private async Task<(
             ManagementSummaryKpisDto Kpis,
             ManagementSummaryOutstandingInterestDto OutstandingInterest,
             IReadOnlyList<ChartSliceDto> ExposureBreakdown)>
             LoadDashboardKpisAndBreakdownAsync(
-                DateOnly asOfDate,
+                ManagementSummaryDashboardQuery query,
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
-            var sql = AppendFundingStatusFilter(
-                $"""
+            var sql = $"""
                 select
-                    count(distinct v.loan_code) as loan_count,
-                    sum(a.principal_balance) as total_outstanding_balance,
-                    avg(v.ltv) as average_ltv,
-                    (sum(case when v.funding_status_description = 'DEFAULT' then a.principal_balance else 0 end)
-                        / nullif(sum(a.principal_balance), 0)) * 100 as percentage_of_fundings,
-                    sum(a.interest_disbursed) as interest_disbursed,
-                    sum(a.interest_not_disbursed) as interest_not_disbursed,
-                    sum(a.outstanding_loan_interest) as total_outstanding_interest,
-                    sum(a.outstanding_late_interest) as total_late_interest,
-                    sum(a.exposure) as exposure,
-                    sum(a.accrued) as accrued,
-                    sum(isnull(a.tax_arrears, 0)) as tax_arrear,
-                    sum(a.monthly_interest_adjustment_amount) as interest_adjustment,
-                    sum(isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                """,
-                fundingStatus,
-                "v.funding_status_description");
+                    k.loan_count,
+                    k.total_outstanding_balance,
+                    k.average_ltv,
+                    k.percentage_of_fundings,
+                    k.interest_disbursed,
+                    k.interest_not_disbursed,
+                    k.total_outstanding_interest,
+                    k.total_late_interest
+                from {_fnManagementSummaryPortfolioKpis}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) k
+                """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -349,30 +480,6 @@ namespace kingsightapi.Services
             var percentOfFundings = GetNullableDecimal(reader, "percentage_of_fundings");
             var outstandingInterest = GetNullableDecimal(reader, "total_outstanding_interest") ?? 0m;
             var lateInterest = GetNullableDecimal(reader, "total_late_interest") ?? 0m;
-            var totalExposure = GetNullableDecimal(reader, "exposure") ?? 0m;
-            var components = new (string Label, decimal Value)[]
-            {
-                ("Outstanding Interest", outstandingInterest),
-                ("Accrued", GetNullableDecimal(reader, "accrued") ?? 0m),
-                ("Late Interest", lateInterest),
-                ("Tax Arrears", GetNullableDecimal(reader, "tax_arrear") ?? 0m),
-                ("Interest Adjustment", GetNullableDecimal(reader, "interest_adjustment") ?? 0m),
-                ("Other", GetNullableDecimal(reader, "other_cost") ?? 0m)
-            };
-            var denominator = totalExposure > 0
-                ? totalExposure
-                : components.Sum(component => component.Value);
-            var breakdown = components
-                .Where(component => component.Value != 0m)
-                .Select(component => new ChartSliceDto
-                {
-                    Label = component.Label,
-                    Value = component.Value,
-                    SharePercent = denominator > 0
-                        ? Math.Round(component.Value / denominator * 100m, 1)
-                        : null
-                })
-                .ToList();
 
             return (
                 new ManagementSummaryKpisDto
@@ -390,70 +497,29 @@ namespace kingsightapi.Services
                     TotalOutstandingInterest = outstandingInterest,
                     TotalLateInterest = lateInterest
                 },
-                breakdown);
+                Array.Empty<ChartSliceDto>());
         }
 
         private static ManagementSummaryChartsPhase2Dto BuildDashboardChartsFromAliasRows(
             IReadOnlyList<LoanAliasSummaryRowDto> aliasRows,
             IReadOnlyList<ChartSliceDto> investorSummary,
             IReadOnlyList<ChartSliceDto> exposureBreakdown,
-            IReadOnlyList<ExposureAnalysisRowDto> exposureAnalysisRows)
+            IReadOnlyList<ExposureAnalysisRowDto> exposureAnalysisRows,
+            IReadOnlyList<ChartSliceDto> ltvRiskDistribution,
+            IReadOnlyList<ChartSliceDto> top5Exposures,
+            IReadOnlyList<ChartSliceDto> sponsorSummary)
         {
             var totalExposure = aliasRows.Sum(row => row.TotalExposure);
 
-            var ltvRiskDistribution = aliasRows
-                .GroupBy(row => row.Risk)
-                .Select(group =>
+            top5Exposures = top5Exposures
+                .Select(slice => new ChartSliceDto
                 {
-                    var exposure = group.Sum(row => row.TotalExposure);
-                    return new ChartSliceDto
-                    {
-                        Label = group.Key,
-                        Value = exposure,
-                        Count = group.Count(),
-                        SharePercent = totalExposure > 0
-                            ? Math.Round(exposure / totalExposure * 100m, 1)
-                            : null
-                    };
-                })
-                .OrderByDescending(slice => slice.Value)
-                .ToList();
-
-            var top5Exposures = aliasRows
-                .OrderByDescending(row => row.TotalExposure)
-                .Take(5)
-                .Select(row => new ChartSliceDto
-                {
-                    Label = row.LoanAlias,
-                    Value = row.TotalExposure,
+                    Label = slice.Label,
+                    Value = slice.Value,
                     SharePercent = totalExposure > 0
-                        ? Math.Round(row.TotalExposure / totalExposure * 100m, 1)
+                        ? Math.Round(slice.Value / totalExposure * 100m, 1)
                         : null
                 })
-                .ToList();
-
-            // Unique sponsor totals from exposure-analysis grain (loan alias × sponsor),
-            // not concatenated sponsor strings on detailed loan-summary rows.
-            var sponsorSummary = exposureAnalysisRows
-                .GroupBy(row => string.IsNullOrWhiteSpace(row.Sponsor) ? "(Unknown)" : row.Sponsor.Trim())
-                .Select(group =>
-                {
-                    var exposure = group.Sum(row =>
-                        row.ExternalBalance
-                        + row.SmfBalance
-                        + row.MlpBalance
-                        + row.SubordinateExposure);
-                    var ltvs = group.Where(row => row.Ltv.HasValue).Select(row => row.Ltv!.Value).ToList();
-                    return new ChartSliceDto
-                    {
-                        Label = group.Key,
-                        Value = exposure,
-                        Count = group.Select(row => row.LoanAlias).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                        AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null,
-                        SharePercent = null
-                    };
-                })
-                .Where(slice => slice.Value > 0)
                 .ToList();
 
             var sponsorTotal = sponsorSummary.Sum(slice => slice.Value);
@@ -466,9 +532,8 @@ namespace kingsightapi.Services
                     AverageLtv = slice.AverageLtv,
                     SharePercent = sponsorTotal > 0
                         ? Math.Round(slice.Value / sponsorTotal * 100m, 1)
-                        : null
+                        : slice.SharePercent
                 })
-                .OrderByDescending(slice => slice.AverageLtv ?? decimal.MinValue)
                 .ToList();
 
             var capitalStackTotal =
@@ -538,118 +603,55 @@ namespace kingsightapi.Services
 
         private async Task<(ManagementSummaryKpisDto Kpis, ManagementSummaryOutstandingInterestDto OutstandingInterest)>
             LoadDashboardKpisAsync(
-                DateOnly asOfDate,
+                ManagementSummaryDashboardQuery query,
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
-            var combined = await LoadDashboardKpisAndBreakdownAsync(asOfDate, fundingStatus, cancellationToken);
+            var combined = await LoadDashboardKpisAndBreakdownAsync(query, fundingStatus, cancellationToken);
             return (combined.Kpis, combined.OutstandingInterest);
         }
 
         private async Task<List<LoanAliasSummaryRowDto>> LoadDashboardAliasRowsAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Loan-level funding status filter — same grain as Loan Detail drill-down so
-            // summary Other Costs / exposure match the filtered portfolio for an alias.
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where upper(ltrim(rtrim(funding_status_description))) = @funding_status";
-            var joinStatusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
-
-            // Pre-aggregate text fields once (join), avoid correlated string_agg per alias row.
-            // Interest Status matches reporting SQL: for SMF/MLP only, take vw.interest_status
-            // (already formatted per DE0239/DE0240), distinct then string_agg.
             var sql = $"""
-                with distinct_interest_status as (
-                    select
-                        loan_alias_name,
-                        string_agg(interest_status, ', ') as interest_status_alias
-                    from (
-                        select distinct
-                            loan_alias_name,
-                            case
-                                when investor_alias_name in ('SMF', 'MLP')
-                                    then interest_status
-                                else null
-                            end as interest_status
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
-                    ) d
-                    where interest_status is not null
-                    group by loan_alias_name
-                ),
-                distinct_sponsor as (
-                    select
-                        loan_alias_name,
-                        string_agg(sponsor, ', ') as sponsor
-                    from (
-                        select distinct loan_alias_name, ltrim(rtrim(sponsor)) as sponsor
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
-                    ) d
-                    where sponsor is not null
-                      and sponsor <> ''
-                    group by loan_alias_name
-                ),
-                distinct_exit as (
-                    select
-                        loan_alias_name,
-                        string_agg(exit_plan, ', ') as ext
-                    from (
-                        select distinct loan_alias_name, exit_plan
-                        from {_vwLoanAttributes}
-                        {statusPredicate}
-                    ) d
-                    where exit_plan is not null
-                    group by loan_alias_name
-                )
                 select
-                    v.loan_alias_name,
-                    s.sponsor,
-                    min(case when v.default_date is null then v.loan_term_default_date else v.default_date end) as default_date,
-                    min(v.maturity_date) as maturity_date,
-                    i.interest_status_alias,
-                    min(v.units_loan_alias) as units,
-                    min(v.security_value_loan_alias) as security,
-                    e.ext,
-                    sum(a.principal_balance) as principal,
-                    sum(a.outstanding_loan_interest) as outstanding_interest,
-                    sum(a.accrued) as accrued,
-                    sum(a.outstanding_late_interest) as late_interest,
-                    sum(isnull(a.tax_arrears, 0)) as tax_arrear,
-                    sum(a.monthly_interest_adjustment_amount) as interest_adjustment,
-                    sum(isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost,
-                    sum(a.exposure) as total_exposure,
-                    avg(v.ltv) as ltv,
-                    case
-                        when avg(v.ltv) < 50 then 'Low'
-                        when avg(v.ltv) between 50 and 75 then 'Moderate'
-                        when avg(v.ltv) between 75 and 100 then 'Elevated'
-                        else 'High'
-                    end as risk_level
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                left join distinct_sponsor s on s.loan_alias_name = v.loan_alias_name
-                left join distinct_interest_status i on i.loan_alias_name = v.loan_alias_name
-                left join distinct_exit e on e.loan_alias_name = v.loan_alias_name
-                where 1 = 1
-                {joinStatusPredicate}
-                group by
-                    v.loan_alias_name,
-                    s.sponsor,
-                    i.interest_status_alias,
-                    e.ext
+                    a.loan_alias_name,
+                    a.sponsor,
+                    a.default_date,
+                    a.maturity_date,
+                    a.interest_status_alias,
+                    a.units,
+                    a.security,
+                    a.ext,
+                    a.principal,
+                    a.outstanding_interest,
+                    a.accrued,
+                    a.late_interest,
+                    a.tax_arrear,
+                    a.interest_adjustment,
+                    a.other_cost,
+                    a.total_exposure,
+                    a.ltv,
+                    a.risk_level
+                from {_fnManagementSummaryLoanAlias}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) a
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<LoanAliasSummaryRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -784,164 +786,123 @@ namespace kingsightapi.Services
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadDashboardInvestorSummaryAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Group by investor alias (not legal investor name); exclude blank / Unknown.
             var sql = $"""
                 select
-                    investor = ltrim(rtrim(v.investor_alias_name)),
-                    loan_count = count(distinct v.loan_alias_name),
-                    exposure = sum(a.exposure)
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                where nullif(ltrim(rtrim(v.investor_alias_name)), '') is not null
-                  and ltrim(rtrim(v.investor_alias_name)) not in ('(Unknown)', 'Unknown')
-                """;
-
-            if (!string.IsNullOrEmpty(fundingStatus))
-            {
-                sql += """
-
-                  and v.funding_status_description = @funding_status
-                """;
-            }
-
-            sql += """
-
-                group by ltrim(rtrim(v.investor_alias_name))
-                order by exposure desc
+                    i.investor_name,
+                    i.loan_count,
+                    i.exposure,
+                    i.percentage
+                from {_fnManagementSummaryInvestorSummary}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) i
+                order by i.exposure desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
+                var percentage = GetNullableDecimal(reader, "percentage");
                 rows.Add(new ChartSliceDto
                 {
-                    Label = GetString(reader, "investor"),
+                    Label = GetString(reader, "investor_name"),
                     Value = GetNullableDecimal(reader, "exposure") ?? 0m,
-                    Count = GetInt32(reader, "loan_count")
+                    Count = GetInt32(reader, "loan_count"),
+                    SharePercent = percentage.HasValue ? Math.Round(percentage.Value, 2) : null
                 });
             }
 
-            var total = rows.Sum(row => row.Value);
-            return rows
-                .Select(row => new ChartSliceDto
-                {
-                    Label = row.Label,
-                    Value = row.Value,
-                    Count = row.Count,
-                    SharePercent = total > 0 ? Math.Round(row.Value / total * 100m, 1) : null
-                })
-                .ToList();
+            return rows;
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadDashboardSponsorSummaryAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var sql = AppendFundingStatusFilter(
-                $"""
+            var sql = $"""
                 select
-                    sponsor = isnull(nullif(ltrim(rtrim(v.sponsor)), ''), '(Unknown)'),
-                    loan_count = count(distinct v.loan_code),
-                    exposure = sum(a.exposure),
-                    average_ltv = avg(v.ltv)
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                """,
-                fundingStatus,
-                "v.funding_status_description");
-
-            sql += """
-
-                group by isnull(nullif(ltrim(rtrim(v.sponsor)), ''), '(Unknown)')
-                order by average_ltv desc
+                    s.sponsor,
+                    s.loan_count,
+                    s.exposure,
+                    s.average_ltv
+                from {_fnManagementSummarySponsorSummary}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) s
+                order by s.average_ltv desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
-            var rows = new List<(ChartSliceDto Slice, decimal Exposure)>();
+            var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var exposure = GetNullableDecimal(reader, "exposure") ?? 0m;
                 var averageLtv = GetNullableDecimal(reader, "average_ltv");
-                rows.Add((
-                    new ChartSliceDto
-                    {
-                        Label = GetString(reader, "sponsor"),
-                        Value = exposure,
-                        Count = GetInt32(reader, "loan_count"),
-                        AverageLtv = averageLtv.HasValue ? Math.Round(averageLtv.Value, 2) : null
-                    },
-                    exposure));
+                rows.Add(new ChartSliceDto
+                {
+                    Label = GetString(reader, "sponsor"),
+                    Value = GetNullableDecimal(reader, "exposure") ?? 0m,
+                    Count = GetInt32(reader, "loan_count"),
+                    AverageLtv = averageLtv.HasValue ? Math.Round(averageLtv.Value, 2) : null
+                });
             }
 
-            var total = rows.Sum(row => row.Exposure);
-            return rows
-                .Select(row => new ChartSliceDto
-                {
-                    Label = row.Slice.Label,
-                    Value = row.Slice.Value,
-                    Count = row.Slice.Count,
-                    AverageLtv = row.Slice.AverageLtv,
-                    SharePercent = total > 0 ? Math.Round(row.Exposure / total * 100m, 1) : null
-                })
-                .ToList();
+            return rows;
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadDashboardLtvRiskDistributionAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where v.funding_status_description = @funding_status";
-
             var sql = $"""
-                with temp as (
-                    select
-                        v.loan_alias_name,
-                        case
-                            when avg(v.ltv) < 50 then 'Low'
-                            when avg(v.ltv) between 50 and 75 then 'Moderate'
-                            when avg(v.ltv) between 75 and 100 then 'Elevated'
-                            else 'High'
-                        end as risk_level,
-                        sum(a.exposure) as exposure
-                    from {_vwLoanAttributes} v
-                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                    {statusPredicate}
-                    group by v.loan_alias_name
-                )
                 select
-                    risk_level,
-                    count(loan_alias_name) as loan_count,
-                    sum(exposure) as total_exposure
-                from temp
-                group by risk_level
+                    r.risk_level,
+                    r.loan_count,
+                    r.total_exposure
+                from {_fnManagementSummaryRiskDistribution}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) r
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -969,54 +930,40 @@ namespace kingsightapi.Services
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadDashboardTop5ExposuresAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where v.funding_status_description = @funding_status";
-
             var sql = $"""
-                with temp as (
-                    select
-                        v.loan_alias_name,
-                        sum(a.exposure) as exposure
-                    from {_vwLoanAttributes} v
-                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                    {statusPredicate}
-                    group by v.loan_alias_name
-                ),
-                ranked as (
-                    select
-                        loan_alias_name,
-                        exposure,
-                        row_number() over (order by exposure desc) as rn,
-                        sum(exposure) over () as tot_exposure
-                    from temp
-                )
-                select loan_alias_name, exposure, tot_exposure
-                from ranked
-                where rn <= 5
+                select
+                    t.loan_alias_name,
+                    t.exposure
+                from {_fnManagementSummaryTop5Exposure}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) t
+                order by t.exposure desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var exposure = GetNullableDecimal(reader, "exposure") ?? 0m;
-                var total = GetNullableDecimal(reader, "tot_exposure") ?? 0m;
                 rows.Add(new ChartSliceDto
                 {
                     Label = GetString(reader, "loan_alias_name"),
-                    Value = exposure,
-                    SharePercent = total > 0 ? Math.Round(exposure / total * 100m, 1) : null
+                    Value = GetNullableDecimal(reader, "exposure") ?? 0m
                 });
             }
 
@@ -1024,31 +971,35 @@ namespace kingsightapi.Services
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadDashboardExposureBreakdownAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var sql = AppendFundingStatusFilter(
-                $"""
+            var sql = $"""
                 select
-                    sum(a.exposure) as exposure,
-                    sum(a.outstanding_loan_interest) as outstanding_interest,
-                    sum(a.accrued) as accrued,
-                    sum(a.outstanding_late_interest) as late_interest,
-                    sum(isnull(a.tax_arrears, 0)) as tax_arrear,
-                    sum(a.monthly_interest_adjustment_amount) as interest_adjustment,
-                    sum(isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                """,
-                fundingStatus,
-                "v.funding_status_description");
+                    b.exposure,
+                    b.outstanding_interest,
+                    b.accrued,
+                    b.late_interest,
+                    b.tax_arrear,
+                    b.interest_adjustment,
+                    b.other_cost
+                from {_fnManagementSummaryExposureBreakdown}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) b
+                """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -1085,79 +1036,37 @@ namespace kingsightapi.Services
         }
 
         private async Task<List<ExposureAnalysisRowDto>> LoadDashboardExposureAnalysisAsync(
-            DateOnly asOfDate,
+            ManagementSummaryDashboardQuery query,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
-            var sponsorStatusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "where upper(ltrim(rtrim(funding_status_description))) = @funding_status";
-
-            // One row per loan alias; unique sponsors concatenated (Exposure Analysis 1.1 / 1.2).
-            // ks_rank is alias-level only — do not join/group by sponsor.
             var sql = $"""
-                with base as (
-                    select
-                        v.loan_alias_name,
-                        v.sponsor,
-                        v.loan_code,
-                        v.investor_alias_name,
-                        isnull(v.ranking, 0) as ranking,
-                        a.exposure,
-                        v.ltv
-                    from {_vwLoanAttributes} v
-                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                    {statusPredicate}
-                ),
-                ks_rank as (
-                    select
-                        loan_alias_name,
-                        min(ranking) as ks_start_ranking,
-                        max(ranking) as ks_end_ranking
-                    from base
-                    where investor_alias_name in ('SMF', 'MLP')
-                    group by loan_alias_name
-                ),
-                distinct_sponsor as (
-                    select
-                        loan_alias_name,
-                        string_agg(sponsor, ', ') as sponsor
-                    from (
-                        select distinct
-                            loan_alias_name,
-                            ltrim(rtrim(sponsor)) as sponsor
-                        from {_vwLoanAttributes}
-                        {sponsorStatusPredicate}
-                    ) d
-                    where sponsor is not null
-                      and sponsor <> ''
-                    group by loan_alias_name
-                )
                 select
-                    b.loan_alias_name,
-                    s.sponsor,
-                    sum(case when b.ranking < k.ks_start_ranking then b.exposure else 0 end) as external_balance,
-                    sum(case when b.investor_alias_name = 'SMF' then b.exposure else 0 end) as smf_balance,
-                    sum(case when b.investor_alias_name = 'MLP' then b.exposure else 0 end) as mlp_balance,
-                    sum(case when b.ranking > k.ks_end_ranking then b.exposure else 0 end) as subordinate_exposure,
-                    sum(case when b.ranking < k.ks_start_ranking then b.exposure else 0 end)
-                        + sum(case when b.investor_alias_name in ('SMF', 'MLP') then b.exposure else 0 end) as total_ks_exposure,
-                    avg(b.ltv) as ltv
-                from base b
-                inner join ks_rank k on b.loan_alias_name = k.loan_alias_name
-                left join distinct_sponsor s on s.loan_alias_name = b.loan_alias_name
-                group by b.loan_alias_name, s.sponsor
-                order by b.loan_alias_name
+                    e.loan_alias_name,
+                    e.sponsor,
+                    e.external_balance,
+                    e.smf_balance,
+                    e.mlp_balance,
+                    e.subordinate_exposure,
+                    e.total_ks_exposure,
+                    e.ltv
+                from {_fnManagementSummaryExposureAnalysis}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) e
+                order by e.loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddAsOfDateParameter(command, asOfDate);
-            AddFundingStatusParameter(command, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<ExposureAnalysisRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1358,23 +1267,25 @@ namespace kingsightapi.Services
             }
 
             var portfolioTask = LoadLoanDetailPortfolioRowsAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var topBarTask = LoadLoanDetailTopBarAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var reportDetailsTask = LoadLoanDetailReportDetailsAsync(
-                aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var keyDatesTask = LoadLoanDetailKeyDatesAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var propertyStatsTask = LoadLoanDetailPropertyStatsAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var interestReserveTask = LoadLoanDetailInterestReserveAsync(
-                aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var interestOverLifeTask = LoadLoanDetailInterestOverLifeAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
-                query.AsOfDate, aliasName, fundingStatus, cancellationToken);
+                query, fundingStatus, cancellationToken);
+            var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
+                query, aliasName, fundingStatus, cancellationToken);
             var taxTask = LoadTaxArrearsForAliasAsync(
-                query.AsOfDate, aliasName, cancellationToken);
+                query, fundingStatus, cancellationToken);
 
             await Task.WhenAll(
                 portfolioTask,
@@ -1385,6 +1296,7 @@ namespace kingsightapi.Services
                 interestReserveTask,
                 interestOverLifeTask,
                 exposureByInvestorTask,
+                exposureCompositionTask,
                 taxTask);
 
             var portfolioRows = ApplyLoanDetailInvestorFilter(await portfolioTask, query.InvestorAliases);
@@ -1397,10 +1309,10 @@ namespace kingsightapi.Services
             var exposureByInvestor = ApplyLoanDetailInvestorChartFilter(
                 await exposureByInvestorTask,
                 query.InvestorAliases);
+            var exposureComposition = await exposureCompositionTask;
             var taxData = await taxTask;
 
             var portfolioTotals = BuildPortfolioTotals(portfolioRows);
-            var exposureComposition = BuildLoanDetailExposureComposition(portfolioTotals);
             var totalExposure = portfolioTotals.TotalExposure;
             var securityValue = topBar.SecurityValue ?? propertyStats.SecurityValue;
             // Prefer LTV from filtered portfolio when investor filter narrows rows.
@@ -1410,9 +1322,7 @@ namespace kingsightapi.Services
                 : topBar.AverageLtv;
 
             DateTime? dateOfDefault = keyDatesRaw.DefaultDate;
-            int? daysInDefault = dateOfDefault.HasValue
-                ? (int)(query.AsOfDate.ToDateTime(TimeOnly.MinValue) - dateOfDefault.Value.Date).TotalDays
-                : null;
+            int? daysInDefault = keyDatesRaw.DaysInDefault;
 
             decimal? monthsCovered = null;
             var reserveBalance = interestReserve.CurrentInterestReserveBalance ?? 0m;
@@ -1422,10 +1332,9 @@ namespace kingsightapi.Services
                 monthsCovered = Math.Round(reserveBalance / monthlyInterest, 1);
             }
 
-            var unitsLabel = BuildUnitsLabel(
-                propertyStats.Units.HasValue ? (int?)Math.Round(propertyStats.Units.Value) : null,
-                propertyStats.SquareFeet,
-                propertyStats.Acres);
+            var unitsLabel = string.IsNullOrWhiteSpace(propertyStats.PropertySize)
+                ? null
+                : propertyStats.PropertySize.Trim();
 
             decimal? percentInterestPaid = null;
             var totalInterestDue = interestOverLife.TotalInterestDue;
@@ -1554,87 +1463,63 @@ namespace kingsightapi.Services
         }
 
         private async Task<List<LoanPortfolioDetailRowDto>> LoadLoanDetailPortfolioRowsAsync(
-            DateOnly asOfDate,
+            LoanDetailReportQuery query,
             string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            // Loan Portfolio grid — matches reporting SQL:
-            // vw_loan_attributes ⋈ fn_exposure(@as_of_date), rate from fn_exposure.
-            // Drill-down adds loan_alias_name; Filters status → funding_status_description.
+            // Warehouse TVF applies as-of + panel filters; alias scope keeps drill-down to this loan alias.
             var sql = $"""
                 select
-                    v.loan_code,
-                    v.loan_description,
-                    v.investor_name,
-                    v.ranking,
-                    a.rate,
-                    a.principal_balance,
-                    a.outstanding_loan_interest,
-                    a.accrued,
-                    a.outstanding_late_interest,
-                    a.monthly_interest_adjustment_amount,
-                    a.tax_arrears,
-                    (isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost,
-                    a.exposure,
-                    v.ltv
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
+                    p.loan_code,
+                    p.loan_description,
+                    p.investor_name,
+                    p.ranking,
+                    p.rate,
+                    p.principal_balance,
+                    p.outstanding_loan_interest,
+                    p.accrued,
+                    p.outstanding_late_interest,
+                    p.monthly_interest_adjustment_amount,
+                    p.tax_arrears,
+                    p.other_cost,
+                    p.exposure,
+                    p.ltv
+                from {_fnManagementDetailsLoanPortfolio}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) p
+                where exists (
+                    select 1
+                    from {_vwLoanAttributes} v
+                    where v.loan_code = p.loan_code
+                      and v.loan_alias_name = @loan_alias_name
+                )
                 order by
-                    case when v.ranking is null then 1 else 0 end,
-                    v.ranking,
-                    v.loan_code
+                    case when p.ranking is null then 1 else 0 end,
+                    p.ranking,
+                    p.loan_code
                 """;
 
-            try
-            {
-                return await ReadLoanDetailPortfolioRowsAsync(sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogDebug(ex, "rate unavailable on fn_exposure; loading portfolio without rate.");
-                var fallbackSql = $"""
-                    select
-                        v.loan_code,
-                        v.loan_description,
-                        v.investor_name,
-                        v.ranking,
-                        cast(null as decimal(18, 6)) as rate,
-                        a.principal_balance,
-                        a.outstanding_loan_interest,
-                        a.accrued,
-                        a.outstanding_late_interest,
-                        a.monthly_interest_adjustment_amount,
-                        a.tax_arrears,
-                        (isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost,
-                        a.exposure,
-                        v.ltv
-                    from {_vwLoanAttributes} v
-                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                    {BuildLoanAliasWhere(fundingStatus)}
-                    order by
-                        case when v.ranking is null then 1 else 0 end,
-                        v.ranking,
-                        v.loan_code
-                    """;
-                return await ReadLoanDetailPortfolioRowsAsync(
-                    fallbackSql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-        }
-
-        private async Task<List<LoanPortfolioDetailRowDto>> ReadLoanDetailPortfolioRowsAsync(
-            string sql,
-            DateOnly asOfDate,
-            string loanAliasName,
-            string? fundingStatus,
-            CancellationToken cancellationToken)
-        {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
+            return await ReadLoanDetailPortfolioRowsFromReaderAsync(command, cancellationToken);
+        }
+
+        private static async Task<List<LoanPortfolioDetailRowDto>> ReadLoanDetailPortfolioRowsFromReaderAsync(
+            SqlCommand command,
+            CancellationToken cancellationToken)
+        {
             var rows = new List<LoanPortfolioDetailRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
@@ -1670,28 +1555,36 @@ namespace kingsightapi.Services
             decimal InterestDisbursed,
             decimal InterestNotDisbursed,
             decimal TotalOutstandingInterest)> LoadLoanDetailTopBarAsync(
-            DateOnly asOfDate,
+            LoanDetailReportQuery query,
             string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 select
-                    max(v.security_value_loan_alias) as security_value,
-                    avg(v.ltv) as ltv,
-                    sum(a.interest_disbursed) as interest_disbursed,
-                    sum(a.interest_not_disbursed) as interest_not_disbursed,
-                    sum(a.outstanding_loan_interest) as total_outstanding_interest
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
+                    t.security_value,
+                    t.ltv,
+                    t.interest_disbursed,
+                    t.interest_not_disbursed,
+                    t.total_outstanding_interest
+                from {_fnManagementDetailTopbarSummary}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) t
+                where t.loan_alias_name = @loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -1710,102 +1603,34 @@ namespace kingsightapi.Services
 
         private async Task<(string? ParentLoanCodes, string? Sponsors, int InvestorCount)>
             LoadLoanDetailReportDetailsAsync(
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
+            LoanDetailReportQuery query,
+            string loanAliasName,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
         {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and upper(ltrim(rtrim(funding_status_description))) = @funding_status";
-
-            // Matches reporting Report Details SQL exactly:
-            // distinct main_loan_code / sponsor / count(distinct investor_code).
-            // No app-side exclusion of 'P' codes — use the warehouse main_loan_code as-is.
-            try
-            {
-                return await ReadLoanDetailReportDetailsAsync(
-                    BuildLoanDetailReportDetailsSql("main_loan_code", statusPredicate),
-                    loanAliasName,
-                    fundingStatus,
-                    cancellationToken);
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "main_loan_code unavailable on vw_loan_attributes; falling back to parent_loan_code.");
-                return await ReadLoanDetailReportDetailsAsync(
-                    BuildLoanDetailReportDetailsSql("parent_loan_code", statusPredicate),
-                    loanAliasName,
-                    fundingStatus,
-                    cancellationToken);
-            }
-        }
-
-        private string BuildLoanDetailReportDetailsSql(string mainLoanCodeColumn, string statusPredicate) =>
-            $"""
-            with base as (
-                select distinct
-                    loan_alias_name,
-                    loan_code,
-                    nullif(ltrim(rtrim({mainLoanCodeColumn})), '') as main_loan_code,
-                    nullif(ltrim(rtrim(sponsor)), '') as sponsor,
-                    nullif(ltrim(rtrim(investor_code)), '') as investor_code
-                from {_vwLoanAttributes}
-                where loan_alias_name = @loan_alias_name
-                {statusPredicate}
-            ),
-            parent_codes as (
+            var sql = $"""
                 select
-                    loan_alias_name,
-                    string_agg(main_loan_code, ', ') as loan_codes
-                from (
-                    select distinct loan_alias_name, main_loan_code
-                    from base
-                    where main_loan_code is not null
-                ) x
-                group by loan_alias_name
-            ),
-            sponsors as (
-                select
-                    loan_alias_name,
-                    string_agg(sponsor, ', ') as sponsors
-                from (
-                    select distinct loan_alias_name, sponsor
-                    from base
-                    where sponsor is not null
-                ) x
-                group by loan_alias_name
-            ),
-            investors as (
-                select
-                    loan_alias_name,
-                    count(distinct investor_code) as investor_count
-                from base
-                where investor_code is not null
-                group by loan_alias_name
-            )
-            select
-                coalesce(p.loan_codes, '') as parent_loan_codes,
-                s.sponsors,
-                isnull(i.investor_count, 0) as investor_count
-            from (select distinct loan_alias_name from base) a
-            left join parent_codes p on a.loan_alias_name = p.loan_alias_name
-            left join sponsors s on a.loan_alias_name = s.loan_alias_name
-            left join investors i on a.loan_alias_name = i.loan_alias_name
-            """;
+                    r.loan_codes,
+                    r.sponsors,
+                    r.investor_count
+                from {_fnManagementDetailReport}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) r
+                where r.loan_alias_name = @loan_alias_name
+                """;
 
-        private async Task<(string? ParentLoanCodes, string? Sponsors, int InvestorCount)>
-            ReadLoanDetailReportDetailsAsync(
-                string sql,
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
-        {
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, null, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -1813,36 +1638,100 @@ namespace kingsightapi.Services
                 return (null, null, 0);
             }
 
-            var codes = GetNullableString(reader, "parent_loan_codes");
+            var codes = GetNullableString(reader, "loan_codes");
             return (
                 string.IsNullOrWhiteSpace(codes) ? null : codes,
                 GetNullableString(reader, "sponsors"),
                 GetInt32(reader, "investor_count"));
         }
 
-        private async Task<(DateTime? DefaultDate, DateTime? MaturityDate, DateTime? DateOfAdvance, DateTime? InterestOffDate)>
+        private async Task<(
+            DateTime? DefaultDate,
+            DateTime? MaturityDate,
+            DateTime? DateOfAdvance,
+            DateTime? InterestOffDate,
+            int? DaysInDefault)>
             LoadLoanDetailKeyDatesAsync(
-                DateOnly asOfDate,
+                LoanDetailReportQuery query,
                 string loanAliasName,
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
             var sql = $"""
                 select
-                    min(a.date_of_advance) as date_of_advance,
-                    min(case when v.default_date is null then v.loan_term_default_date else v.default_date end) as default_date,
-                    min(v.maturity_date) as maturity_date,
-                    min(v.date_interest_turned_off) as interest_off_date
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
+                    k.date_of_advance,
+                    k.default_date,
+                    k.maturity_date,
+                    k.interest_off_date,
+                    k.days_in_default
+                from {_fnManagementDetailKeyDates}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) k
+                where k.loan_alias_name = @loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return (null, null, null, null, null);
+            }
+
+            return (
+                GetNullableDateTime(reader, "default_date"),
+                GetNullableDateTime(reader, "maturity_date"),
+                GetNullableDateTime(reader, "date_of_advance"),
+                GetNullableDateTime(reader, "interest_off_date"),
+                GetNullableInt32(reader, "days_in_default"));
+        }
+
+        private async Task<(
+            decimal? SecurityValue,
+            string? PropertySize,
+            decimal? ValuePerUnit,
+            decimal? ExposurePerUnit)>
+            LoadLoanDetailPropertyStatsAsync(
+                LoanDetailReportQuery query,
+                string loanAliasName,
+                string? fundingStatus,
+                CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    p.security_value,
+                    p.property_size,
+                    p.value_per_unit,
+                    p.exposure_per_unit
+                from {_fnManagementDetailPropertyStats}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) p
+                where p.loan_alias_name = @loan_alias_name
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -1850,305 +1739,129 @@ namespace kingsightapi.Services
                 return (null, null, null, null);
             }
 
-            return (
-                GetNullableDateTime(reader, "default_date"),
-                GetNullableDateTime(reader, "maturity_date"),
-                GetNullableDateTime(reader, "date_of_advance"),
-                GetNullableDateTime(reader, "interest_off_date"));
-        }
-
-        private async Task<(
-            decimal? SecurityValue,
-            decimal? Units,
-            decimal? Acres,
-            decimal? SquareFeet,
-            decimal? ValuePerUnit,
-            decimal? ExposurePerUnit)>
-            LoadLoanDetailPropertyStatsAsync(
-                DateOnly asOfDate,
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
-        {
-            // Size metrics (units / SF / acres) come from subjective_input.loan_alias_master —
-            // the same source Loan Exposure Markers writes. Security + exposure stay on the
-            // mortgage view / fn_exposure for as-of consistency.
-            var sql = $"""
-                select
-                    max(v.security_value_loan_alias) as security_value,
-                    max(m.units) as units,
-                    max(m.net_acres) as acres,
-                    max(m.square_feet) as square_feet,
-                    case
-                        when nullif(max(m.units), 0) is null then null
-                        else max(v.security_value_loan_alias) / nullif(max(m.units), 0)
-                    end as value_per_unit,
-                    case
-                        when nullif(max(m.units), 0) is null then null
-                        else sum(a.exposure) / nullif(max(m.units), 0)
-                    end as exposure_per_unit
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                left join {_tblSubjectiveLoanAliasMaster} m
-                    on m.loan_alias_name = v.loan_alias_name
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
-                """;
-
-            try
-            {
-                return await ReadLoanDetailPropertyStatsAsync(
-                    sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogDebug(
-                    ex,
-                    "Property stats size columns unavailable on loan_alias_master; falling back to view columns.");
-                return await LoadLoanDetailPropertyStatsCoreAsync(
-                    asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-        }
-
-        private async Task<(
-            decimal? SecurityValue,
-            decimal? Units,
-            decimal? Acres,
-            decimal? SquareFeet,
-            decimal? ValuePerUnit,
-            decimal? ExposurePerUnit)>
-            LoadLoanDetailPropertyStatsCoreAsync(
-                DateOnly asOfDate,
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
-        {
-            var sql = $"""
-                select
-                    max(v.security_value_loan_alias) as security_value,
-                    max(v.units_loan_alias) as units,
-                    max(v.net_acres_loan_alias) as acres,
-                    cast(null as decimal(18, 2)) as square_feet,
-                    case
-                        when nullif(max(v.units_loan_alias), 0) is null then null
-                        else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
-                    end as value_per_unit,
-                    case
-                        when nullif(max(v.units_loan_alias), 0) is null then null
-                        else sum(a.exposure) / nullif(max(v.units_loan_alias), 0)
-                    end as exposure_per_unit
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
-                """;
-
-            try
-            {
-                return await ReadLoanDetailPropertyStatsAsync(
-                    sql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogDebug(ex, "Property stats acres column unavailable on view; retrying without it.");
-                var fallbackSql = $"""
-                    select
-                        max(v.security_value_loan_alias) as security_value,
-                        max(v.units_loan_alias) as units,
-                        cast(null as decimal(18, 4)) as acres,
-                        cast(null as decimal(18, 2)) as square_feet,
-                        case
-                            when nullif(max(v.units_loan_alias), 0) is null then null
-                            else max(v.security_value_loan_alias) / nullif(max(v.units_loan_alias), 0)
-                        end as value_per_unit,
-                        case
-                            when nullif(max(v.units_loan_alias), 0) is null then null
-                            else sum(a.exposure) / nullif(max(v.units_loan_alias), 0)
-                        end as exposure_per_unit
-                    from {_vwLoanAttributes} v
-                    inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                    {BuildLoanAliasWhere(fundingStatus)}
-                    group by v.loan_alias_name
-                    """;
-                return await ReadLoanDetailPropertyStatsAsync(
-                    fallbackSql, asOfDate, loanAliasName, fundingStatus, cancellationToken);
-            }
-        }
-
-        private async Task<(
-            decimal? SecurityValue,
-            decimal? Units,
-            decimal? Acres,
-            decimal? SquareFeet,
-            decimal? ValuePerUnit,
-            decimal? ExposurePerUnit)>
-            ReadLoanDetailPropertyStatsAsync(
-                string sql,
-                DateOnly asOfDate,
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
-        {
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-            await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
-            {
-                return (null, null, null, null, null, null);
-            }
-
             var valuePerUnit = GetNullableDecimal(reader, "value_per_unit");
             var exposurePerUnit = GetNullableDecimal(reader, "exposure_per_unit");
             return (
                 GetNullableDecimal(reader, "security_value"),
-                GetNullableDecimal(reader, "units"),
-                GetNullableDecimal(reader, "acres"),
-                GetNullableDecimal(reader, "square_feet"),
+                GetNullableString(reader, "property_size"),
                 valuePerUnit.HasValue ? Math.Round(valuePerUnit.Value, 2) : null,
                 exposurePerUnit.HasValue ? Math.Round(exposurePerUnit.Value, 2) : null);
         }
 
         private async Task<LoanDetailReportInterestOverLifeDto> LoadLoanDetailInterestOverLifeAsync(
-            DateOnly asOfDate,
-            string loanAliasName,
-            string? fundingStatus,
-            CancellationToken cancellationToken)
-        {
-            // Interest Over Life — reporting SQL (fn_exposure LTD columns).
-            var sql = $"""
-                select
-                    sum(a.outstanding_loan_interest) as total_interest_due,
-                    sum(a.paid_by_reserve_ltd) as paid_by_reserves,
-                    sum(a.paid_by_cash_ltd) as paid_via_cash,
-                    sum(a.unpaid_amount) as interest_unpaid
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
-                """;
-
-            try
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = new SqlCommand(sql, connection);
-                AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
-
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                if (!await reader.ReadAsync(cancellationToken))
-                {
-                    return new LoanDetailReportInterestOverLifeDto();
-                }
-
-                return new LoanDetailReportInterestOverLifeDto
-                {
-                    TotalInterestDue = GetNullableDecimal(reader, "total_interest_due"),
-                    PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves"),
-                    PaidViaCash = GetNullableDecimal(reader, "paid_via_cash"),
-                    InterestUnpaid = GetNullableDecimal(reader, "interest_unpaid")
-                };
-            }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Interest-over-life columns unavailable on fn_exposure for alias {LoanAliasName}.",
-                    loanAliasName);
-                return new LoanDetailReportInterestOverLifeDto();
-            }
-        }
-
-        private async Task<(decimal? CurrentInterestReserve, decimal? CurrentInterestReserveBalance)>
-            LoadLoanDetailInterestReserveAsync(
-                string loanAliasName,
-                string? fundingStatus,
-                CancellationToken cancellationToken)
-        {
-            var statusPredicate = string.IsNullOrEmpty(fundingStatus)
-                ? string.Empty
-                : "and upper(ltrim(rtrim(v.funding_status_description))) = @funding_status";
-
-            var sql = $"""
-                with interest_reserve as (
-                    select
-                        loan_key,
-                        loan_code,
-                        sum(case
-                            when trim(a.history_status) = 'Interest Reserve Funding'
-                                then a.interest_reserve_draw_amount
-                        end) as current_interest_reserve,
-                        sum(case
-                            when trim(a.history_status) <> 'Interest Reserve Funding'
-                                then a.interest_reserve_draw_amount
-                        end) as current_interest_reserve_balance
-                    from {_tblFactAmortizationSchedule} a
-                    group by loan_key, loan_code
-                ),
-                alias_loans as (
-                    select distinct v.loan_code
-                    from {_vwLoanAttributes} v
-                    where v.loan_alias_name = @loan_alias_name
-                    {statusPredicate}
-                )
-                select
-                    sum(i.current_interest_reserve) as current_interest_reserve,
-                    sum(i.current_interest_reserve_balance) as current_interest_reserve_balance
-                from alias_loans v
-                left join interest_reserve i on v.loan_code = i.loan_code
-                """;
-
-            try
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = new SqlCommand(sql, connection);
-                AddLoanAliasParameters(command, null, loanAliasName, fundingStatus);
-
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                if (!await reader.ReadAsync(cancellationToken))
-                {
-                    return (null, null);
-                }
-
-                return (
-                    GetNullableDecimal(reader, "current_interest_reserve"),
-                    GetNullableDecimal(reader, "current_interest_reserve_balance"));
-            }
-            catch (SqlException ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Interest reserve query failed for alias {LoanAliasName}; returning empty reserve.",
-                    loanAliasName);
-                return (null, null);
-            }
-        }
-
-        private async Task<IReadOnlyList<ChartSliceDto>> LoadLoanDetailExposureByInvestorAsync(
-            DateOnly asOfDate,
+            LoanDetailReportQuery query,
             string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 select
-                    investor = ltrim(rtrim(v.investor_name)),
-                    exposure = sum(a.exposure)
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                  and nullif(ltrim(rtrim(v.investor_name)), '') is not null
-                group by ltrim(rtrim(v.investor_name))
-                order by exposure desc
+                    i.total_interest_due,
+                    i.paid_by_reserves,
+                    i.paid_via_cash,
+                    i.interest_unpaid
+                from {_fnManagementDetailInterestOverLife}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) i
+                where i.loan_alias_name = @loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return new LoanDetailReportInterestOverLifeDto();
+            }
+
+            return new LoanDetailReportInterestOverLifeDto
+            {
+                TotalInterestDue = GetNullableDecimal(reader, "total_interest_due"),
+                PaidByReservesOrInterCo = GetNullableDecimal(reader, "paid_by_reserves"),
+                PaidViaCash = GetNullableDecimal(reader, "paid_via_cash"),
+                InterestUnpaid = GetNullableDecimal(reader, "interest_unpaid")
+            };
+        }
+
+        private async Task<(decimal? CurrentInterestReserve, decimal? CurrentInterestReserveBalance)>
+            LoadLoanDetailInterestReserveAsync(
+                LoanDetailReportQuery query,
+                string loanAliasName,
+                string? fundingStatus,
+                CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    r.current_interest_reserve,
+                    r.current_interest_reserve_balance
+                from {_fnManagementDetailInterestReserve}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) r
+                where r.loan_alias_name = @loan_alias_name
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return (null, null);
+            }
+
+            return (
+                GetNullableDecimal(reader, "current_interest_reserve"),
+                GetNullableDecimal(reader, "current_interest_reserve_balance"));
+        }
+
+        private async Task<IReadOnlyList<ChartSliceDto>> LoadLoanDetailExposureByInvestorAsync(
+            LoanDetailReportQuery query,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    e.investor_name,
+                    e.exposure
+                from {_fnManagementDetailExposureByInvestor}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) e
+                where nullif(ltrim(rtrim(e.investor_name)), '') is not null
+                order by e.exposure desc
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -2156,7 +1869,7 @@ namespace kingsightapi.Services
             {
                 rows.Add(new ChartSliceDto
                 {
-                    Label = GetString(reader, "investor"),
+                    Label = GetString(reader, "investor_name"),
                     Value = GetNullableDecimal(reader, "exposure") ?? 0m
                 });
             }
@@ -2174,31 +1887,38 @@ namespace kingsightapi.Services
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadLoanDetailExposureCompositionAsync(
-            DateOnly asOfDate,
+            LoanDetailReportQuery query,
             string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
             var sql = $"""
                 select
-                    sum(a.principal_balance) as principal,
-                    sum(a.exposure) as exposure,
-                    sum(a.outstanding_loan_interest) as outstanding_interest,
-                    sum(a.accrued) as accrued,
-                    sum(a.outstanding_late_interest) as late_interest,
-                    sum(isnull(a.tax_arrears, 0)) as tax_arrear,
-                    sum(a.monthly_interest_adjustment_amount) as interest_adjustment,
-                    sum(isnull(a.outstanding_invoices, 0) + isnull(a.est_realization_costs, 0) + isnull(a.cost_to_complete, 0)) as other_cost
-                from {_vwLoanAttributes} v
-                inner join {_fnExposure}(@as_of_date) a on a.loan_code = v.loan_code
-                {BuildLoanAliasWhere(fundingStatus)}
-                group by v.loan_alias_name
+                    c.exposure,
+                    c.outstanding_interest,
+                    c.accrued,
+                    c.late_interest,
+                    c.tax_arrear,
+                    c.interest_adjustment,
+                    c.other_cost
+                from {_fnManagementDetailExposureComposition}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) c
+                where c.loan_alias_name = @loan_alias_name
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, asOfDate, loanAliasName, fundingStatus);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
@@ -2206,51 +1926,15 @@ namespace kingsightapi.Services
                 return [];
             }
 
-            var totalExposure = GetNullableDecimal(reader, "exposure") ?? 0m;
             var outstandingInterest = GetNullableDecimal(reader, "outstanding_interest") ?? 0m;
             var interestAdjustment = GetNullableDecimal(reader, "interest_adjustment") ?? 0m;
-            var osIntMerged = outstandingInterest + interestAdjustment;
-
-            // Principal + O/S Int (incl. Int. Adj) + Accrued + Late + Tax + Other.
-            // Int. Adj is merged into O/S Int so the pie never needs a negative slice.
             var components = new (string Label, decimal Value)[]
             {
-                ("Principal", GetNullableDecimal(reader, "principal") ?? 0m),
-                ("O/S Int.", osIntMerged),
+                ("O/S Int.", outstandingInterest + interestAdjustment),
                 ("Accrued Int.", GetNullableDecimal(reader, "accrued") ?? 0m),
                 ("Late Int.", GetNullableDecimal(reader, "late_interest") ?? 0m),
                 ("Tax Arrears", GetNullableDecimal(reader, "tax_arrear") ?? 0m),
                 ("Other Costs", GetNullableDecimal(reader, "other_cost") ?? 0m)
-            };
-
-            var positive = components.Where(component => component.Value > 0m).ToList();
-            var denominator = positive.Sum(component => component.Value);
-
-            return positive
-                .Select(component => new ChartSliceDto
-                {
-                    Label = component.Label,
-                    Value = component.Value,
-                    SharePercent = denominator > 0
-                        ? Math.Round(component.Value / denominator * 100m, 1)
-                        : null
-                })
-                .ToList();
-        }
-
-        private static IReadOnlyList<ChartSliceDto> BuildLoanDetailExposureComposition(
-            LoanPortfolioDetailTotalsDto totals)
-        {
-            // Int. Adj merged into O/S Int — pie charts cannot represent negative slices.
-            var osIntMerged = totals.DefInterest + totals.IntAdj;
-            var components = new (string Label, decimal Value)[]
-            {
-                ("Principal", totals.Principal),
-                ("O/S Int.", osIntMerged),
-                ("Accrued Int.", totals.AccruedInt),
-                ("Late Int.", totals.LateInt),
-                ("Tax Arrears", totals.TaxArrears),
-                ("Other Costs", totals.OtherCosts)
             };
 
             var positive = components.Where(component => component.Value > 0m).ToList();
@@ -3602,55 +3286,36 @@ namespace kingsightapi.Services
         }
 
         private async Task<(DateTime? AsAt, IReadOnlyList<TaxArrearsByYearDto> ByYear)> LoadTaxArrearsForAliasAsync(
-            DateOnly asOfDate,
-            string loanAliasName,
+            LoanDetailReportQuery query,
+            string? fundingStatus,
             CancellationToken cancellationToken)
         {
-            await EnsureLoanTaxDetailsTableAvailableAsync(cancellationToken);
-            if (_loanTaxDetailsTableAvailable != true)
-            {
-                return (null, []);
-            }
-
-            // Matches the report tax query:
-            // tax_memo_date <= DATEADD(DAY, -1, EOMONTH(@as_of_date))
-            // Scoped to alias loan_codes only (no funding-status filter).
-            // distinct loan_code so multi-investor view rows do not inflate the sum.
             var sql = $"""
-                with alias_loans as (
-                    select distinct a.loan_code
-                    from {_vwLoanAttributes} a
-                    where a.loan_alias_name = @loan_alias_name
-                )
                 select
-                    b.tax_year,
-                    sum(isnull(b.tax_arrears, 0)) as tax_arrears,
-                    max(b.tax_memo_date) as tax_memo_date
-                from alias_loans a
-                inner join {_tblLoanTaxDetails} b
-                    on a.loan_code = b.loan_code
-                   and b.tax_memo_date <= dateadd(day, -1, eomonth(@as_of_date))
-                group by b.tax_year
-                order by b.tax_year desc
+                    t.tax_year,
+                    t.tax_arrears
+                from {_fnManagementDetailTaxArrearsByYear}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) t
+                order by t.tax_year desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@as_of_date", asOfDate.ToDateTime(TimeOnly.MinValue));
-            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
 
-            DateTime? asAt = null;
             var byYear = new List<TaxArrearsByYearDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var memoDate = GetNullableDateTime(reader, "tax_memo_date");
-                if (memoDate.HasValue && (!asAt.HasValue || memoDate.Value > asAt.Value))
-                {
-                    asAt = memoDate;
-                }
-
                 byYear.Add(new TaxArrearsByYearDto
                 {
                     Year = GetInt32(reader, "tax_year"),
@@ -3658,32 +3323,7 @@ namespace kingsightapi.Services
                 });
             }
 
-            return (asAt, byYear);
-        }
-
-        private async Task EnsureLoanTaxDetailsTableAvailableAsync(CancellationToken cancellationToken)
-        {
-            if (_loanTaxDetailsTableAvailable.HasValue)
-            {
-                return;
-            }
-
-            var probe = $"select top 0 loan_code from {_tblLoanTaxDetails}";
-            try
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = new SqlCommand(probe, connection);
-                await command.ExecuteReaderAsync(cancellationToken);
-                _loanTaxDetailsTableAvailable = true;
-            }
-            catch (SqlException)
-            {
-                _loanTaxDetailsTableAvailable = false;
-                _logger.LogWarning(
-                    "Tax arrears source {Table} unavailable; Loan Detail tax widget will be empty.",
-                    _tblLoanTaxDetails);
-            }
+            return (query.AsOfDate.ToDateTime(TimeOnly.MinValue), byYear);
         }
 
         private async Task EnsureTaxArrearsTableAvailableAsync(CancellationToken cancellationToken)
