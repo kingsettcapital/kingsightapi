@@ -1461,6 +1461,7 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken)
         {
             // Warehouse TVF applies as-of + panel filters; alias scope keeps drill-down to this loan alias.
+            // Order by loan_code then rank so related tranches stay grouped; rank breaks ties within same ID.
             var sql = $"""
                 select
                     p.loan_code,
@@ -1491,9 +1492,9 @@ namespace kingsightapi.Services
                     @funding_status) p
                 where p.loan_alias_name = @loan_alias_name
                 order by
+                    p.loan_code,
                     case when p.ranking is null then 1 else 0 end,
-                    p.ranking,
-                    p.loan_code
+                    p.ranking
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
@@ -2922,8 +2923,8 @@ namespace kingsightapi.Services
 
         private static List<LoanPortfolioDetailRowDto> BuildPortfolioDetailRows(IReadOnlyList<LoanSnapshotRow> loanRows) =>
             loanRows
-                .OrderBy(r => r.Ranking ?? int.MaxValue)
-                .ThenBy(r => r.LoanCode)
+                .OrderBy(r => r.LoanCode, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(r => r.Ranking ?? int.MaxValue)
                 .Select(r => new LoanPortfolioDetailRowDto
                 {
                     LoanId = r.LoanCode,

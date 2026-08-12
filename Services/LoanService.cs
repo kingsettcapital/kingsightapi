@@ -599,11 +599,18 @@ namespace kingsightapi.Services
                 || loan.FundingStatusKey.HasValue;
         }
 
+        /// <summary>
+        /// Funding status column reads for <see cref="BuildAttributeAssignmentListSql"/> only.
+        /// Alias list must NOT call these — OuterApply on <c>l</c> does not project funding columns.
+        /// </summary>
         private string BuildFundingStatusKeySelectExpression(string dimLoanAlias = "l") =>
             string.IsNullOrWhiteSpace(_loanStatusKeyColumn)
                 ? "cast(null as bigint)"
                 : $"try_cast({dimLoanAlias}.[{_loanStatusKeyColumn}] as bigint)";
 
+        /// <summary>
+        /// Funding status name for attribute list only (full <c>dim_loan</c> join alias required).
+        /// </summary>
         private string BuildFundingStatusNameSelectExpression(string dimLoanAlias = "l") =>
             string.IsNullOrWhiteSpace(_loanStatusKeyColumn)
                 ? "cast('' as varchar(100))"
@@ -664,9 +671,10 @@ namespace kingsightapi.Services
                 : $"isnull(r.[{_lateInterestOffNoteColumn}], '')";
 
         /// <summary>
-        /// Loan Alias Assignment list:
-        /// relationship (Yardi) UNION external_serviced_loan (Non-KS not already in relationship),
-        /// filtered per loan by dim_loan.funding_status_code / funding_status_description.
+        /// Loan Alias Assignment list (auditProfile=loan_alias).
+        /// Do not select dim_loan funding_status_* onto OuterApply alias <c>l</c> —
+        /// that projection only has loan_key / parent_loan_code / investor_code.
+        /// Status filter still uses EXISTS against shared.dim_loan (unchanged).
         /// </summary>
         private string BuildAliasAssignmentListSql(
             SubjectiveInputRelationshipAuditColumns audit,
@@ -686,8 +694,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
-                       funding_status_key = {BuildFundingStatusKeySelectExpression()},
-                       funding_status_name = {BuildFundingStatusNameSelectExpression()},
+                       funding_status_key = cast(null as bigint),
+                       funding_status_name = '',
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
                        is_non_ks = cast(0 as bit)
@@ -766,8 +774,8 @@ namespace kingsightapi.Services
         }
 
         /// <summary>
-        /// Loan Attribute Assignment list — relationship INNER JOIN current dim_loan,
-        /// filtered per loan by funding_status_code / funding_status_description.
+        /// Loan Attribute Assignment list (auditProfile=loan_attribute).
+        /// INNER JOIN current dim_loan — safe to select funding_status_code / description.
         /// </summary>
         private string BuildAttributeAssignmentListSql(
             SubjectiveInputRelationshipAuditColumns audit,
@@ -817,6 +825,7 @@ namespace kingsightapi.Services
             return sql.ToString();
         }
 
+        // Legacy helper (unused by GetAllAsync). Uses left join full dim_loan — funding cols OK if present.
         private string BuildListSql(SubjectiveInputRelationshipAuditColumns audit) =>
             $"""
                 select loan_key = isnull(l.loan_key, 0),
@@ -830,8 +839,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
-                       funding_status_key = {BuildFundingStatusKeySelectExpression()},
-                       funding_status_name = {BuildFundingStatusNameSelectExpression()},
+                       funding_status_key = cast(null as bigint),
+                       funding_status_name = '',
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
                        is_non_ks = cast(0 as bit)
