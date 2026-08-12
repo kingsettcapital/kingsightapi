@@ -1281,11 +1281,11 @@ namespace kingsightapi.Services
             var interestOverLifeTask = LoadLoanDetailInterestOverLifeAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
-                query, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
             var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var taxTask = LoadTaxArrearsForAliasAsync(
-                query, fundingStatus, cancellationToken);
+                query, aliasName, fundingStatus, cancellationToken);
 
             await Task.WhenAll(
                 portfolioTask,
@@ -1323,14 +1323,6 @@ namespace kingsightapi.Services
 
             DateTime? dateOfDefault = keyDatesRaw.DefaultDate;
             int? daysInDefault = keyDatesRaw.DaysInDefault;
-
-            decimal? monthsCovered = null;
-            var reserveBalance = interestReserve.CurrentInterestReserveBalance ?? 0m;
-            var monthlyInterest = topBar.TotalOutstandingInterest / 12m;
-            if (reserveBalance > 0 && monthlyInterest > 0)
-            {
-                monthsCovered = Math.Round(reserveBalance / monthlyInterest, 1);
-            }
 
             var unitsLabel = string.IsNullOrWhiteSpace(propertyStats.PropertySize)
                 ? null
@@ -1389,14 +1381,14 @@ namespace kingsightapi.Services
                 {
                     InterestDisbursed = topBar.InterestDisbursed,
                     InterestNotDisbursed = topBar.InterestNotDisbursed,
-                    MonthsInArrears = null
+                    MonthsInArrears = topBar.MonthsInArrears
                 },
                 InterestOverLife = interestOverLife,
                 InterestReserve = new LoanDetailReportInterestReserveDto
                 {
                     CurrentInterestReserve = interestReserve.CurrentInterestReserve,
                     CurrentInterestReserveBalance = interestReserve.CurrentInterestReserveBalance,
-                    MonthsCoveredByReserve = monthsCovered
+                    MonthsCoveredByReserve = interestReserve.NumberOfMonths
                 },
                 PortfolioRows = portfolioRows,
                 PortfolioTotals = portfolioTotals,
@@ -1484,7 +1476,8 @@ namespace kingsightapi.Services
                     p.tax_arrears,
                     p.other_cost,
                     p.exposure,
-                    p.ltv
+                    p.ltv,
+                    p.months_in_arrears
                 from {_fnManagementDetailsLoanPortfolio}(
                     @as_of_date,
                     @default_date_from,
@@ -1495,12 +1488,7 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) p
-                where exists (
-                    select 1
-                    from {_vwLoanAttributes} v
-                    where v.loan_code = p.loan_code
-                      and v.loan_alias_name = @loan_alias_name
-                )
+                where p.loan_alias_name = @loan_alias_name
                 order by
                     case when p.ranking is null then 1 else 0 end,
                     p.ranking,
@@ -1541,7 +1529,7 @@ namespace kingsightapi.Services
                     OtherCosts = GetNullableDecimal(reader, "other_cost") ?? 0m,
                     TotalExposure = GetNullableDecimal(reader, "exposure") ?? 0m,
                     Ltv = ltv.HasValue ? Math.Round(ltv.Value, 2) : null,
-                    MonthsInArrears = null,
+                    MonthsInArrears = GetNullableInt32(reader, "months_in_arrears"),
                     TimesNsfd = null
                 });
             }
@@ -1554,7 +1542,8 @@ namespace kingsightapi.Services
             decimal? AverageLtv,
             decimal InterestDisbursed,
             decimal InterestNotDisbursed,
-            decimal TotalOutstandingInterest)> LoadLoanDetailTopBarAsync(
+            decimal TotalOutstandingInterest,
+            int? MonthsInArrears)> LoadLoanDetailTopBarAsync(
             LoanDetailReportQuery query,
             string loanAliasName,
             string? fundingStatus,
@@ -1562,11 +1551,12 @@ namespace kingsightapi.Services
         {
             var sql = $"""
                 select
-                    t.security_value,
+                    t.principal_balance,
                     t.ltv,
                     t.interest_disbursed,
                     t.interest_not_disbursed,
-                    t.total_outstanding_interest
+                    t.total_outstanding_interest,
+                    t.months_in_arrears
                 from {_fnManagementDetailTopbarSummary}(
                     @as_of_date,
                     @default_date_from,
@@ -1589,16 +1579,17 @@ namespace kingsightapi.Services
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
             {
-                return (null, null, 0m, 0m, 0m);
+                return (null, null, 0m, 0m, 0m, null);
             }
 
             var averageLtv = GetNullableDecimal(reader, "ltv");
             return (
-                GetNullableDecimal(reader, "security_value"),
+                GetNullableDecimal(reader, "principal_balance"),
                 averageLtv.HasValue ? Math.Round(averageLtv.Value, 2) : null,
                 GetNullableDecimal(reader, "interest_disbursed") ?? 0m,
                 GetNullableDecimal(reader, "interest_not_disbursed") ?? 0m,
-                GetNullableDecimal(reader, "total_outstanding_interest") ?? 0m);
+                GetNullableDecimal(reader, "total_outstanding_interest") ?? 0m,
+                GetNullableInt32(reader, "months_in_arrears"));
         }
 
         private async Task<(string? ParentLoanCodes, string? Sponsors, int InvestorCount)>
@@ -1794,7 +1785,10 @@ namespace kingsightapi.Services
             };
         }
 
-        private async Task<(decimal? CurrentInterestReserve, decimal? CurrentInterestReserveBalance)>
+        private async Task<(
+            decimal? CurrentInterestReserve,
+            decimal? CurrentInterestReserveBalance,
+            decimal? NumberOfMonths)>
             LoadLoanDetailInterestReserveAsync(
                 LoanDetailReportQuery query,
                 string loanAliasName,
@@ -1804,7 +1798,8 @@ namespace kingsightapi.Services
             var sql = $"""
                 select
                     r.current_interest_reserve,
-                    r.current_interest_reserve_balance
+                    r.current_interest_reserve_balance,
+                    r.number_of_months
                 from {_fnManagementDetailInterestReserve}(
                     @as_of_date,
                     @default_date_from,
@@ -1827,16 +1822,19 @@ namespace kingsightapi.Services
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
             {
-                return (null, null);
+                return (null, null, null);
             }
 
+            var numberOfMonths = GetNullableDecimal(reader, "number_of_months");
             return (
                 GetNullableDecimal(reader, "current_interest_reserve"),
-                GetNullableDecimal(reader, "current_interest_reserve_balance"));
+                GetNullableDecimal(reader, "current_interest_reserve_balance"),
+                numberOfMonths.HasValue ? Math.Round(numberOfMonths.Value, 1) : null);
         }
 
         private async Task<IReadOnlyList<ChartSliceDto>> LoadLoanDetailExposureByInvestorAsync(
             LoanDetailReportQuery query,
+            string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
@@ -1854,7 +1852,8 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) e
-                where nullif(ltrim(rtrim(e.investor_name)), '') is not null
+                where e.loan_alias_name = @loan_alias_name
+                  and nullif(ltrim(rtrim(e.investor_name)), '') is not null
                 order by e.exposure desc
                 """;
 
@@ -1862,6 +1861,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             var rows = new List<ChartSliceDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -3287,6 +3287,7 @@ namespace kingsightapi.Services
 
         private async Task<(DateTime? AsAt, IReadOnlyList<TaxArrearsByYearDto> ByYear)> LoadTaxArrearsForAliasAsync(
             LoanDetailReportQuery query,
+            string loanAliasName,
             string? fundingStatus,
             CancellationToken cancellationToken)
         {
@@ -3304,6 +3305,7 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) t
+                where t.loan_alias_name = @loan_alias_name
                 order by t.tax_year desc
                 """;
 
@@ -3311,6 +3313,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
 
             var byYear = new List<TaxArrearsByYearDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
