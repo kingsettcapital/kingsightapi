@@ -1562,7 +1562,7 @@ namespace kingsightapi.Services
         {
             var sql = $"""
                 select
-                    t.security_value,
+                    t.principal_balance,
                     t.ltv,
                     t.interest_disbursed,
                     t.interest_not_disbursed,
@@ -1594,7 +1594,7 @@ namespace kingsightapi.Services
 
             var averageLtv = GetNullableDecimal(reader, "ltv");
             return (
-                GetNullableDecimal(reader, "security_value"),
+                GetNullableDecimal(reader, "principal_balance"),
                 averageLtv.HasValue ? Math.Round(averageLtv.Value, 2) : null,
                 GetNullableDecimal(reader, "interest_disbursed") ?? 0m,
                 GetNullableDecimal(reader, "interest_not_disbursed") ?? 0m,
