@@ -149,7 +149,12 @@ namespace kingsightapi.Controllers
                     ex,
                     "Error retrieving loan detail report dashboard for alias {LoanAliasKey}",
                     loanAliasKey);
-                return StatusCode(500, "An error occurred while retrieving loan detail report.");
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving loan detail report.",
+                    detail = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
             }
         }
 
@@ -184,7 +189,12 @@ namespace kingsightapi.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving management summary");
-                return StatusCode(500, "An error occurred while retrieving management summary.");
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving management summary.",
+                    detail = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
             }
         }
 
@@ -219,7 +229,12 @@ namespace kingsightapi.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error retrieving loan detail report for alias {LoanAliasKey}", loanAliasKey);
-                return StatusCode(500, "An error occurred while retrieving loan detail report.");
+                return StatusCode(500, new
+                {
+                    message = "An error occurred while retrieving loan detail report.",
+                    detail = ex.Message,
+                    inner = ex.InnerException?.Message
+                });
             }
         }
     }
