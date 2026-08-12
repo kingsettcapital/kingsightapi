@@ -17,6 +17,9 @@ namespace kingsightapi.Entities
         public string DummyLoanLink { get; init; } = string.Empty;
         public bool? IsLoanInterestApplicable { get; init; }
         public string LateInterestOffNote { get; init; } = string.Empty;
+        /// <summary><c>shared.dim_loan.funding_status_code</c> → <c>shared.dim_status.status_key</c>.</summary>
+        public long? FundingStatusKey { get; init; }
+        public string FundingStatusName { get; init; } = string.Empty;
         public string UserUpdatedBy { get; init; } = string.Empty;
         public DateTime? UserUpdatedDate { get; init; }
         /// <summary>True when the row comes from <c>external_serviced_loan</c> (Non-KS).</summary>

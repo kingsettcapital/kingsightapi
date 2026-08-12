@@ -26,8 +26,14 @@ public sealed class FabricWarehouseOptions
     public string SilverLakehouseDatabase { get; set; } = "shortcut_lh_silver1";
 
     /// <summary>
-    /// Bronze lakehouse shortcuts (e.g. <c>external_files.cmhc_default</c>).
+    /// Bronze lakehouse shortcuts for CMHC watchlist and related external tables.
     /// Development = <c>shortcut_lh_bronze1</c>; UAT = <c>shortcut_lh_bronze</c>.
     /// </summary>
     public string BronzeLakehouseDatabase { get; set; } = "shortcut_lh_bronze1";
+
+    /// <summary>
+    /// Schema for bronze CMHC watchlist (<c>cmhc_default</c>).
+    /// Development = <c>external_files</c>; UAT = <c>dbo</c>.
+    /// </summary>
+    public string BronzeExternalFilesSchema { get; set; } = "external_files";
 }

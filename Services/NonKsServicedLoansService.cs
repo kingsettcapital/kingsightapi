@@ -444,6 +444,13 @@ namespace kingsightapi.Services
             AddOptionalDecimal(command, columns.TaxArrears, "@tax_arrears", loan.TaxArrears);
             AddOptionalDecimal(command, columns.InterestAsOfTaxMemo, "@interest_as_of_tax_memo", loan.InterestAsOfTaxMemo);
             AddOptionalDecimal(command, columns.InterestAdjustment, "@interest_adjustment", loan.InterestAdjustment);
+
+            if (columns.FundingStatus is not null)
+            {
+                command.Parameters.AddWithValue(
+                    "@funding_status",
+                    ToDbValue(NormalizeOptional(loan.FundingStatus)));
+            }
         }
 
         private static NonKsServicedLoanRowDto MapRow(SqlDataReader reader)
@@ -487,6 +494,7 @@ namespace kingsightapi.Services
                 TaxArrears = GetNullableDecimal(reader, "tax_arrears"),
                 InterestAsOfTaxMemo = GetNullableDecimal(reader, "interest_as_of_tax_memo"),
                 InterestAdjustment = GetNullableDecimal(reader, "interest_adjustment"),
+                FundingStatus = GetNullableString(reader, "funding_status"),
                 UserUpdatedBy = GetNullableString(reader, "updated_by"),
                 UserUpdatedDate = GetNullableDateTime(reader, "updated_datetime"),
                 CreatedBy = GetNullableString(reader, "created_by"),

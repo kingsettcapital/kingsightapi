@@ -257,6 +257,8 @@ namespace kingsightapi.Entities
         public decimal? Ltv { get; init; }
         public int? MonthsInArrears { get; init; }
         public int? TimesNsfd { get; init; }
+        /// <summary>Y/N from warehouse (aggregate_flag); portfolio TOTALS include only Y rows.</summary>
+        public string? AggregateFlag { get; init; }
     }
 
     public sealed class LoanPortfolioDetailTotalsDto

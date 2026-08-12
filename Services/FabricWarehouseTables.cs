@@ -50,7 +50,11 @@ public sealed class FabricWarehouseTables
     /// <summary>Bronze lakehouse database name from config.</summary>
     public string BronzeLakehouseDatabase => _options.BronzeLakehouseDatabase;
 
-    /// <summary>External files tables in <c>{BronzeLakehouseDatabase}.external_files</c>.</summary>
+    /// <summary>
+    /// CMHC / external files tables in
+    /// <c>{BronzeLakehouseDatabase}.{BronzeExternalFilesSchema}</c>
+    /// (Dev: <c>external_files.cmhc_default</c>; UAT: <c>dbo.cmhc_default</c>).
+    /// </summary>
     public string ExternalFiles(string table) =>
-        $"{_options.BronzeLakehouseDatabase}.external_files.{table}";
+        $"{_options.BronzeLakehouseDatabase}.{_options.BronzeExternalFilesSchema}.{table}";
 }
