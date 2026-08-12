@@ -9,6 +9,11 @@ namespace kingsightapi.Entities
         public string DummyLoanLink { get; init; } = string.Empty;
         public bool? IsLoanInterestApplicable { get; init; }
         public string LateInterestOffNote { get; init; } = string.Empty;
+        /// <summary>
+        /// When set, updates <c>shared.dim_loan.funding_status_code</c> (and description when present)
+        /// to the matching <c>shared.dim_status</c> row.
+        /// </summary>
+        public long? FundingStatusKey { get; init; }
         public string UserUpdatedBy { get; init; } = string.Empty;
     }
 

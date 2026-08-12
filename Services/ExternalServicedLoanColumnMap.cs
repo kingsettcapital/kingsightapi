@@ -38,6 +38,8 @@ namespace kingsightapi.Services
         public string? TaxArrears { get; init; }
         public string? InterestAsOfTaxMemo { get; init; }
         public string? InterestAdjustment { get; init; }
+        /// <summary>Maps to <c>external_serviced_loan.funding_status</c> (dim_status status_name).</summary>
+        public string? FundingStatus { get; init; }
 
         public SubjectiveInputMasterAuditColumns Audit { get; init; } = new();
 
@@ -106,6 +108,8 @@ namespace kingsightapi.Services
                     connectionString, tableName, ["interest_as_of_tax_memo", "interest_as_of_memo"], cancellationToken),
                 InterestAdjustment = await FindFirstAsync(
                     connectionString, tableName, ["interest_adjustment"], cancellationToken),
+                FundingStatus = await FindFirstAsync(
+                    connectionString, tableName, ["funding_status"], cancellationToken),
                 Audit = audit
             };
         }
@@ -172,6 +176,7 @@ namespace kingsightapi.Services
             AddWriteColumn(columns, values, TaxArrears, "@tax_arrears");
             AddWriteColumn(columns, values, InterestAsOfTaxMemo, "@interest_as_of_tax_memo");
             AddWriteColumn(columns, values, InterestAdjustment, "@interest_adjustment");
+            AddWriteColumn(columns, values, FundingStatus, "@funding_status");
 
             var columnList = string.Join(",\n                    ", columns.Select(Bracket));
             var valueList = string.Join(",\n                    ", values) + Audit.BuildInsertValueList();
@@ -213,6 +218,7 @@ namespace kingsightapi.Services
             AddUpdateSet(sets, TaxArrears, "@tax_arrears");
             AddUpdateSet(sets, InterestAsOfTaxMemo, "@interest_as_of_tax_memo");
             AddUpdateSet(sets, InterestAdjustment, "@interest_adjustment");
+            AddUpdateSet(sets, FundingStatus, "@funding_status");
 
             var auditUpdate = Audit.BuildUpdateSetClause().Trim();
             if (auditUpdate.StartsWith(','))
@@ -276,6 +282,7 @@ namespace kingsightapi.Services
                 SelectAliasOrNull(TaxArrears, "tax_arrears", "decimal(18, 2)"),
                 SelectAliasOrNull(InterestAsOfTaxMemo, "interest_as_of_tax_memo", "decimal(18, 2)"),
                 SelectAliasOrNull(InterestAdjustment, "interest_adjustment", "decimal(18, 2)"),
+                SelectAliasOrNull(FundingStatus, "funding_status", "varchar(100)"),
             };
 
             if (Audit.ReadUpdatedByColumn is not null)

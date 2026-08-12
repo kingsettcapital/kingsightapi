@@ -1477,7 +1477,8 @@ namespace kingsightapi.Services
                     p.other_cost,
                     p.exposure,
                     p.ltv,
-                    p.months_in_arrears
+                    p.months_in_arrears,
+                    p.aggregate_flag
                 from {_fnManagementDetailsLoanPortfolio}(
                     @as_of_date,
                     @default_date_from,
@@ -1530,7 +1531,8 @@ namespace kingsightapi.Services
                     TotalExposure = GetNullableDecimal(reader, "exposure") ?? 0m,
                     Ltv = ltv.HasValue ? Math.Round(ltv.Value, 2) : null,
                     MonthsInArrears = GetNullableInt32(reader, "months_in_arrears"),
-                    TimesNsfd = null
+                    TimesNsfd = null,
+                    AggregateFlag = GetNullableString(reader, "aggregate_flag")
                 });
             }
 
@@ -2944,18 +2946,25 @@ namespace kingsightapi.Services
                 .ToList();
 
         private static LoanPortfolioDetailTotalsDto BuildPortfolioTotals(
-            IReadOnlyList<LoanPortfolioDetailRowDto> rows) =>
-            new()
+            IReadOnlyList<LoanPortfolioDetailRowDto> rows)
+        {
+            // Grid shows all rows; TOTALS only include aggregate_flag = Y.
+            var totalRows = rows
+                .Where(r => string.Equals(r.AggregateFlag?.Trim(), "Y", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            return new()
             {
-                Principal = rows.Sum(r => r.Principal),
-                DefInterest = rows.Sum(r => r.DefInterest),
-                AccruedInt = rows.Sum(r => r.AccruedInt),
-                LateInt = rows.Sum(r => r.LateInt),
-                IntAdj = rows.Sum(r => r.IntAdj),
-                TaxArrears = rows.Sum(r => r.TaxArrears),
-                OtherCosts = rows.Sum(r => r.OtherCosts),
-                TotalExposure = rows.Sum(r => r.TotalExposure)
+                Principal = totalRows.Sum(r => r.Principal),
+                DefInterest = totalRows.Sum(r => r.DefInterest),
+                AccruedInt = totalRows.Sum(r => r.AccruedInt),
+                LateInt = totalRows.Sum(r => r.LateInt),
+                IntAdj = totalRows.Sum(r => r.IntAdj),
+                TaxArrears = totalRows.Sum(r => r.TaxArrears),
+                OtherCosts = totalRows.Sum(r => r.OtherCosts),
+                TotalExposure = totalRows.Sum(r => r.TotalExposure)
             };
+        }
 
         private static (IReadOnlyList<ChartSliceDto> ByInvestor, IReadOnlyList<ChartSliceDto> Composition, IReadOnlyList<ChartSliceDto> InvestorBreakdown)
             BuildExposureCharts(IReadOnlyList<LoanPortfolioDetailRowDto> portfolioRows)
@@ -3130,7 +3139,9 @@ namespace kingsightapi.Services
                 }
             }
 
-            // Source: {BronzeLakehouse}.external_files.cmhc_default (Dev: shortcut_lh_bronze1).
+            // Source: {BronzeLakehouse}.{schema}.cmhc_default
+            // Dev: shortcut_lh_bronze1.external_files.cmhc_default
+            // UAT: shortcut_lh_bronze.dbo.cmhc_default
             var colourColumn = await ResolveWatchlistColourColumnAsync(cancellationToken);
             var colourSelect = string.IsNullOrEmpty(colourColumn)
                 ? "cast(null as varchar(50)) as colour_input"

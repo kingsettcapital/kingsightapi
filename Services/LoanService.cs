@@ -247,6 +247,14 @@ namespace kingsightapi.Services
                         audit.UpdatedDtmColumn);
                 }
 
+                if (isAttributeUpdate && loan.FundingStatusKey.HasValue)
+                {
+                    rowsChanged += await ExecuteFundingStatusUpdateAsync(
+                        loan,
+                        connection,
+                        cancellationToken);
+                }
+
                 affectedRows += rowsChanged;
                 // Yardi alias assignment writes relationship only.
                 // Non-KS is handled above via external_serviced_loan.
@@ -372,6 +380,55 @@ namespace kingsightapi.Services
             command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
             command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
             audit.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<int> ExecuteFundingStatusUpdateAsync(
+            LoanUpdateRequestDto loan,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(_loanStatusKeyColumn))
+            {
+                _logger.LogWarning(
+                    "Funding status update skipped for {LoanCode}: dim_loan funding status column missing.",
+                    loan.LoanCode);
+                return 0;
+            }
+
+            var descriptionSet = string.IsNullOrWhiteSpace(_loanStatusDescriptionColumn)
+                ? string.Empty
+                : $"""
+                    ,
+                           l.[{_loanStatusDescriptionColumn}] = (
+                               select top 1 s.status_name
+                               from {_sql.DimStatus} s
+                               where s.status_key = @funding_status_key
+                           )
+                    """;
+
+            var sql = loan.LoanKey > 0
+                ? $"""
+                    update l
+                    set l.[{_loanStatusKeyColumn}] = @funding_status_key{descriptionSet}
+                    from {_sql.SharedDimLoan} l
+                    where l.loan_key = @loan_key
+                      and {_sql.DimLoanIsCurrent("l")}
+                    """
+                : $"""
+                    update l
+                    set l.[{_loanStatusKeyColumn}] = @funding_status_key{descriptionSet}
+                    from {_sql.SharedDimLoan} l
+                    where cast(l.loan_code as varchar(100)) collate database_default
+                          = cast(@loan_code as varchar(100)) collate database_default
+                      and {_sql.DimLoanIsCurrent("l")}
+                    """;
+
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@funding_status_key", loan.FundingStatusKey!.Value);
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -536,9 +593,29 @@ namespace kingsightapi.Services
                 return false;
             }
 
-            // Infer from payload: attribute screen always sends ranking and/or late-interest fields.
-            return loan.LoanRanking.HasValue || loan.IsLoanInterestApplicable.HasValue;
+            // Infer from payload: attribute screen always sends ranking, late-interest, and/or funding status.
+            return loan.LoanRanking.HasValue
+                || loan.IsLoanInterestApplicable.HasValue
+                || loan.FundingStatusKey.HasValue;
         }
+
+        private string BuildFundingStatusKeySelectExpression(string dimLoanAlias = "l") =>
+            string.IsNullOrWhiteSpace(_loanStatusKeyColumn)
+                ? "cast(null as bigint)"
+                : $"try_cast({dimLoanAlias}.[{_loanStatusKeyColumn}] as bigint)";
+
+        private string BuildFundingStatusNameSelectExpression(string dimLoanAlias = "l") =>
+            string.IsNullOrWhiteSpace(_loanStatusKeyColumn)
+                ? "cast('' as varchar(100))"
+                : string.IsNullOrWhiteSpace(_loanStatusDescriptionColumn)
+                    ? $"""
+                        isnull((
+                            select top 1 s.status_name
+                            from {_sql.DimStatus} s
+                            where s.status_key = try_cast({dimLoanAlias}.[{_loanStatusKeyColumn}] as bigint)
+                        ), '')
+                        """
+                    : $"isnull(cast({dimLoanAlias}.[{_loanStatusDescriptionColumn}] as varchar(100)), '')";
 
         private string BuildRankingSelectExpression() =>
             _rankingColumn is not null
@@ -609,6 +686,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
+                       funding_status_key = {BuildFundingStatusKeySelectExpression()},
+                       funding_status_name = {BuildFundingStatusNameSelectExpression()},
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
                        is_non_ks = cast(0 as bit)
@@ -657,6 +736,8 @@ namespace kingsightapi.Services
                            dummy_loan_link = '',
                            is_loan_interest_applicable = cast(null as bit),
                            late_interest_off_note = '',
+                           funding_status_key = cast(null as bigint),
+                           funding_status_name = '',
                            user_updated_by = '',
                            user_updated_date = cast(null as datetime2),
                            is_non_ks = cast(1 as bit)
@@ -705,6 +786,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
+                       funding_status_key = {BuildFundingStatusKeySelectExpression()},
+                       funding_status_name = {BuildFundingStatusNameSelectExpression()},
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
                        is_non_ks = cast(0 as bit)
@@ -747,6 +830,8 @@ namespace kingsightapi.Services
                        dummy_loan_link = {BuildDummyLoanLinkSelectExpression()},
                        is_loan_interest_applicable = {BuildLateInterestApplicableSelectExpression()},
                        late_interest_off_note = {BuildLateInterestOffNoteSelectExpression()},
+                       funding_status_key = {BuildFundingStatusKeySelectExpression()},
+                       funding_status_name = {BuildFundingStatusNameSelectExpression()},
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
                        is_non_ks = cast(0 as bit)
@@ -835,6 +920,13 @@ namespace kingsightapi.Services
                 DummyLoanLink = reader.GetStringOrEmpty("dummy_loan_link"),
                 IsLoanInterestApplicable = interestApplicable,
                 LateInterestOffNote = reader.GetStringOrEmpty("late_interest_off_note"),
+                FundingStatusKey = reader.TryGetOrdinal("funding_status_key", out var statusKeyOrd)
+                    && !reader.IsDBNull(statusKeyOrd)
+                        ? Convert.ToInt64(reader.GetValue(statusKeyOrd))
+                        : null,
+                FundingStatusName = reader.TryGetOrdinal("funding_status_name", out _)
+                    ? reader.GetStringOrEmpty("funding_status_name")
+                    : string.Empty,
                 UserUpdatedBy = reader.GetStringOrEmpty("user_updated_by"),
                 UserUpdatedDate = updatedDate,
                 IsNonKs = reader.TryGetOrdinal("is_non_ks", out var nonKsOrd)

@@ -44,6 +44,8 @@ namespace kingsightapi.Entities
         public decimal? TaxArrears { get; init; }
         public decimal? InterestAsOfTaxMemo { get; init; }
         public decimal? InterestAdjustment { get; init; }
+        /// <summary><c>subjective_input.external_serviced_loan.funding_status</c>.</summary>
+        public string? FundingStatus { get; init; }
         public string? UserUpdatedBy { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
         public string? CreatedBy { get; init; }
@@ -84,6 +86,8 @@ namespace kingsightapi.Entities
         public decimal? TaxArrears { get; init; }
         public decimal? InterestAsOfTaxMemo { get; init; }
         public decimal? InterestAdjustment { get; init; }
+        /// <summary>Saved to <c>external_serviced_loan.funding_status</c> (dim_status status_name).</summary>
+        public string? FundingStatus { get; init; }
         public string UserUpdatedBy { get; init; } = "system";
     }
 
