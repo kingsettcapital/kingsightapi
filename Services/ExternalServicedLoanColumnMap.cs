@@ -30,7 +30,7 @@ namespace kingsightapi.Services
         public string? NetAcres { get; init; }
         public string? SquareFeet { get; init; }
         public string? InterestRate { get; init; }
-        /// <summary>Maps to <c>current_ltv</c> / <c>ltv</c> on external_serviced_loan.</summary>
+        /// <summary>Maps to <c>external_serviced_loan.loan_to_value</c> (or legacy current_ltv / ltv).</summary>
         public string? CurrentLtv { get; init; }
         public string? PrincipalBalance { get; init; }
         public string? OutstandingInterest { get; init; }
@@ -94,10 +94,11 @@ namespace kingsightapi.Services
                     connectionString, tableName, ["square_feet", "sf"], cancellationToken),
                 InterestRate = await FindFirstAsync(
                     connectionString, tableName, ["interest_rate"], cancellationToken),
+                // Warehouse column added as loan_to_value (prefer over legacy names).
                 CurrentLtv = await FindFirstAsync(
                     connectionString,
                     tableName,
-                    ["current_ltv", "loan_to_value", "ltv", "current_loan_to_value"],
+                    ["loan_to_value", "current_ltv", "ltv", "current_loan_to_value"],
                     cancellationToken),
                 PrincipalBalance = await FindFirstAsync(
                     connectionString, tableName, ["principal_balance", "principal"], cancellationToken),

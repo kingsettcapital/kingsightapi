@@ -1314,7 +1314,9 @@ namespace kingsightapi.Services
 
             var portfolioTotals = BuildPortfolioTotals(portfolioRows);
             var totalExposure = portfolioTotals.TotalExposure;
-            var securityValue = topBar.SecurityValue ?? propertyStats.SecurityValue;
+            // Property Stats Security Value comes from fn_management_detail_property_stats only
+            // (do not use topbar principal_balance — that was incorrectly coalesced here).
+            var securityValue = propertyStats.SecurityValue;
             // Prefer LTV from filtered portfolio when investor filter narrows rows.
             var overallLtv = query.InvestorAliases is { Count: > 0 }
                 && !query.InvestorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase))
@@ -1541,7 +1543,6 @@ namespace kingsightapi.Services
         }
 
         private async Task<(
-            decimal? SecurityValue,
             decimal? AverageLtv,
             decimal InterestDisbursed,
             decimal InterestNotDisbursed,
@@ -1582,12 +1583,11 @@ namespace kingsightapi.Services
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             if (!await reader.ReadAsync(cancellationToken))
             {
-                return (null, null, 0m, 0m, 0m, null);
+                return (null, 0m, 0m, 0m, null);
             }
 
             var averageLtv = GetNullableDecimal(reader, "ltv");
             return (
-                GetNullableDecimal(reader, "principal_balance"),
                 averageLtv.HasValue ? Math.Round(averageLtv.Value, 2) : null,
                 GetNullableDecimal(reader, "interest_disbursed") ?? 0m,
                 GetNullableDecimal(reader, "interest_not_disbursed") ?? 0m,
