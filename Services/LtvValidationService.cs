@@ -26,8 +26,6 @@ namespace kingsightapi.Services
 
     public sealed class LtvValidationService : ILtvValidationService
     {
-        private const int ConfirmLoanKeyBatchSize = 200;
-
         private readonly string _loanAliasRelationship;
         private readonly string _loanAliasMaster;
         private readonly string _tblSharedDimLoan;
@@ -248,12 +246,6 @@ namespace kingsightapi.Services
             string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            var loanKeys = request.LoanKeys.Where(key => key > 0).Distinct().ToArray();
-            if (loanKeys.Length == 0)
-            {
-                throw new InvalidOperationException("At least one loan key is required.");
-            }
-
             var schema = await GetSchemaAsync(cancellationToken);
             if (schema.Optional.LtvColumn is null)
             {
@@ -261,8 +253,6 @@ namespace kingsightapi.Services
                     "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
                     + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql.");
             }
-
-            _logger.LogInformation("Confirming LTV review for {LoanKeyCount} loan key(s).", loanKeys.Length);
 
             if (schema.Optional.IsConfirmedColumn is null)
             {
@@ -272,78 +262,92 @@ namespace kingsightapi.Services
                     + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql and restart the API.");
             }
 
-            var auditUtc = DateTime.UtcNow;
-
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            var affectedRows = await ExecuteBatchConfirmAuditAsync(
-                connection,
-                loanKeys,
-                schema,
-                auditDisplayName,
-                auditUtc,
-                cancellationToken);
+            var loanCodes = await ResolveConfirmLoanCodesAsync(connection, request, cancellationToken);
+            if (loanCodes.Length == 0)
+            {
+                throw new InvalidOperationException("At least one loan code is required to confirm LTV.");
+            }
+
+            _logger.LogInformation(
+                "Confirming LTV review for {LoanCodeCount} loan code(s) (is_confirmed = 'Y').",
+                loanCodes.Length);
+
+            var auditUtc = DateTime.UtcNow;
+            var confirmSql = BuildConfirmByLoanCodeSql(schema);
+            var affectedRows = 0;
+
+            foreach (var loanCode in loanCodes)
+            {
+                await using var command = new SqlCommand(confirmSql, connection);
+                command.Parameters.AddWithValue("@loan_code", loanCode);
+                schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
+                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
 
             if (affectedRows == 0)
             {
-                _logger.LogWarning("No eligible LTV validation rows matched the confirm request.");
+                _logger.LogWarning("No loan_alias_relationship rows matched Confirm LTV (is_confirmed).");
                 return false;
             }
 
             await _notificationService.CreateLtvReviewedAsync(auditDisplayName, cancellationToken);
             _logger.LogInformation(
-                "Confirmed LTV review for {AffectedRows} loan row(s) (is_confirmed={HasFlag}).",
-                affectedRows,
-                schema.Optional.IsConfirmedColumn ?? "(none)");
+                "Confirmed LTV review for {AffectedRows} loan row(s) via is_confirmed = 'Y'.",
+                affectedRows);
             return true;
         }
 
-        private async Task<int> ExecuteBatchConfirmAuditAsync(
+        private async Task<string[]> ResolveConfirmLoanCodesAsync(
             SqlConnection connection,
-            long[] loanKeys,
-            LtvValidationSchema schema,
-            string auditDisplayName,
-            DateTime auditUtc,
+            LtvValidationConfirmRequest request,
             CancellationToken cancellationToken)
         {
-            var totalAffected = 0;
-            for (var offset = 0; offset < loanKeys.Length; offset += ConfirmLoanKeyBatchSize)
+            var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var code in request.LoanCodes)
             {
-                var batch = loanKeys.Skip(offset).Take(ConfirmLoanKeyBatchSize).ToArray();
-                var inClause = string.Join(", ", batch.Select((_, index) => $"@loan_key_{index}"));
-                var sql = BuildBatchConfirmAuditSql(schema, inClause);
-
-                await using var command = new SqlCommand(sql, connection);
-                for (var index = 0; index < batch.Length; index++)
+                var trimmed = code?.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
                 {
-                    command.Parameters.AddWithValue($"@loan_key_{index}", batch[index]);
+                    codes.Add(trimmed);
                 }
-
-                schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
-                totalAffected += await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            return totalAffected;
+            foreach (var loanKey in request.LoanKeys.Where(key => key > 0).Distinct())
+            {
+                var sql = $"select loan_code from {_tblSharedDimLoan} where loan_key = @loan_key";
+                await using var command = new SqlCommand(sql, connection);
+                command.Parameters.AddWithValue("@loan_key", loanKey);
+                var result = await command.ExecuteScalarAsync(cancellationToken);
+                var loanCode = result is null or DBNull ? null : Convert.ToString(result)?.Trim();
+                if (!string.IsNullOrWhiteSpace(loanCode))
+                {
+                    codes.Add(loanCode);
+                }
+            }
+
+            return codes.ToArray();
         }
 
-        private string BuildBatchConfirmAuditSql(LtvValidationSchema schema, string loanKeyInClause)
+        private string BuildConfirmByLoanCodeSql(LtvValidationSchema schema)
         {
             var setClause = BuildConfirmSetClause(schema);
             if (string.IsNullOrWhiteSpace(setClause))
             {
-                return string.Empty;
+                throw new InvalidOperationException(
+                    "Confirm LTV has nothing to update (is_confirmed / audit columns missing).");
             }
 
-            // Resolve relationship row(s) via dim_loan.loan_key → loan_code (same as Save).
-            // Sets is_confirmed = 'Y' when the column exists.
+            // Matches warehouse expectation:
+            // update subjective_input.loan_alias_relationship set is_confirmed = 'Y' where loan_code = @loan_code
             return $"""
                 update a
                 set {setClause}
                 from {_loanAliasRelationship} a
-                inner join {_tblSharedDimLoan} c
-                    on {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
-                where c.loan_key in ({loanKeyInClause})
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
                 """;
         }
 
