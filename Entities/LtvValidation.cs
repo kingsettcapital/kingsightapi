@@ -52,6 +52,8 @@ namespace kingsightapi.Entities
     public sealed class LtvValidationConfirmRequest
     {
         public List<long> LoanKeys { get; init; } = [];
+        /// <summary>Preferred: confirm by loan_code (sets is_confirmed = 'Y').</summary>
+        public List<string> LoanCodes { get; init; } = [];
         public string UserUpdatedBy { get; init; } = "system";
     }
 }

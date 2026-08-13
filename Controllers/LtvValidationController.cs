@@ -108,9 +108,10 @@ namespace kingsightapi.Controllers
             [FromBody] LtvValidationConfirmRequest? request,
             CancellationToken cancellationToken)
         {
-            if (request is null || request.LoanKeys.Count == 0)
+            if (request is null
+                || (request.LoanKeys.Count == 0 && request.LoanCodes.Count == 0))
             {
-                return BadRequest("Request body must include at least one loan key.");
+                return BadRequest("Request body must include at least one loan key or loan code.");
             }
 
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
