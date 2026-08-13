@@ -33,6 +33,11 @@ namespace kingsightapi.Services
                 return "Interest rate must be between 0 and 100.";
             }
 
+            if (item.CurrentLtv is < 0 or > 999)
+            {
+                return "Current LTV must be between 0 and 999.";
+            }
+
             if (item.LoanId is { Length: > 100 }
                 || item.LoanCode is { Length: > 100 }
                 || item.ExtLoanCode is { Length: > 100 })

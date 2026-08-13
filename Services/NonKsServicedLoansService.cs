@@ -34,6 +34,8 @@ namespace kingsightapi.Services
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
         private ExternalServicedLoanColumnMap? _columns;
+        /// <summary>Allows one re-probe after startup if sponsor/loan_to_value were added mid-process.</summary>
+        private int _schemaProbeCount;
 
         public NonKsServicedLoansService(
             IConfiguration configuration,
@@ -248,7 +250,7 @@ namespace kingsightapi.Services
 
         private async Task<ExternalServicedLoanColumnMap> GetColumnsAsync(CancellationToken cancellationToken)
         {
-            if (_columns is not null)
+            if (_columns is not null && !ShouldReprobeOptionalColumns(_columns))
             {
                 return _columns;
             }
@@ -256,7 +258,7 @@ namespace kingsightapi.Services
             await _schemaLock.WaitAsync(cancellationToken);
             try
             {
-                if (_columns is not null)
+                if (_columns is not null && !ShouldReprobeOptionalColumns(_columns))
                 {
                     return _columns;
                 }
@@ -265,6 +267,13 @@ namespace kingsightapi.Services
                     _connectionString,
                     _tblExternalServicedLoan,
                     cancellationToken);
+                _schemaProbeCount++;
+                _logger.LogInformation(
+                    "Non-KS external_serviced_loan columns: sponsor={Sponsor}, loanToValue={CurrentLtv}, fundingStatus={FundingStatus} (probe #{ProbeCount}).",
+                    _columns.Sponsor ?? "(none)",
+                    _columns.CurrentLtv ?? "(none)",
+                    _columns.FundingStatus ?? "(none)",
+                    _schemaProbeCount);
                 return _columns;
             }
             catch (SqlException ex) when (ex.Number is 208 or 3701)
@@ -277,6 +286,14 @@ namespace kingsightapi.Services
                 _schemaLock.Release();
             }
         }
+
+        /// <summary>
+        /// Re-probe at most once if optional columns were missing on the first probe
+        /// (e.g. ALTER applied after API start). Never loops on every request.
+        /// </summary>
+        private bool ShouldReprobeOptionalColumns(ExternalServicedLoanColumnMap columns) =>
+            _schemaProbeCount < 2
+            && (columns.Sponsor is null || columns.CurrentLtv is null);
 
         private async Task<SqlConnection> OpenConnectionAsync(CancellationToken cancellationToken)
         {
