@@ -29,6 +29,7 @@ namespace kingsightapi.Services
 
         private readonly string _connectionString;
         private readonly string _tblExternalServicedLoan;
+        private readonly string _vwLoanAttributes;
         private readonly INonKsInvestorAliasBridge _investorAliasBridge;
         private readonly ILogger<NonKsServicedLoansService> _logger;
         private readonly SemaphoreSlim _schemaLock = new(1, 1);
@@ -45,16 +46,19 @@ namespace kingsightapi.Services
             _logger = logger;
             _investorAliasBridge = investorAliasBridge;
             _tblExternalServicedLoan = tables.SubjectiveInput("external_serviced_loan");
+            _vwLoanAttributes = tables.Mortgage("vw_loan_attributes");
         }
 
         public async Task<NonKsServicedLoanLookupsDto> GetLookupsAsync(
             CancellationToken cancellationToken = default)
         {
             await using var connection = await OpenConnectionAsync(cancellationToken);
+            var columns = await GetColumnsAsync(cancellationToken);
 
             return new NonKsServicedLoanLookupsDto
             {
-                NextExtLoanCode = await GetNextExtLoanCodeAsync(connection, cancellationToken)
+                NextExtLoanCode = await GetNextExtLoanCodeAsync(connection, cancellationToken),
+                Sponsors = await LoadSponsorOptionsAsync(connection, columns, cancellationToken)
             };
         }
 
@@ -281,6 +285,73 @@ namespace kingsightapi.Services
             return connection;
         }
 
+        /// <summary>
+        /// Unique sponsor names for Non-KS dropdown: Yardi vw_loan_attributes + Non-KS rows.
+        /// Add-new on the SPA is free-text until saved on the loan (no separate sponsor master).
+        /// </summary>
+        private async Task<IReadOnlyList<string>> LoadSponsorOptionsAsync(
+            SqlConnection connection,
+            ExternalServicedLoanColumnMap columns,
+            CancellationToken cancellationToken)
+        {
+            var sponsors = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                await using var yardiCommand = new SqlCommand(
+                    $"""
+                    select distinct sponsor = ltrim(rtrim(sponsor))
+                    from {_vwLoanAttributes}
+                    where sponsor is not null
+                      and ltrim(rtrim(sponsor)) <> ''
+                    """,
+                    connection);
+                await using var yardiReader = await yardiCommand.ExecuteReaderAsync(cancellationToken);
+                while (await yardiReader.ReadAsync(cancellationToken))
+                {
+                    var sponsor = yardiReader.IsDBNull(0) ? null : Convert.ToString(yardiReader.GetValue(0));
+                    if (!string.IsNullOrWhiteSpace(sponsor))
+                    {
+                        sponsors.Add(sponsor.Trim());
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Non-KS sponsor lookup skipped vw_loan_attributes.");
+            }
+
+            if (columns.Sponsor is not null)
+            {
+                try
+                {
+                    await using var nonKsCommand = new SqlCommand(
+                        $"""
+                        select distinct sponsor = ltrim(rtrim([{columns.Sponsor}]))
+                        from {_tblExternalServicedLoan}
+                        where [{columns.Sponsor}] is not null
+                          and ltrim(rtrim([{columns.Sponsor}])) <> ''
+                        """,
+                        connection);
+                    await using var nonKsReader = await nonKsCommand.ExecuteReaderAsync(cancellationToken);
+                    while (await nonKsReader.ReadAsync(cancellationToken))
+                    {
+                        var sponsor = nonKsReader.IsDBNull(0) ? null : Convert.ToString(nonKsReader.GetValue(0));
+                        if (!string.IsNullOrWhiteSpace(sponsor))
+                        {
+                            sponsors.Add(sponsor.Trim());
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Non-KS sponsor lookup skipped external_serviced_loan.sponsor.");
+                }
+            }
+
+            return sponsors.ToList();
+        }
+
         private async Task<string> GetNextExtLoanCodeAsync(
             SqlConnection connection,
             CancellationToken cancellationToken)
@@ -425,6 +496,13 @@ namespace kingsightapi.Services
                     ToDbValue(NormalizeOptional(loan.InvestorCode)));
             }
 
+            if (columns.Sponsor is not null)
+            {
+                command.Parameters.AddWithValue(
+                    "@sponsor",
+                    ToDbValue(NormalizeOptional(loan.Sponsor)));
+            }
+
             AddOptionalDate(command, columns.DefaultDate, "@default_date", loan.DateOfDefault);
             AddOptionalDate(command, columns.MaturityDate, "@maturity_date", loan.MaturityDate);
             AddOptionalDate(command, columns.InterestOffDate, "@interest_off_date", loan.InterestOffDate);
@@ -434,6 +512,7 @@ namespace kingsightapi.Services
             AddOptionalDecimal(command, columns.NetAcres, "@net_acres", loan.NetAcres);
             AddOptionalDecimal(command, columns.SquareFeet, "@square_feet", loan.SquareFeet);
             AddOptionalDecimal(command, columns.InterestRate, "@interest_rate", loan.InterestRate);
+            AddOptionalDecimal(command, columns.CurrentLtv, "@current_ltv", loan.CurrentLtv);
             AddOptionalDecimal(command, columns.PrincipalBalance, "@principal_balance", loan.PrincipalBalance);
             AddOptionalDecimal(command, columns.OutstandingInterest, "@outstanding_interest", loan.OutstandingInterest);
             AddOptionalDecimal(command, columns.AccruedInterest, "@accrued_interest", loan.AccruedInterest);
@@ -475,6 +554,7 @@ namespace kingsightapi.Services
                 InvestorAliasName = investorName,
                 Investor = investorName,
                 InvestorCode = investorCode,
+                Sponsor = GetNullableString(reader, "sponsor"),
                 DateOfDefault = GetNullableDate(reader, "default_date"),
                 MaturityDate = GetNullableDate(reader, "maturity_date"),
                 InterestOffDate = GetNullableDate(reader, "interest_off_date"),
@@ -484,6 +564,7 @@ namespace kingsightapi.Services
                 NetAcres = GetNullableDecimal(reader, "net_acres"),
                 SquareFeet = GetNullableDecimal(reader, "square_feet"),
                 InterestRate = GetNullableDecimal(reader, "interest_rate"),
+                CurrentLtv = GetNullableDecimal(reader, "current_ltv"),
                 PrincipalBalance = GetNullableDecimal(reader, "principal_balance"),
                 OutstandingInterest = GetNullableDecimal(reader, "outstanding_interest"),
                 AccruedInterest = GetNullableDecimal(reader, "accrued_interest"),

@@ -264,21 +264,26 @@ namespace kingsightapi.Services
 
             _logger.LogInformation("Confirming LTV review for {LoanKeyCount} loan key(s).", loanKeys.Length);
 
+            if (schema.Optional.IsConfirmedColumn is null)
+            {
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no is_confirmed column. "
+                    + "Confirm LTV must set is_confirmed = 'Y'. "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql and restart the API.");
+            }
+
             var auditUtc = DateTime.UtcNow;
-            var confirmUpdateSql = BuildConfirmAuditSql(schema);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            var affectedRows = string.IsNullOrWhiteSpace(confirmUpdateSql)
-                ? await CountEligibleLoanKeysAsync(connection, loanKeys, cancellationToken)
-                : await ExecuteBatchConfirmAuditAsync(
-                    connection,
-                    loanKeys,
-                    schema,
-                    auditDisplayName,
-                    auditUtc,
-                    cancellationToken);
+            var affectedRows = await ExecuteBatchConfirmAuditAsync(
+                connection,
+                loanKeys,
+                schema,
+                auditDisplayName,
+                auditUtc,
+                cancellationToken);
 
             if (affectedRows == 0)
             {
@@ -288,8 +293,9 @@ namespace kingsightapi.Services
 
             await _notificationService.CreateLtvReviewedAsync(auditDisplayName, cancellationToken);
             _logger.LogInformation(
-                "Confirmed LTV review for {AffectedRows} loan row(s).",
-                affectedRows);
+                "Confirmed LTV review for {AffectedRows} loan row(s) (is_confirmed={HasFlag}).",
+                affectedRows,
+                schema.Optional.IsConfirmedColumn ?? "(none)");
             return true;
         }
 
@@ -321,53 +327,44 @@ namespace kingsightapi.Services
             return totalAffected;
         }
 
-        private async Task<int> CountEligibleLoanKeysAsync(
-            SqlConnection connection,
-            long[] loanKeys,
-            CancellationToken cancellationToken)
-        {
-            var totalEligible = 0;
-            for (var offset = 0; offset < loanKeys.Length; offset += ConfirmLoanKeyBatchSize)
-            {
-                var batch = loanKeys.Skip(offset).Take(ConfirmLoanKeyBatchSize).ToArray();
-                var inClause = string.Join(", ", batch.Select((_, index) => $"@loan_key_{index}"));
-                var sql = $"""
-                    select count(distinct c.loan_key)
-                    from {_tblSharedDimLoan} c
-                    inner join {_loanAliasRelationship} a
-                        on {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
-                    where c.loan_key in ({inClause})
-                    """;
-
-                await using var command = new SqlCommand(sql, connection);
-                for (var index = 0; index < batch.Length; index++)
-                {
-                    command.Parameters.AddWithValue($"@loan_key_{index}", batch[index]);
-                }
-
-                var result = await command.ExecuteScalarAsync(cancellationToken);
-                totalEligible += Convert.ToInt32(result ?? 0);
-            }
-
-            return totalEligible;
-        }
-
         private string BuildBatchConfirmAuditSql(LtvValidationSchema schema, string loanKeyInClause)
         {
-            var auditSet = schema.Audit.BuildUpdateSetClause();
-            if (string.IsNullOrWhiteSpace(auditSet))
+            var setClause = BuildConfirmSetClause(schema);
+            if (string.IsNullOrWhiteSpace(setClause))
             {
                 return string.Empty;
             }
 
+            // Resolve relationship row(s) via dim_loan.loan_key → loan_code (same as Save).
+            // Sets is_confirmed = 'Y' when the column exists.
             return $"""
                 update a
-                set {auditSet.TrimStart(',', ' ')}
+                set {setClause}
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
                 where c.loan_key in ({loanKeyInClause})
                 """;
+        }
+
+        private string BuildConfirmSetClause(LtvValidationSchema schema)
+        {
+            var confirmedSet = schema.Optional.BuildConfirmUpdateSetClause("a");
+            var auditSet = schema.Audit.BuildUpdateSetClause(); // leading ", col = @param" when present
+
+            if (string.IsNullOrWhiteSpace(confirmedSet) && string.IsNullOrWhiteSpace(auditSet))
+            {
+                return string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(confirmedSet))
+            {
+                return auditSet.TrimStart(',', ' ');
+            }
+
+            return string.IsNullOrWhiteSpace(auditSet)
+                ? confirmedSet
+                : confirmedSet + auditSet;
         }
 
         private async Task<LtvValidationSchema> GetSchemaAsync(CancellationToken cancellationToken)
@@ -405,18 +402,25 @@ namespace kingsightapi.Services
                     _connectionString,
                     cancellationToken);
                 _logger.LogInformation(
-                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, auditBy={AuditBy}.",
+                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, isConfirmed={Confirmed}, auditBy={AuditBy}.",
                     optional.LtvColumn ?? "(none)",
                     optional.PriorLtvColumn ?? "(none)",
                     optional.UpdateReason ?? "(none)",
                     optional.AiComments ?? "(none)",
                     qrSlideLink ?? "(none)",
+                    optional.IsConfirmedColumn ?? "(none)",
                     audit.UpdatedByColumn ?? "(none)");
                 if (optional.LtvColumn is null)
                 {
                     _logger.LogWarning(
                         "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
                         + "LTV screen will load with null LTV values; run Scripts/Alter_loan_alias_relationship_ltv_validation.sql for saves and confirm.");
+                }
+                if (optional.IsConfirmedColumn is null)
+                {
+                    _logger.LogWarning(
+                        "loan_alias_relationship has no is_confirmed column. "
+                        + "Confirm LTV will not set the report confirmed flag until the column exists.");
                 }
 
                 return _schema;
@@ -536,24 +540,6 @@ namespace kingsightapi.Services
             return $"""
                 update a
                 set {ltvSet}{optionalSet}{auditSet}
-                from {_loanAliasRelationship} a
-                inner join {_tblSharedDimLoan} c
-                    on c.loan_key = @loan_key
-                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
-                """;
-        }
-
-        private string BuildConfirmAuditSql(LtvValidationSchema schema)
-        {
-            var auditSet = schema.Audit.BuildUpdateSetClause();
-            if (string.IsNullOrWhiteSpace(auditSet))
-            {
-                return string.Empty;
-            }
-
-            return $"""
-                update a
-                set {auditSet.TrimStart(',', ' ')}
                 from {_loanAliasRelationship} a
                 inner join {_tblSharedDimLoan} c
                     on c.loan_key = @loan_key

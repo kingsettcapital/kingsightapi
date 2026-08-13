@@ -45,3 +45,11 @@ BEGIN
     ADD [ai_confidence_score] DECIMAL(18, 4) NULL;
 END
 GO
+
+-- Confirm LTV flag consumed by reporting (Confirm button sets 'Y').
+IF COL_LENGTH('subjective_input.loan_alias_relationship', 'is_confirmed') IS NULL
+BEGIN
+    ALTER TABLE [subjective_input].[loan_alias_relationship]
+    ADD [is_confirmed] VARCHAR(1) NULL;
+END
+GO
