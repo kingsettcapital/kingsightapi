@@ -6,6 +6,8 @@ namespace kingsightapi.Entities
     public sealed class NonKsServicedLoanLookupsDto
     {
         public string NextExtLoanCode { get; init; } = "NKSLn-1";
+        /// <summary>Unique sponsors from Yardi view + existing Non-KS rows.</summary>
+        public IReadOnlyList<string> Sponsors { get; init; } = [];
     }
 
     public sealed class NonKsServicedLoanRowDto
@@ -25,6 +27,7 @@ namespace kingsightapi.Entities
         public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
         public string? InvestorCode { get; init; }
+        public string? Sponsor { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
         public DateTime? InterestOffDate { get; init; }
@@ -34,6 +37,7 @@ namespace kingsightapi.Entities
         public decimal? NetAcres { get; init; }
         public decimal? SquareFeet { get; init; }
         public decimal? InterestRate { get; init; }
+        public decimal? CurrentLtv { get; init; }
         public decimal? PrincipalBalance { get; init; }
         public decimal? OutstandingInterest { get; init; }
         public decimal? AccruedInterest { get; init; }
@@ -67,6 +71,7 @@ namespace kingsightapi.Entities
         public string? InvestorAliasName { get; init; }
         public string? Investor { get; init; }
         public string? InvestorCode { get; init; }
+        public string? Sponsor { get; init; }
         public DateTime? DateOfDefault { get; init; }
         public DateTime? MaturityDate { get; init; }
         public DateTime? InterestOffDate { get; init; }
@@ -76,6 +81,7 @@ namespace kingsightapi.Entities
         public decimal? NetAcres { get; init; }
         public decimal? SquareFeet { get; init; }
         public decimal? InterestRate { get; init; }
+        public decimal? CurrentLtv { get; init; }
         public decimal? PrincipalBalance { get; init; }
         public decimal? OutstandingInterest { get; init; }
         public decimal? AccruedInterest { get; init; }

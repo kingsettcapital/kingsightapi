@@ -14,6 +14,8 @@ namespace kingsightapi.Services
         public string? UpdateComment { get; init; }
         public string? AiComments { get; init; }
         public string? AiConfidenceScore { get; init; }
+        /// <summary>Confirm LTV flag on relationship (<c>is_confirmed = 'Y'</c>).</summary>
+        public string? IsConfirmedColumn { get; init; }
 
         public static async Task<LtvValidationOptionalColumns> ProbeAsync(
             string connectionString,
@@ -62,7 +64,26 @@ namespace kingsightapi.Services
                     "ai_confidence_score",
                     "confidence_score",
                     "ai_confidence"),
+                IsConfirmedColumn = FindColumn(
+                    columns,
+                    "is_confirmed",
+                    "ltv_is_confirmed",
+                    "is_ltv_confirmed"),
             };
+        }
+
+        public string BuildConfirmUpdateSetClause(string relationshipAlias = "a")
+        {
+            var sets = new List<string>();
+            if (IsConfirmedColumn is not null)
+            {
+                // Warehouse flag used by reports: is_confirmed = 'Y'.
+                sets.Add($"{relationshipAlias}.{Bracket(IsConfirmedColumn)} = 'Y'");
+            }
+
+            return sets.Count == 0
+                ? string.Empty
+                : string.Join(",\n                    ", sets);
         }
 
         public string BuildUpdateSetClause(string relationshipAlias = "a")
@@ -159,6 +180,7 @@ namespace kingsightapi.Services
                          "user_update_comments", "user_update_comment", "update_comment", "ltv_update_comment",
                          "ai_comments", "ai_commentary",
                          "ai_confidence_score", "confidence_score", "ai_confidence",
+                         "is_confirmed", "ltv_is_confirmed", "is_ltv_confirmed",
                      })
             {
                 var found = await DimLoanColumnProbe.FindFirstAsync(

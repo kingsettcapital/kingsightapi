@@ -19,6 +19,8 @@ namespace kingsightapi.Services
         public string? Description { get; init; }
         public string? InvestorAliasName { get; init; }
         public string? InvestorCode { get; init; }
+        /// <summary>Maps to <c>external_serviced_loan.sponsor</c> (free-text; list from Yardi + Non-KS).</summary>
+        public string? Sponsor { get; init; }
         public string? DefaultDate { get; init; }
         public string? MaturityDate { get; init; }
         public string? InterestOffDate { get; init; }
@@ -28,6 +30,8 @@ namespace kingsightapi.Services
         public string? NetAcres { get; init; }
         public string? SquareFeet { get; init; }
         public string? InterestRate { get; init; }
+        /// <summary>Maps to <c>current_ltv</c> / <c>ltv</c> on external_serviced_loan.</summary>
+        public string? CurrentLtv { get; init; }
         public string? PrincipalBalance { get; init; }
         public string? OutstandingInterest { get; init; }
         public string? AccruedInterest { get; init; }
@@ -70,6 +74,8 @@ namespace kingsightapi.Services
                     connectionString, tableName, ["investor_alias_name", "investor"], cancellationToken),
                 InvestorCode = await FindFirstAsync(
                     connectionString, tableName, ["investor_code"], cancellationToken),
+                Sponsor = await FindFirstAsync(
+                    connectionString, tableName, ["sponsor", "sponsor_name", "borrower_name"], cancellationToken),
                 DefaultDate = await FindFirstAsync(
                     connectionString, tableName, ["default_date", "date_of_default"], cancellationToken),
                 MaturityDate = await FindFirstAsync(
@@ -88,6 +94,11 @@ namespace kingsightapi.Services
                     connectionString, tableName, ["square_feet", "sf"], cancellationToken),
                 InterestRate = await FindFirstAsync(
                     connectionString, tableName, ["interest_rate"], cancellationToken),
+                CurrentLtv = await FindFirstAsync(
+                    connectionString,
+                    tableName,
+                    ["current_ltv", "loan_to_value", "ltv", "current_loan_to_value"],
+                    cancellationToken),
                 PrincipalBalance = await FindFirstAsync(
                     connectionString, tableName, ["principal_balance", "principal"], cancellationToken),
                 OutstandingInterest = await FindFirstAsync(
@@ -157,6 +168,7 @@ namespace kingsightapi.Services
             AddWriteColumn(columns, values, Description, "@description");
                 AddWriteColumn(columns, values, InvestorAliasName, "@investor_alias_name");
             AddWriteColumn(columns, values, InvestorCode, "@investor_code");
+            AddWriteColumn(columns, values, Sponsor, "@sponsor");
             AddWriteColumn(columns, values, DefaultDate, "@default_date");
             AddWriteColumn(columns, values, MaturityDate, "@maturity_date");
             AddWriteColumn(columns, values, InterestOffDate, "@interest_off_date");
@@ -166,6 +178,7 @@ namespace kingsightapi.Services
             AddWriteColumn(columns, values, NetAcres, "@net_acres");
             AddWriteColumn(columns, values, SquareFeet, "@square_feet");
             AddWriteColumn(columns, values, InterestRate, "@interest_rate");
+            AddWriteColumn(columns, values, CurrentLtv, "@current_ltv");
             AddWriteColumn(columns, values, PrincipalBalance, "@principal_balance");
             AddWriteColumn(columns, values, OutstandingInterest, "@outstanding_interest");
             AddWriteColumn(columns, values, AccruedInterest, "@accrued_interest");
@@ -199,6 +212,7 @@ namespace kingsightapi.Services
             AddUpdateSet(sets, Description, "@description");
             AddUpdateSet(sets, InvestorAliasName, "@investor_alias_name");
             AddUpdateSet(sets, InvestorCode, "@investor_code");
+            AddUpdateSet(sets, Sponsor, "@sponsor");
             AddUpdateSet(sets, DefaultDate, "@default_date");
             AddUpdateSet(sets, MaturityDate, "@maturity_date");
             AddUpdateSet(sets, InterestOffDate, "@interest_off_date");
@@ -208,6 +222,7 @@ namespace kingsightapi.Services
             AddUpdateSet(sets, NetAcres, "@net_acres");
             AddUpdateSet(sets, SquareFeet, "@square_feet");
             AddUpdateSet(sets, InterestRate, "@interest_rate");
+            AddUpdateSet(sets, CurrentLtv, "@current_ltv");
             AddUpdateSet(sets, PrincipalBalance, "@principal_balance");
             AddUpdateSet(sets, OutstandingInterest, "@outstanding_interest");
             AddUpdateSet(sets, AccruedInterest, "@accrued_interest");
@@ -263,6 +278,7 @@ namespace kingsightapi.Services
                 SelectAliasOrNull(Description, "description", "varchar(500)"),
                 SelectAliasOrNull(InvestorAliasName, "investor_alias_name", "varchar(200)"),
                 SelectAliasOrNull(InvestorCode, "investor_code", "varchar(100)"),
+                SelectAliasOrNull(Sponsor, "sponsor", "varchar(200)"),
                 SelectAliasOrNull(DefaultDate, "default_date", "date"),
                 SelectAliasOrNull(MaturityDate, "maturity_date", "date"),
                 SelectAliasOrNull(InterestOffDate, "interest_off_date", "date"),
@@ -272,6 +288,7 @@ namespace kingsightapi.Services
                 SelectAliasOrNull(NetAcres, "net_acres", "decimal(18, 4)"),
                 SelectAliasOrNull(SquareFeet, "square_feet", "decimal(18, 2)"),
                 SelectAliasOrNull(InterestRate, "interest_rate", "decimal(9, 4)"),
+                SelectAliasOrNull(CurrentLtv, "current_ltv", "decimal(18, 4)"),
                 SelectAliasOrNull(PrincipalBalance, "principal_balance", "decimal(18, 2)"),
                 SelectAliasOrNull(OutstandingInterest, "outstanding_interest", "decimal(18, 2)"),
                 SelectAliasOrNull(AccruedInterest, "accrued_interest", "decimal(18, 2)"),
