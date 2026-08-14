@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Data;
+using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
 
@@ -222,7 +224,10 @@ namespace kingsightapi.Services
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
                 FilterInvestorSummary(investorSlices, query),
-                exposureBreakdown,
+                PrependPrincipalSlice(
+                    exposureBreakdown,
+                    aliasRows.Sum(row => row.Principal),
+                    aliasRows.Sum(row => row.TotalExposure)),
                 exposureAnalysisRows,
                 await riskDistributionTask,
                 await top5Task,
@@ -534,6 +539,7 @@ namespace kingsightapi.Services
                         ? Math.Round(slice.Value / sponsorTotal * 100m, 1)
                         : slice.SharePercent
                 })
+                .OrderByDescending(slice => slice.Value)
                 .ToList();
 
             var capitalStackTotal =
@@ -852,7 +858,7 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) s
-                order by s.average_ltv desc
+                order by s.exposure desc
                 """;
 
             await using var connection = new SqlConnection(_connectionString);
@@ -1329,6 +1335,10 @@ namespace kingsightapi.Services
             var unitsLabel = string.IsNullOrWhiteSpace(propertyStats.PropertySize)
                 ? null
                 : propertyStats.PropertySize.Trim();
+            var unitCount = TryParseUnitCount(unitsLabel);
+            var exposurePerUnit = unitCount is > 0
+                ? Math.Round(totalExposure / unitCount.Value, 2)
+                : propertyStats.ExposurePerUnit;
 
             decimal? percentInterestPaid = null;
             var totalInterestDue = interestOverLife.TotalInterestDue;
@@ -1376,7 +1386,7 @@ namespace kingsightapi.Services
                     SecurityValue = securityValue,
                     UnitsSize = unitsLabel,
                     ValuePerUnit = propertyStats.ValuePerUnit,
-                    ExposurePerUnit = propertyStats.ExposurePerUnit,
+                    ExposurePerUnit = exposurePerUnit,
                     RiskStatus = MapDashboardRiskBand(overallLtv)
                 },
                 InterestSummary = new LoanDetailReportInterestSummaryDto
@@ -1898,6 +1908,7 @@ namespace kingsightapi.Services
             var sql = $"""
                 select
                     c.exposure,
+                    c.principal_balance,
                     c.outstanding_interest,
                     c.accrued,
                     c.late_interest,
@@ -1933,6 +1944,7 @@ namespace kingsightapi.Services
             var interestAdjustment = GetNullableDecimal(reader, "interest_adjustment") ?? 0m;
             var components = new (string Label, decimal Value)[]
             {
+                ("Principal", GetNullableDecimal(reader, "principal_balance") ?? 0m),
                 ("O/S Int.", outstandingInterest + interestAdjustment),
                 ("Accrued Int.", GetNullableDecimal(reader, "accrued") ?? 0m),
                 ("Late Int.", GetNullableDecimal(reader, "late_interest") ?? 0m),
@@ -1940,19 +1952,81 @@ namespace kingsightapi.Services
                 ("Other Costs", GetNullableDecimal(reader, "other_cost") ?? 0m)
             };
 
-            var positive = components.Where(component => component.Value > 0m).ToList();
-            var denominator = positive.Sum(component => component.Value);
+            var totalExposure = GetNullableDecimal(reader, "exposure") ?? 0m;
+            var included = components.Where(component => component.Value != 0m).ToList();
+            var componentSum = included.Sum(component => component.Value);
+            var denominator = totalExposure != 0m ? totalExposure : componentSum;
 
-            return positive
+            return included
                 .Select(component => new ChartSliceDto
                 {
                     Label = component.Label,
                     Value = component.Value,
-                    SharePercent = denominator > 0
+                    SharePercent = denominator != 0m
                         ? Math.Round(component.Value / denominator * 100m, 1)
                         : null
                 })
                 .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> PrependPrincipalSlice(
+            IReadOnlyList<ChartSliceDto> slices,
+            decimal principal,
+            decimal totalExposure)
+        {
+            var components = slices
+                .Where(slice => !string.Equals(slice.Label, "Principal", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (principal != 0m)
+            {
+                components.Insert(0, new ChartSliceDto
+                {
+                    Label = "Principal",
+                    Value = principal
+                });
+            }
+
+            var denominator = totalExposure > 0
+                ? totalExposure
+                : components.Sum(slice => slice.Value);
+
+            return components
+                .Select(slice => new ChartSliceDto
+                {
+                    Label = slice.Label,
+                    Value = slice.Value,
+                    SharePercent = denominator > 0
+                        ? Math.Round(slice.Value / denominator * 100m, 1)
+                        : null
+                })
+                .ToList();
+        }
+
+        private static decimal? TryParseUnitCount(string? propertySize)
+        {
+            if (string.IsNullOrWhiteSpace(propertySize))
+            {
+                return null;
+            }
+
+            var match = Regex.Match(propertySize, @"[\d,]+(?:\.\d+)?");
+            if (!match.Success)
+            {
+                return null;
+            }
+
+            if (!decimal.TryParse(
+                    match.Value.Replace(",", "", StringComparison.Ordinal),
+                    NumberStyles.Number,
+                    CultureInfo.InvariantCulture,
+                    out var units)
+                || units <= 0)
+            {
+                return null;
+            }
+
+            return units;
         }
 
         private static string MapDashboardRiskBand(decimal? ltv)
@@ -2646,6 +2720,7 @@ namespace kingsightapi.Services
 
             var components = new (string Label, decimal Value)[]
             {
+                ("Principal", principal),
                 ("Outstanding Interest", osInt),
                 ("Accrued", accrued),
                 ("Late Interest", lateInt),
