@@ -988,7 +988,6 @@ namespace kingsightapi.Services
                     b.accrued,
                     b.late_interest,
                     b.tax_arrear,
-                    b.interest_adjustment,
                     b.other_cost
                 from {_fnManagementSummaryExposureBreakdown}(
                     @as_of_date,
@@ -1020,7 +1019,6 @@ namespace kingsightapi.Services
                 ("Accrued", GetNullableDecimal(reader, "accrued") ?? 0m),
                 ("Late Interest", GetNullableDecimal(reader, "late_interest") ?? 0m),
                 ("Tax Arrears", GetNullableDecimal(reader, "tax_arrear") ?? 0m),
-                ("Interest Adjustment", GetNullableDecimal(reader, "interest_adjustment") ?? 0m),
                 ("Other", GetNullableDecimal(reader, "other_cost") ?? 0m)
             };
 
@@ -1913,7 +1911,6 @@ namespace kingsightapi.Services
                     c.accrued,
                     c.late_interest,
                     c.tax_arrear,
-                    c.interest_adjustment,
                     c.other_cost
                 from {_fnManagementDetailExposureComposition}(
                     @as_of_date,
@@ -1940,12 +1937,10 @@ namespace kingsightapi.Services
                 return [];
             }
 
-            var outstandingInterest = GetNullableDecimal(reader, "outstanding_interest") ?? 0m;
-            var interestAdjustment = GetNullableDecimal(reader, "interest_adjustment") ?? 0m;
             var components = new (string Label, decimal Value)[]
             {
                 ("Principal", GetNullableDecimal(reader, "principal_balance") ?? 0m),
-                ("O/S Int.", outstandingInterest + interestAdjustment),
+                ("O/S Int.", GetNullableDecimal(reader, "outstanding_interest") ?? 0m),
                 ("Accrued Int.", GetNullableDecimal(reader, "accrued") ?? 0m),
                 ("Late Int.", GetNullableDecimal(reader, "late_interest") ?? 0m),
                 ("Tax Arrears", GetNullableDecimal(reader, "tax_arrear") ?? 0m),
@@ -2696,7 +2691,6 @@ namespace kingsightapi.Services
             var accrued = aliasRows.Sum(r => r.Accrued);
             var lateInt = aliasRows.Sum(r => r.LateInt);
             var taxIns = aliasRows.Sum(r => r.TaxIns);
-            var intAdv = aliasRows.Sum(r => r.IntAdv);
             var other = aliasRows.Sum(r => r.Other);
             var totalExposure = aliasRows.Sum(r => r.TotalExposure);
 
@@ -2725,7 +2719,6 @@ namespace kingsightapi.Services
                 ("Accrued", accrued),
                 ("Late Interest", lateInt),
                 ("Tax Arrears", taxIns),
-                ("Interest Adjustment", intAdv),
                 ("Other", other)
             };
             var denominator = totalExposure > 0 ? totalExposure : components.Sum(c => c.Value);
