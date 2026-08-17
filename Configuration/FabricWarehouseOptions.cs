@@ -3,7 +3,7 @@ namespace kingsightapi.Configuration;
 /// <summary>
 /// Fabric warehouse / lakehouse database names for three-part SQL.
 /// Values are environment-specific via <c>appsettings.{Environment}.json</c>
-/// (Development: <c>wh_gold1</c>; UAT: <c>wh_gold</c>).
+/// (Dev and UAT subjective input: <c>wh_gold</c>).
 /// </summary>
 public sealed class FabricWarehouseOptions
 {
@@ -16,9 +16,9 @@ public sealed class FabricWarehouseOptions
 
     /// <summary>
     /// Subjective input schema database: <c>subjective_input.*</c> master and relationship tables.
-    /// Development = <c>wh_gold1</c>; UAT = <c>wh_gold</c>.
+    /// Dev and UAT = <c>wh_gold</c>.
     /// </summary>
-    public string SubjectiveInputDatabase { get; set; } = "wh_gold1";
+    public string SubjectiveInputDatabase { get; set; } = "wh_gold";
 
     /// <summary>
     /// Silver lakehouse with Yardi shortcuts (e.g. <c>yardi.collateral</c>, <c>yardi.Collateral_Value</c>).

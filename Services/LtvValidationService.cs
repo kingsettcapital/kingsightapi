@@ -26,6 +26,11 @@ namespace kingsightapi.Services
 
     public sealed class LtvValidationService : ILtvValidationService
     {
+        /// <summary>
+        /// Fabric round-trips are expensive; confirm many loan_codes per statement.
+        /// </summary>
+        private const int ConfirmLoanCodeBatchSize = 200;
+
         private readonly string _loanAliasRelationship;
         private readonly string _loanAliasMaster;
         private readonly string _tblSharedDimLoan;
@@ -272,17 +277,24 @@ namespace kingsightapi.Services
             }
 
             _logger.LogInformation(
-                "Confirming LTV review for {LoanCodeCount} loan code(s) (is_confirmed = 'Y').",
-                loanCodes.Length);
+                "Confirming LTV review for {LoanCodeCount} loan code(s) in batches of {BatchSize} (is_confirmed = 'Y').",
+                loanCodes.Length,
+                ConfirmLoanCodeBatchSize);
 
             var auditUtc = DateTime.UtcNow;
-            var confirmSql = BuildConfirmByLoanCodeSql(schema);
             var affectedRows = 0;
+            var batchCount = 0;
 
-            foreach (var loanCode in loanCodes)
+            foreach (var batch in loanCodes.Chunk(ConfirmLoanCodeBatchSize))
             {
+                batchCount++;
+                var confirmSql = BuildConfirmByLoanCodesSql(schema, batch.Length);
                 await using var command = new SqlCommand(confirmSql, connection);
-                command.Parameters.AddWithValue("@loan_code", loanCode);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
+                }
+
                 schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
                 affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -295,8 +307,9 @@ namespace kingsightapi.Services
 
             await _notificationService.CreateLtvReviewedAsync(auditDisplayName, cancellationToken);
             _logger.LogInformation(
-                "Confirmed LTV review for {AffectedRows} loan row(s) via is_confirmed = 'Y'.",
-                affectedRows);
+                "Confirmed LTV review for {AffectedRows} loan row(s) via is_confirmed = 'Y' ({BatchCount} batch(es)).",
+                affectedRows,
+                batchCount);
             return true;
         }
 
@@ -316,24 +329,45 @@ namespace kingsightapi.Services
                 }
             }
 
-            foreach (var loanKey in request.LoanKeys.Where(key => key > 0).Distinct())
+            var unresolvedKeys = request.LoanKeys.Where(key => key > 0).Distinct().ToArray();
+            // SPA always sends loanCodes; skip key→code lookups when codes are already present.
+            if (codes.Count > 0 || unresolvedKeys.Length == 0)
             {
-                var sql = $"select loan_code from {_tblSharedDimLoan} where loan_key = @loan_key";
-                await using var command = new SqlCommand(sql, connection);
-                command.Parameters.AddWithValue("@loan_key", loanKey);
-                var result = await command.ExecuteScalarAsync(cancellationToken);
-                var loanCode = result is null or DBNull ? null : Convert.ToString(result)?.Trim();
-                if (!string.IsNullOrWhiteSpace(loanCode))
+                return codes.ToArray();
+            }
+            foreach (var keyBatch in unresolvedKeys.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var sql = new StringBuilder($"select loan_code from {_tblSharedDimLoan} where loan_key in (");
+                sql.Append(string.Join(", ", keyBatch.Select((_, i) => $"@loan_key_{i}")));
+                sql.Append(')');
+
+                await using var command = new SqlCommand(sql.ToString(), connection);
+                for (var i = 0; i < keyBatch.Length; i++)
                 {
-                    codes.Add(loanCode);
+                    command.Parameters.AddWithValue($"@loan_key_{i}", keyBatch[i]);
+                }
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var loanCode = reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0))?.Trim();
+                    if (!string.IsNullOrWhiteSpace(loanCode))
+                    {
+                        codes.Add(loanCode);
+                    }
                 }
             }
 
             return codes.ToArray();
         }
 
-        private string BuildConfirmByLoanCodeSql(LtvValidationSchema schema)
+        private string BuildConfirmByLoanCodesSql(LtvValidationSchema schema, int loanCodeCount)
         {
+            if (loanCodeCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(loanCodeCount));
+            }
+
             var setClause = BuildConfirmSetClause(schema);
             if (string.IsNullOrWhiteSpace(setClause))
             {
@@ -341,13 +375,14 @@ namespace kingsightapi.Services
                     "Confirm LTV has nothing to update (is_confirmed / audit columns missing).");
             }
 
-            // Matches warehouse expectation:
-            // update subjective_input.loan_alias_relationship set is_confirmed = 'Y' where loan_code = @loan_code
+            var inList = string.Join(", ", Enumerable.Range(0, loanCodeCount).Select(i => $"@loan_code_{i}"));
+
+            // One statement per batch instead of one UPDATE per loan_code.
             return $"""
                 update a
                 set {setClause}
                 from {_loanAliasRelationship} a
-                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
+                where a.loan_code in ({inList})
                 """;
         }
 
