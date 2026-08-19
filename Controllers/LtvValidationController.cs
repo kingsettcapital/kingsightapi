@@ -59,6 +59,28 @@ namespace kingsightapi.Controllers
             }
         }
 
+        // GET: api/LtvValidation/column-dates
+        [HttpGet("column-dates")]
+        public async Task<ActionResult<LtvValidationColumnDatesDto>> GetColumnDates(
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                var result = await _service.GetColumnDatesAsync(cancellationToken);
+                return Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Get LTV column dates cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving LTV column dates");
+                return StatusCode(500, "An error occurred while retrieving LTV column dates.");
+            }
+        }
+
         // PUT: api/LtvValidation
         [HttpPut]
         public async Task<IActionResult> Update(

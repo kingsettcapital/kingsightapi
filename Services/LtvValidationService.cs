@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
@@ -22,6 +23,9 @@ namespace kingsightapi.Services
             LtvValidationConfirmRequest request,
             string auditDisplayName,
             CancellationToken cancellationToken = default);
+
+        Task<LtvValidationColumnDatesDto> GetColumnDatesAsync(
+            CancellationToken cancellationToken = default);
     }
 
     public sealed class LtvValidationService : ILtvValidationService
@@ -32,6 +36,7 @@ namespace kingsightapi.Services
         private const int ConfirmLoanCodeBatchSize = 200;
 
         private readonly string _loanAliasRelationship;
+        private readonly string _fileUploadHistoryTable;
         private readonly string _loanAliasMaster;
         private readonly string _tblSharedDimLoan;
         private readonly string _tblDimStatus;
@@ -67,6 +72,7 @@ namespace kingsightapi.Services
             _tblSharedDimLoan = subjective.SharedDimLoan;
             _tblDimStatus = subjective.DimStatus;
             _loanAliasRelationship = subjective.LoanAliasRelationship;
+            _fileUploadHistoryTable = tables.SubjectiveInput("file_upload_history");
             _loanAliasMaster = subjective.LoanAliasMaster;
             _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("l", "d");
 
@@ -313,6 +319,20 @@ namespace kingsightapi.Services
             return true;
         }
 
+        public async Task<LtvValidationColumnDatesDto> GetColumnDatesAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var schema = await GetSchemaAsync(cancellationToken);
+            var currentAsOf = await GetLatestQrSlidesAsOfDateAsync(cancellationToken);
+            var priorConfirmed = await GetLatestLtvUpdatedDatetimeAsync(schema, cancellationToken);
+
+            return new LtvValidationColumnDatesDto
+            {
+                CurrentLtvAsOfDate = currentAsOf,
+                PriorLtvConfirmedDate = priorConfirmed,
+            };
+        }
+
         private async Task<string[]> ResolveConfirmLoanCodesAsync(
             SqlConnection connection,
             LtvValidationConfirmRequest request,
@@ -441,14 +461,15 @@ namespace kingsightapi.Services
                     _connectionString,
                     cancellationToken);
                 _logger.LogInformation(
-                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, isConfirmed={Confirmed}, auditBy={AuditBy}.",
+                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, isConfirmed={Confirmed}, auditBy={AuditBy}, auditDtm={AuditDtm}.",
                     optional.LtvColumn ?? "(none)",
                     optional.PriorLtvColumn ?? "(none)",
                     optional.UpdateReason ?? "(none)",
                     optional.AiComments ?? "(none)",
                     qrSlideLink ?? "(none)",
                     optional.IsConfirmedColumn ?? "(none)",
-                    audit.UpdatedByColumn ?? "(none)");
+                    audit.UpdatedByColumn ?? "(none)",
+                    audit.UpdatedDtmColumn ?? "(none)");
                 if (optional.LtvColumn is null)
                 {
                     _logger.LogWarning(
@@ -772,6 +793,86 @@ namespace kingsightapi.Services
             return reader.IsDBNull(ordinal)
                 ? null
                 : DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
+        }
+
+        private async Task<string?> GetLatestQrSlidesAsOfDateAsync(CancellationToken cancellationToken)
+        {
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    select top 1 as_of_date
+                    from {_fileUploadHistoryTable}
+                    where lower(isnull(file_type, '')) in ('qr-slides', 'qr_slides')
+                       or (isnull(file_type, '') = '' and filename like '%.pdf')
+                    order by uploaded_date desc
+                    """,
+                    connection);
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                if (value is null || value is DBNull)
+                {
+                    return null;
+                }
+
+                if (value is DateTime asOf)
+                {
+                    return asOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                }
+
+                if (DateTime.TryParse(
+                        Convert.ToString(value),
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.None,
+                        out var parsed))
+                {
+                    return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                }
+
+                return Convert.ToString(value)?.Trim();
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 3701)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "file_upload_history is unavailable; Current LTV As Of header will be blank.");
+                return null;
+            }
+        }
+
+        private async Task<DateTime?> GetLatestLtvUpdatedDatetimeAsync(
+            LtvValidationSchema schema,
+            CancellationToken cancellationToken)
+        {
+            var column = schema.Audit.UpdatedDtmColumn;
+            if (string.IsNullOrWhiteSpace(column))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship has no ltv_updated_datetime column; Prior LTV header will be blank.");
+                return null;
+            }
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    select max(a.[{column}])
+                    from {_loanAliasRelationship} a
+                    """,
+                    connection);
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                return value is DateTime updatedAt
+                    ? DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)
+                    : null;
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not read {Column} for Prior LTV header.", column);
+                return null;
+            }
         }
 
         private sealed class LtvValidationSchema
