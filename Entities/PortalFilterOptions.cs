@@ -68,4 +68,7 @@ public sealed class AssetListFilterOptionsDto
     public IReadOnlyList<PortalFilterOptionDto> Geographies { get; init; } = [];
 
     public IReadOnlyList<PortalFilterOptionDto> Statuses { get; init; } = [];
+
+    [JsonPropertyName("quarterly_periods")]
+    public IReadOnlyList<PortalQuarterPeriodOptionDto> QuarterlyPeriods { get; init; } = [];
 }

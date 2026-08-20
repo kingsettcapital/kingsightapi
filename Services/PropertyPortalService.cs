@@ -17,7 +17,9 @@ public interface IPropertyPortalService
         string? sortDir,
         int page,
         int pageSize,
-        string? fundCode);
+        string? fundCode,
+        TimeGranularity view = TimeGranularity.Ltd,
+        int? dateKey = null);
     Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey);
     Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
@@ -49,12 +51,25 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         string? sortDir,
         int page,
         int pageSize,
-        string? fundCode)
+        string? fundCode,
+        TimeGranularity view = TimeGranularity.Ltd,
+        int? dateKey = null)
     {
         try
         {
             return await GetPropertiesInternalAsync(
-                search, assetType, investmentType, geography, status, sortBy, sortDir, page, pageSize, fundCode);
+                search,
+                assetType,
+                investmentType,
+                geography,
+                status,
+                sortBy,
+                sortDir,
+                page,
+                pageSize,
+                fundCode,
+                view,
+                dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -132,11 +147,20 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         string? sortDir,
         int page,
         int pageSize,
-        string? fundCode)
+        string? fundCode,
+        TimeGranularity view,
+        int? dateKey)
     {
         if (!PortalListSort.TryParseProperty(sortBy, sortDir, out var orderBy, out var sortError))
         {
             throw new ArgumentException(sortError);
+        }
+
+        var restrictToQuarter = view == TimeGranularity.Quarterly && dateKey is > 0;
+        if (view == TimeGranularity.Quarterly && !restrictToQuarter)
+        {
+            throw new ArgumentException(
+                "Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
         }
 
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
@@ -160,7 +184,14 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         AddPropertyListingParameters(
-            countCommand, searchTerm, assetTypeTerm, investmentTypeTerm, geographyTerm, statusTerm, fundCodeTerm);
+            countCommand,
+            searchTerm,
+            assetTypeTerm,
+            investmentTypeTerm,
+            geographyTerm,
+            statusTerm,
+            fundCodeTerm,
+            restrictToQuarter ? dateKey : null);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
         var summary = await GetAssetListSummaryAsync(
             connection,
@@ -169,7 +200,9 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
             investmentTypeTerm,
             geographyTerm,
             statusTerm,
-            fundCodeTerm);
+            fundCodeTerm,
+            restrictToQuarter,
+            restrictToQuarter ? dateKey : null);
 
         var sql = new StringBuilder();
         sql.Append(" select ");
@@ -189,7 +222,8 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         sql.Append(" sum(isnull(metrics.committed_area_sqft, 0)) as committed_sf, ");
         sql.Append(" sum(isnull(metrics.vacant_area_sqft, 0)) as vacant_sf ");
         WarehouseSql.AppendConsolidatedAssetFrom(sql);
-        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p", "metrics");
+        WarehouseSql.AppendLatestAssetMetricsApply(
+            sql, "p", "metrics", includeLeasingColumns: false, restrictToQuarterFromDateKey: restrictToQuarter);
         AppendPropertyListingWhere(sql);
         WarehouseSql.AppendConsolidatedAssetGroupBy(sql);
         orderBy.AppendOrderBy(sql);
@@ -200,7 +234,14 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         AddPropertyListingParameters(
-            command, searchTerm, assetTypeTerm, investmentTypeTerm, geographyTerm, statusTerm, fundCodeTerm);
+            command,
+            searchTerm,
+            assetTypeTerm,
+            investmentTypeTerm,
+            geographyTerm,
+            statusTerm,
+            fundCodeTerm,
+            restrictToQuarter ? dateKey : null);
         command.Parameters.AddWithValue("@offset", offset);
         command.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -212,8 +253,8 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         }
 
         _logger.LogInformation(
-            "Retrieved {Count} consolidated properties (page {Page}, total {Total}).",
-            items.Count, normalizedPage, totalCount);
+            "Retrieved {Count} consolidated properties (page {Page}, total {Total}, view={View}).",
+            items.Count, normalizedPage, totalCount, view);
 
         return new PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>
         {
@@ -232,7 +273,9 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         string? investmentType,
         string? geography,
         string? status,
-        string? fundCode)
+        string? fundCode,
+        bool restrictToQuarter,
+        int? dateKey)
     {
         var summarySql = new StringBuilder();
         summarySql.Append(" select ");
@@ -242,11 +285,13 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         summarySql.Append(" sum(isnull(metrics.committed_area_sqft, 0)) as total_committed_sf, ");
         summarySql.Append(" sum(isnull(metrics.vacant_area_sqft, 0)) as total_vacant_sf ");
         WarehouseSql.AppendConsolidatedAssetFrom(summarySql);
-        WarehouseSql.AppendLatestAssetMetricsApply(summarySql, "p", "metrics");
+        WarehouseSql.AppendLatestAssetMetricsApply(
+            summarySql, "p", "metrics", includeLeasingColumns: false, restrictToQuarterFromDateKey: restrictToQuarter);
         AppendPropertyListingWhere(summarySql);
 
         await using var command = new SqlCommand(summarySql.ToString(), connection);
-        AddPropertyListingParameters(command, search, assetType, investmentType, geography, status, fundCode);
+        AddPropertyListingParameters(
+            command, search, assetType, investmentType, geography, status, fundCode, dateKey);
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
         {
@@ -370,7 +415,8 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         string? investmentType,
         string? geography,
         string? status,
-        string? fundCode)
+        string? fundCode,
+        int? dateKey = null)
     {
         command.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
         command.Parameters.AddWithValue("@assetType", (object?)assetType ?? DBNull.Value);
@@ -378,6 +424,10 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         command.Parameters.AddWithValue("@geography", (object?)geography ?? DBNull.Value);
         command.Parameters.AddWithValue("@status", (object?)status ?? DBNull.Value);
         command.Parameters.AddWithValue("@fund_code", (object?)fundCode ?? DBNull.Value);
+        if (dateKey is > 0)
+        {
+            command.Parameters.AddWithValue("@dateKey", dateKey.Value);
+        }
     }
 
     private static PropertyListItemDto MapPropertyListItem(SqlDataReader reader)

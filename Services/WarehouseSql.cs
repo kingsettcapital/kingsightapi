@@ -328,12 +328,15 @@ internal static class WarehouseSql
 
     /// <summary>
     /// Latest metrics for a property: <c>SUM</c> by <c>date_key</c>, then <c>TOP 1</c> by date desc.
+    /// When <paramref name="restrictToQuarterFromDateKey"/> is true, only dates in the same
+    /// <c>quarter_year</c> as <c>@dateKey</c> are considered (requires <c>@dateKey</c> parameter).
     /// </summary>
     public static void AppendLatestAssetMetricsApply(
         StringBuilder sql,
         string propertyAlias,
         string applyAlias,
-        bool includeLeasingColumns)
+        bool includeLeasingColumns,
+        bool restrictToQuarterFromDateKey = false)
     {
         sql.Append($" outer apply ( ");
         sql.Append(" select top 1 ");
@@ -362,6 +365,15 @@ internal static class WarehouseSql
 
         sql.Append($" from {WarehouseTables.FactAssetMetrics} m ");
         sql.Append($" where m.property_key = {propertyAlias}.property_key ");
+        if (restrictToQuarterFromDateKey)
+        {
+            sql.Append(" and exists ( ");
+            sql.Append($" select 1 from {WarehouseTables.DimDate} md ");
+            sql.Append(" where md.date_key = m.date_key ");
+            sql.Append($" and md.quarter_year = (select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey) ");
+            sql.Append(" ) ");
+        }
+
         sql.Append(" group by date_key ");
         sql.Append(" order by date_key desc ");
         sql.Append($" ) {applyAlias} ");
