@@ -158,12 +158,9 @@ public sealed class PortalFilterService : IPortalFilterService
     private static string BuildPropertyDistinctSql(string columnName)
     {
         var sql = new StringBuilder();
-        sql.Append($" select distinct isnull(p.{columnName}, '') as option_value ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
-        sql.Append($" and isnull(p.{columnName}, '') <> '' ");
+        sql.Append($" select distinct isnull(c.{columnName}, '') as option_value ");
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        sql.Append($" where isnull(c.{columnName}, '') <> '' ");
         sql.Append(" order by option_value ");
         return sql.ToString();
     }
