@@ -323,8 +323,8 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken = default)
         {
             var schema = await GetSchemaAsync(cancellationToken);
-            var currentAsOf = await GetLatestQrSlidesAsOfDateAsync(cancellationToken);
-            var priorConfirmed = await GetLatestLtvUpdatedDatetimeAsync(schema, cancellationToken);
+            var currentAsOf = await GetLatestAsOfDateByConfirmFlagAsync(schema, confirmed: false, cancellationToken);
+            var priorConfirmed = await GetLatestAsOfDateByConfirmFlagAsync(schema, confirmed: true, cancellationToken);
 
             return new LtvValidationColumnDatesDto
             {
@@ -795,21 +795,58 @@ namespace kingsightapi.Services
                 : DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
         }
 
-        private async Task<string?> GetLatestQrSlidesAsOfDateAsync(CancellationToken cancellationToken)
+        /// <summary>
+        /// Latest file_upload_history.as_of_date for relationship rows with is_confirmed = Y or N.
+        /// Matches warehouse CTE: join on file_upload_id, order by as_of_date desc, rn = 1.
+        /// </summary>
+        private async Task<string?> GetLatestAsOfDateByConfirmFlagAsync(
+            LtvValidationSchema schema,
+            bool confirmed,
+            CancellationToken cancellationToken)
         {
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            var fileUploadIdColumn = schema.Optional.FileUploadIdColumn;
+            var headerLabel = confirmed ? "Prior" : "Current";
+
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship has no is_confirmed column; {Header} LTV As Of header will be blank.",
+                    headerLabel);
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(fileUploadIdColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship has no file_upload_id column; {Header} LTV As Of header will be blank.",
+                    headerLabel);
+                return null;
+            }
+
+            var confirmFlag = confirmed ? "Y" : "N";
+
             try
             {
                 await using var connection = new SqlConnection(_connectionString);
                 await connection.OpenAsync(cancellationToken);
                 await using var command = new SqlCommand(
                     $"""
-                    select top 1 as_of_date
-                    from {_fileUploadHistoryTable}
-                    where lower(isnull(file_type, '')) in ('qr-slides', 'qr_slides')
-                       or (isnull(file_type, '') = '' and filename like '%.pdf')
-                    order by uploaded_date desc
+                    with temp as (
+                        select b.as_of_date,
+                               row_number() over (order by b.as_of_date desc) as rn
+                        from {_loanAliasRelationship} a
+                        inner join {_fileUploadHistoryTable} b
+                            on a.[{fileUploadIdColumn}] = b.file_id
+                        where a.[{isConfirmedColumn}] = @confirm_flag
+                    )
+                    select as_of_date
+                    from temp
+                    where rn = 1
                     """,
                     connection);
+                command.Parameters.AddWithValue("@confirm_flag", confirmFlag);
+
                 var value = await command.ExecuteScalarAsync(cancellationToken);
                 if (value is null || value is DBNull)
                 {
@@ -836,41 +873,13 @@ namespace kingsightapi.Services
             {
                 _logger.LogWarning(
                     ex,
-                    "file_upload_history is unavailable; Current LTV As Of header will be blank.");
+                    "file_upload_history / relationship join unavailable; {Header} LTV As Of header will be blank.",
+                    headerLabel);
                 return null;
-            }
-        }
-
-        private async Task<DateTime?> GetLatestLtvUpdatedDatetimeAsync(
-            LtvValidationSchema schema,
-            CancellationToken cancellationToken)
-        {
-            var column = schema.Audit.UpdatedDtmColumn;
-            if (string.IsNullOrWhiteSpace(column))
-            {
-                _logger.LogWarning(
-                    "loan_alias_relationship has no ltv_updated_datetime column; Prior LTV header will be blank.");
-                return null;
-            }
-
-            try
-            {
-                await using var connection = new SqlConnection(_connectionString);
-                await connection.OpenAsync(cancellationToken);
-                await using var command = new SqlCommand(
-                    $"""
-                    select max(a.[{column}])
-                    from {_loanAliasRelationship} a
-                    """,
-                    connection);
-                var value = await command.ExecuteScalarAsync(cancellationToken);
-                return value is DateTime updatedAt
-                    ? DateTime.SpecifyKind(updatedAt, DateTimeKind.Utc)
-                    : null;
             }
             catch (SqlException ex)
             {
-                _logger.LogWarning(ex, "Could not read {Column} for Prior LTV header.", column);
+                _logger.LogWarning(ex, "Could not resolve {Header} LTV As Of date.", headerLabel);
                 return null;
             }
         }
