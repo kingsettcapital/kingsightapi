@@ -10,16 +10,25 @@ public sealed partial class PropertyPortalService
     {
         var sql = new StringBuilder();
         sql.Append(" select ");
-        sql.Append(" p.*, ");
-        sql.Append(" metrics.gross_leasable_area_sqft, ");
-        sql.Append(" metrics.occupied_area_sqft, ");
-        sql.Append(" metrics.committed_area_sqft, ");
-        sql.Append(" metrics.vacant_area_sqft ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
-        WarehouseSql.AppendLatestAssetMetricsApply(sql);
-        sql.Append(" where p.property_key = @propertyKey ");
-        sql.Append(" and ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
+        sql.Append(" c.property_key, ");
+        sql.Append(" isnull(c.property_code, '') as property_code, ");
+        sql.Append(" isnull(c.property_name, '') as property_name, ");
+        sql.Append(" isnull(c.geography, '') as geography, ");
+        sql.Append(" isnull(c.city, '') as city, ");
+        sql.Append(" isnull(c.province, '') as province, ");
+        sql.Append(" isnull(c.asset_type, '') as asset_type, ");
+        sql.Append(" isnull(c.investment_type, '') as investment_type, ");
+        sql.Append(" isnull(c.development_type, '') as development_type, ");
+        sql.Append(" isnull(c.property_status, '') as property_status, ");
+        sql.Append(" isnull(c.portfolio, 0) as portfolio, ");
+        sql.Append(" sum(metrics.gross_leasable_area_sqft) as gross_leasable_area_sqft, ");
+        sql.Append(" sum(metrics.occupied_area_sqft) as occupied_area_sqft, ");
+        sql.Append(" sum(metrics.committed_area_sqft) as committed_area_sqft, ");
+        sql.Append(" sum(metrics.vacant_area_sqft) as vacant_area_sqft ");
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p", "metrics");
+        sql.Append(" where c.property_key = @propertyKey ");
+        WarehouseSql.AppendConsolidatedAssetGroupBy(sql);
 
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync();
@@ -47,22 +56,10 @@ public sealed partial class PropertyPortalService
         var developmentType = reader.GetStringFromColumns("development_type");
         var status = reader.GetStringFromColumns("property_status", "property_status_name", "status");
         var isPortfolio = reader.GetBooleanFromColumns("portfolio");
-        var acquisitionDate = reader.GetNullableDateTimeFlexible("property_acquisition");
         var totalGlaSf = reader.GetNullableDecimal("gross_leasable_area_sqft");
         var occupiedAreaSf = reader.GetNullableDecimal("occupied_area_sqft");
         var committedAreaSf = reader.GetNullableDecimal("committed_area_sqft");
         var vacantAreaSf = reader.GetNullableDecimal("vacant_area_sqft");
-        var estMarketValue = reader.GetNullableDecimalFromColumns(
-            "market_value",
-            "fair_market_value",
-            "estimated_market_value",
-            "property_market_value",
-            "appraised_value");
-        var estAnnualNoi = reader.GetNullableDecimalFromColumns(
-            "annual_noi",
-            "noi",
-            "estimated_annual_noi",
-            "net_operating_income");
 
         await reader.DisposeAsync();
 
@@ -82,15 +79,15 @@ public sealed partial class PropertyPortalService
             DevelopmentType = developmentType,
             Status = status,
             IsPortfolio = isPortfolio,
-            AcquisitionDate = acquisitionDate,
+            AcquisitionDate = null,
             TotalGlaSf = totalGlaSf,
             CommittedAreaSf = committedAreaSf,
             VacantAreaSf = vacantAreaSf,
             OccupiedAreaSf = occupiedAreaSf,
             OccupancyRate = occupancyRate,
             VacancyRate = vacancyRate,
-            EstMarketValue = estMarketValue,
-            EstAnnualNoi = estAnnualNoi,
+            EstMarketValue = null,
+            EstAnnualNoi = null,
             InvestmentCount = investments.Count
         };
     }

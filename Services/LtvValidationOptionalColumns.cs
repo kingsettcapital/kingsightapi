@@ -16,6 +16,8 @@ namespace kingsightapi.Services
         public string? AiConfidenceScore { get; init; }
         /// <summary>Confirm LTV flag on relationship (<c>is_confirmed = 'Y'</c>).</summary>
         public string? IsConfirmedColumn { get; init; }
+        /// <summary>FK to <c>file_upload_history.file_id</c> for As Of header dates.</summary>
+        public string? FileUploadIdColumn { get; init; }
 
         public static async Task<LtvValidationOptionalColumns> ProbeAsync(
             string connectionString,
@@ -69,6 +71,7 @@ namespace kingsightapi.Services
                     "is_confirmed",
                     "ltv_is_confirmed",
                     "is_ltv_confirmed"),
+                FileUploadIdColumn = FindColumn(columns, "file_upload_id"),
             };
         }
 

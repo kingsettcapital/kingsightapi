@@ -15,6 +15,7 @@ public sealed class PropertyListItemDto
     public string City { get; init; } = string.Empty;
     public string Province { get; init; } = string.Empty;
 
+    [JsonPropertyName("asset_type")]
     public string AssetType { get; init; } = string.Empty;
 
     [JsonPropertyName("investment_type")]

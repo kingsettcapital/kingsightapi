@@ -72,27 +72,28 @@ internal static class PortalListSort
 
     private static readonly Dictionary<string, string> PropertyColumns = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["propertyName"] = "p.property_name",
-        ["propertyCode"] = "p.property_code",
-        ["property_code"] = "p.property_code",
-        ["geography"] = "p.geography",
-        ["assetType"] = "p.asset_type",
-        ["asset_type"] = "p.asset_type",
-        ["investmentType"] = "p.investment_type",
-        ["investment_type"] = "p.investment_type",
-        ["developmentType"] = "p.development_type",
-        ["development_type"] = "p.development_type",
-        ["propertyStatus"] = "p.property_status",
-        ["property_status"] = "p.property_status",
-        ["status"] = "p.property_status",
-        ["glaSf"] = "isnull(metrics.gross_leasable_area_sqft, 0)",
-        ["gla_sf"] = "isnull(metrics.gross_leasable_area_sqft, 0)",
-        ["occupiedSf"] = "isnull(metrics.occupied_area_sqft, 0)",
-        ["occupied_sf"] = "isnull(metrics.occupied_area_sqft, 0)",
-        ["committedSf"] = "isnull(metrics.committed_area_sqft, 0)",
-        ["committed_sf"] = "isnull(metrics.committed_area_sqft, 0)",
-        ["vacantSf"] = "isnull(metrics.vacant_area_sqft, 0)",
-        ["vacant_sf"] = "isnull(metrics.vacant_area_sqft, 0)"
+        // Use SELECT aliases so ORDER BY is valid with GROUP BY (Fabric SqlNumber 8127).
+        ["propertyName"] = "property_name",
+        ["propertyCode"] = "property_code",
+        ["property_code"] = "property_code",
+        ["geography"] = "geography",
+        ["assetType"] = "asset_type",
+        ["asset_type"] = "asset_type",
+        ["investmentType"] = "investment_type",
+        ["investment_type"] = "investment_type",
+        ["developmentType"] = "development_type",
+        ["development_type"] = "development_type",
+        ["propertyStatus"] = "property_status",
+        ["property_status"] = "property_status",
+        ["status"] = "property_status",
+        ["glaSf"] = "gla_sf",
+        ["gla_sf"] = "gla_sf",
+        ["occupiedSf"] = "occupied_sf",
+        ["occupied_sf"] = "occupied_sf",
+        ["committedSf"] = "committed_sf",
+        ["committed_sf"] = "committed_sf",
+        ["vacantSf"] = "vacant_sf",
+        ["vacant_sf"] = "vacant_sf"
     };
 
     // Grouped portfolio transaction tables (one row per fund/investor) plus unpivoted obligation rows.
@@ -387,15 +388,28 @@ internal static class PortalListSort
         string? sortBy,
         string? sortDir,
         out PortalListOrderBy sort,
-        out string? error) =>
-        TryParse(
+        out string? error)
+    {
+        if (!TryParse(
             sortBy,
             sortDir,
             PropertyColumns,
             "propertyName, propertyCode, geography, assetType, investmentType, developmentType, propertyStatus, glaSf, occupiedSf, committedSf, vacantSf",
-            "p.property_name",
+            "gla_sf",
             out sort,
-            out error);
+            out error))
+        {
+            return false;
+        }
+
+        // Default list order: largest GLA first (many consolidated rows have null/0 metrics).
+        if (string.IsNullOrWhiteSpace(sortBy))
+        {
+            sort = new PortalListOrderBy(sort.SqlExpression, descending: true);
+        }
+
+        return true;
+    }
 
     private static bool TryParse(
         string? sortBy,

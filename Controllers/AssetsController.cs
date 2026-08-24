@@ -43,10 +43,12 @@ public class AssetsController : ControllerBase
         }
     }
 
-    // GET: api/assets?search=&assetType=&investmentType=&geography=&status=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
+    // GET: api/assets?search=&view=ltd|quarterly&dateKey=&assetType=&investmentType=&geography=&status=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>>> GetAll(
         [FromQuery] string? search,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
         [FromQuery] string? assetType,
         [FromQuery] string? investmentType,
         [FromQuery] string? geography,
@@ -57,10 +59,28 @@ public class AssetsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                "Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
         try
         {
             var result = await _service.GetPropertiesAsync(
-                search, assetType, investmentType, geography, status, sortBy, sortDir, page, pageSize, fundCode);
+                search,
+                assetType,
+                investmentType,
+                geography,
+                status,
+                sortBy,
+                sortDir,
+                page,
+                pageSize,
+                fundCode,
+                resolvedView,
+                dateKey);
             return Ok(result);
         }
         catch (ArgumentException ex)

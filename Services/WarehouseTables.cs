@@ -17,6 +17,8 @@ internal static class WarehouseTables
     public static string DimFund => "dbo.dim_fund";
     public static string DimInvestor => "dbo.dim_investor";
     public static string DimProperty => "dbo.dim_property";
+    /// <summary>Maps leaf <c>property_id</c> to consolidated asset key for Assets list roll-up.</summary>
+    public static string StgEntityRelation => "stg.stg_EntityRelation";
     public static string DimTransactionType => "dbo.dim_transaction_type";
     public static string FactCommitted => "dbo.fact_commitment";
     public static string FactInvestment => "dbo.fact_investment";
