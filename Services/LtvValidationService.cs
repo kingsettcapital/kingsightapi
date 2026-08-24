@@ -36,6 +36,7 @@ namespace kingsightapi.Services
         private const int ConfirmLoanCodeBatchSize = 200;
 
         private readonly string _loanAliasRelationship;
+        private readonly string _loanAliasRelationshipHistory;
         private readonly string _fileUploadHistoryTable;
         private readonly string _loanAliasMaster;
         private readonly string _tblSharedDimLoan;
@@ -72,6 +73,7 @@ namespace kingsightapi.Services
             _tblSharedDimLoan = subjective.SharedDimLoan;
             _tblDimStatus = subjective.DimStatus;
             _loanAliasRelationship = subjective.LoanAliasRelationship;
+            _loanAliasRelationshipHistory = tables.SubjectiveInput("loan_alias_relationship_history");
             _fileUploadHistoryTable = tables.SubjectiveInput("file_upload_history");
             _loanAliasMaster = subjective.LoanAliasMaster;
             _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("l", "d");
@@ -323,8 +325,8 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken = default)
         {
             var schema = await GetSchemaAsync(cancellationToken);
-            var currentAsOf = await GetLatestAsOfDateByConfirmFlagAsync(schema, confirmed: false, cancellationToken);
-            var priorConfirmed = await GetLatestAsOfDateByConfirmFlagAsync(schema, confirmed: true, cancellationToken);
+            var currentAsOf = await GetCurrentLtvAsOfDateAsync(schema, cancellationToken);
+            var priorConfirmed = await GetPriorLtvAsOfDateAsync(schema, cancellationToken);
 
             return new LtvValidationColumnDatesDto
             {
@@ -455,8 +457,29 @@ namespace kingsightapi.Services
                     _loanAliasRelationship,
                     ["qr_slide_link"],
                     cancellationToken);
+                var historyIsConfirmed = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["is_confirmed", "ltv_is_confirmed", "is_ltv_confirmed"],
+                    cancellationToken);
+                var historyFileUploadId = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["file_upload_id"],
+                    cancellationToken);
+                var historySnapshotDate = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["snapshot_date"],
+                    cancellationToken);
 
-                _schema = new LtvValidationSchema(optional, audit, qrSlideLink);
+                _schema = new LtvValidationSchema(
+                    optional,
+                    audit,
+                    qrSlideLink,
+                    historyIsConfirmed,
+                    historyFileUploadId,
+                    historySnapshotDate);
                 await _subjectiveInputSql.EnsureDimLoanCurrentIndicatorAsync(
                     _connectionString,
                     cancellationToken);
@@ -796,35 +819,20 @@ namespace kingsightapi.Services
         }
 
         /// <summary>
-        /// Latest file_upload_history.as_of_date for relationship rows with is_confirmed = Y or N.
-        /// Matches warehouse CTE: join on file_upload_id, order by as_of_date desc, rn = 1.
+        /// Current LTV header: latest file_upload_history.as_of_date for loan_alias_relationship,
+        /// ordered by file_upload_history.uploaded_date desc.
         /// </summary>
-        private async Task<string?> GetLatestAsOfDateByConfirmFlagAsync(
+        private async Task<string?> GetCurrentLtvAsOfDateAsync(
             LtvValidationSchema schema,
-            bool confirmed,
             CancellationToken cancellationToken)
         {
-            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
             var fileUploadIdColumn = schema.Optional.FileUploadIdColumn;
-            var headerLabel = confirmed ? "Prior" : "Current";
-
-            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
-            {
-                _logger.LogWarning(
-                    "loan_alias_relationship has no is_confirmed column; {Header} LTV As Of header will be blank.",
-                    headerLabel);
-                return null;
-            }
-
             if (string.IsNullOrWhiteSpace(fileUploadIdColumn))
             {
                 _logger.LogWarning(
-                    "loan_alias_relationship has no file_upload_id column; {Header} LTV As Of header will be blank.",
-                    headerLabel);
+                    "loan_alias_relationship has no file_upload_id column; Current LTV As Of header will be blank.");
                 return null;
             }
-
-            var confirmFlag = confirmed ? "Y" : "N";
 
             try
             {
@@ -834,54 +842,126 @@ namespace kingsightapi.Services
                     $"""
                     with temp as (
                         select b.as_of_date,
-                               row_number() over (order by b.as_of_date desc) as rn
+                               row_number() over (order by b.uploaded_date desc) as rn
                         from {_loanAliasRelationship} a
                         inner join {_fileUploadHistoryTable} b
                             on a.[{fileUploadIdColumn}] = b.file_id
-                        where a.[{isConfirmedColumn}] = @confirm_flag
                     )
                     select as_of_date
                     from temp
                     where rn = 1
                     """,
                     connection);
-                command.Parameters.AddWithValue("@confirm_flag", confirmFlag);
 
                 var value = await command.ExecuteScalarAsync(cancellationToken);
-                if (value is null || value is DBNull)
-                {
-                    return null;
-                }
-
-                if (value is DateTime asOf)
-                {
-                    return asOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                }
-
-                if (DateTime.TryParse(
-                        Convert.ToString(value),
-                        CultureInfo.InvariantCulture,
-                        DateTimeStyles.None,
-                        out var parsed))
-                {
-                    return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-                }
-
-                return Convert.ToString(value)?.Trim();
+                return FormatAsOfDateScalar(value);
             }
             catch (SqlException ex) when (ex.Number is 208 or 3701)
             {
                 _logger.LogWarning(
                     ex,
-                    "file_upload_history / relationship join unavailable; {Header} LTV As Of header will be blank.",
-                    headerLabel);
+                    "file_upload_history / loan_alias_relationship join unavailable; Current LTV As Of header will be blank.");
                 return null;
             }
             catch (SqlException ex)
             {
-                _logger.LogWarning(ex, "Could not resolve {Header} LTV As Of date.", headerLabel);
+                _logger.LogWarning(ex, "Could not resolve Current LTV As Of date.");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Prior LTV header: latest file_upload_history.as_of_date for loan_alias_relationship_history
+        /// where is_confirmed = 'Y', ordered by snapshot_date desc.
+        /// </summary>
+        private async Task<string?> GetPriorLtvAsOfDateAsync(
+            LtvValidationSchema schema,
+            CancellationToken cancellationToken)
+        {
+            var isConfirmedColumn = schema.HistoryIsConfirmedColumn;
+            var fileUploadIdColumn = schema.HistoryFileUploadIdColumn;
+            var snapshotDateColumn = schema.HistorySnapshotDateColumn;
+
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no is_confirmed column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(fileUploadIdColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no file_upload_id column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(snapshotDateColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no snapshot_date column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    with temp as (
+                        select b.as_of_date,
+                               row_number() over (order by a.[{snapshotDateColumn}] desc) as rn
+                        from {_loanAliasRelationshipHistory} a
+                        inner join {_fileUploadHistoryTable} b
+                            on a.[{fileUploadIdColumn}] = b.file_id
+                        where a.[{isConfirmedColumn}] = 'Y'
+                    )
+                    select as_of_date
+                    from temp
+                    where rn = 1
+                    """,
+                    connection);
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                return FormatAsOfDateScalar(value);
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 3701)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "file_upload_history / loan_alias_relationship_history join unavailable; Prior LTV As Of header will be blank.");
+                return null;
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve Prior LTV As Of date.");
+                return null;
+            }
+        }
+
+        private static string? FormatAsOfDateScalar(object? value)
+        {
+            if (value is null or DBNull)
+            {
+                return null;
+            }
+
+            if (value is DateTime asOf)
+            {
+                return asOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            if (DateTime.TryParse(
+                    Convert.ToString(value),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var parsed))
+            {
+                return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            return Convert.ToString(value)?.Trim();
         }
 
         private sealed class LtvValidationSchema
@@ -889,18 +969,27 @@ namespace kingsightapi.Services
             public LtvValidationSchema(
                 LtvValidationOptionalColumns optional,
                 SubjectiveInputRelationshipAuditColumns audit,
-                string? qrSlideLinkColumn)
+                string? qrSlideLinkColumn,
+                string? historyIsConfirmedColumn,
+                string? historyFileUploadIdColumn,
+                string? historySnapshotDateColumn)
             {
                 Optional = optional;
                 Audit = audit;
                 QrSlideLinkSelect = qrSlideLinkColumn is null
                     ? "cast(null as varchar(500)) as qr_slide_link"
                     : $"a.[{qrSlideLinkColumn}] as qr_slide_link";
+                HistoryIsConfirmedColumn = historyIsConfirmedColumn;
+                HistoryFileUploadIdColumn = historyFileUploadIdColumn;
+                HistorySnapshotDateColumn = historySnapshotDateColumn;
             }
 
             public LtvValidationOptionalColumns Optional { get; }
             public SubjectiveInputRelationshipAuditColumns Audit { get; }
             public string QrSlideLinkSelect { get; }
+            public string? HistoryIsConfirmedColumn { get; }
+            public string? HistoryFileUploadIdColumn { get; }
+            public string? HistorySnapshotDateColumn { get; }
         }
     }
 }

@@ -59,15 +59,16 @@ namespace kingsightapi.Entities
 
     /// <summary>
     /// Dates shown under Prior LTV / Current LTV column headers.
-    /// Current = latest file_upload_history.as_of_date joined via loan_alias_relationship where is_confirmed = 'N'.
-    /// Prior = latest file_upload_history.as_of_date joined via loan_alias_relationship where is_confirmed = 'Y'.
+    /// Current = latest file_upload_history.as_of_date via loan_alias_relationship (order by uploaded_date desc).
+    /// Prior = latest file_upload_history.as_of_date via loan_alias_relationship_history where is_confirmed = 'Y'
+    /// (order by snapshot_date desc).
     /// </summary>
     public sealed class LtvValidationColumnDatesDto
     {
-        /// <summary>Latest as_of_date for unconfirmed rows (yyyy-MM-dd).</summary>
+        /// <summary>Latest current LTV as_of_date (yyyy-MM-dd).</summary>
         public string? CurrentLtvAsOfDate { get; init; }
 
-        /// <summary>Latest as_of_date for confirmed rows (yyyy-MM-dd).</summary>
+        /// <summary>Latest confirmed prior LTV as_of_date (yyyy-MM-dd).</summary>
         public string? PriorLtvConfirmedDate { get; init; }
     }
 }
