@@ -31,6 +31,7 @@ namespace kingsightapi.Services
 
         Task CreateLtvReviewedAsync(
             string updatedBy,
+            DateTime? asOfDate = null,
             CancellationToken cancellationToken = default);
     }
 
@@ -215,18 +216,22 @@ namespace kingsightapi.Services
             await InsertAsync("Default Date Update", notice, updatedBy, cancellationToken);
         }
 
-        public async Task CreateLtvReviewedAsync(string updatedBy, CancellationToken cancellationToken)
+        public async Task CreateLtvReviewedAsync(
+            string updatedBy,
+            DateTime? asOfDate = null,
+            CancellationToken cancellationToken = default)
         {
             if (!await IsTriggerActiveAsync(LtvValidationScreen, "Confirm LTV", cancellationToken))
             {
-                _logger.LogInformation(
+                _logger.LogWarning(
                     "Skipped LTV Reviewed notification; no active rule in notification_master for LTV Validation / Confirm LTV.");
                 return;
             }
 
-            var periodLabel = GetCurrentQuarterLabel(DateTime.UtcNow);
-            var notice =
-                $"The LTV for {periodLabel} has been Reviewed and Finalized and Reflected in Reporting";
+            // Prefer file As Of date (not calendar quarter from confirm time).
+            var notice = asOfDate.HasValue
+                ? $"The LTV for {FormatDateLabel(asOfDate)} has been Reviewed and Finalized and Reflected in Reporting"
+                : "The LTV has been Reviewed and Finalized and Reflected in Reporting";
 
             await InsertAsync("LTV Reviewed", notice, updatedBy, cancellationToken);
         }
@@ -355,7 +360,8 @@ namespace kingsightapi.Services
                 "Confirm LTV",
                 "loan_alias_relationship",
                 "current_loan_to_value",
-                cancellationToken);
+                cancellationToken,
+                reactivateIfInactive: true);
         }
 
         private async Task EnsureDefaultRuleAsync(
@@ -364,7 +370,8 @@ namespace kingsightapi.Services
             string screenAttribute,
             string tableName,
             string columnName,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool reactivateIfInactive = false)
         {
             await using var command = new SqlCommand(
                 $"""
@@ -379,6 +386,16 @@ namespace kingsightapi.Services
                     values
                         (null, @screen_name, @screen_attribute, @table_name, @column_name, 1)
                 end
+                {(reactivateIfInactive ? $"""
+                else
+                begin
+                    update {_notificationMasterTable}
+                    set is_active = 1
+                    where screen_name = @screen_name
+                      and screen_attribute = @screen_attribute
+                      and isnull(is_active, 0) = 0
+                end
+                """ : string.Empty)}
                 """,
                 connection);
 
@@ -510,11 +527,5 @@ namespace kingsightapi.Services
 
         private static string FormatDateLabel(DateTime? value) =>
             value.HasValue ? value.Value.ToString("MM/dd/yyyy") : "null";
-
-        private static string GetCurrentQuarterLabel(DateTime utcNow)
-        {
-            var quarter = (utcNow.Month - 1) / 3 + 1;
-            return $"Q{quarter} {utcNow.Year}";
-        }
     }
 }

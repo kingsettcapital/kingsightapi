@@ -402,11 +402,14 @@ namespace kingsightapi.Services
                            uploaded_date,
                            uploaded_by
                     from {_fileUploadHistoryTable}
-                    order by uploaded_date desc
+                    order by uploaded_date desc, file_type asc, as_of_date desc
                     """;
             }
 
             var asOfSelect = _legacyAsOfDateColumn is not null ? $", [{_legacyAsOfDateColumn}]" : string.Empty;
+            var asOfOrder = _legacyAsOfDateColumn is not null
+                ? $", [{_legacyAsOfDateColumn}] desc"
+                : string.Empty;
             return $"""
                 select file_id,
                        filename,
@@ -414,7 +417,7 @@ namespace kingsightapi.Services
                        uploaded_date,
                        uploaded_by{asOfSelect}
                 from {_legacyUploadHistoryTable}
-                order by uploaded_date desc
+                order by uploaded_date desc, file_type asc{asOfOrder}
                 """;
         }
 

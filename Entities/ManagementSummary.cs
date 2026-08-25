@@ -66,6 +66,12 @@ namespace kingsightapi.Entities
         public DateTime? WatchlistAsAt { get; init; }
         public ManagementSummaryFilterOptionsDto FilterOptions { get; init; } = new();
         public ManagementSummaryChartsPhase2Dto ChartsPhase2 { get; init; } = new();
+
+        /// <summary>Latest LTV validation as-of date from QR slide upload (yyyy-MM-dd).</summary>
+        public string? LtvAsOfDate { get; init; }
+
+        /// <summary>True when the current LTV review batch is locked.</summary>
+        public bool IsLtvConfirmed { get; init; }
     }
 
     public sealed class ManagementSummaryKpisDto
@@ -107,6 +113,9 @@ namespace kingsightapi.Entities
         public decimal TotalExposure { get; init; }
         public decimal? Ltv { get; init; }
         public string Risk { get; init; } = "LOW";
+
+        /// <summary>True when all LTV values for this loan alias are locked (<c>is_confirmed = 'Y'</c>).</summary>
+        public bool IsLtvConfirmed { get; init; }
     }
 
     public sealed class ExposureAnalysisRowDto
@@ -206,6 +215,12 @@ namespace kingsightapi.Entities
         public DateTime? MaturityDate { get; init; }
         public DateTime? InterestOffDate { get; init; }
         public DateOnly AsOfDate { get; init; }
+
+        /// <summary>Latest LTV validation as-of date from QR slide upload (yyyy-MM-dd).</summary>
+        public string? LtvAsOfDate { get; init; }
+
+        /// <summary>True when the current LTV review batch is locked.</summary>
+        public bool IsLtvConfirmed { get; init; }
     }
 
     public sealed class LoanDetailReportPropertyStatsDto
@@ -259,6 +274,9 @@ namespace kingsightapi.Entities
         public int? TimesNsfd { get; init; }
         /// <summary>Y/N from warehouse (aggregate_flag); portfolio TOTALS include only Y rows.</summary>
         public string? AggregateFlag { get; init; }
+
+        /// <summary>True when this loan's current LTV is locked (<c>is_confirmed = 'Y'</c>).</summary>
+        public bool IsLtvConfirmed { get; init; }
     }
 
     public sealed class LoanPortfolioDetailTotalsDto

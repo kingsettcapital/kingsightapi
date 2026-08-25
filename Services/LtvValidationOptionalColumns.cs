@@ -75,18 +75,21 @@ namespace kingsightapi.Services
             };
         }
 
-        public string BuildConfirmUpdateSetClause(string relationshipAlias = "a")
+        public string BuildConfirmUpdateSetClause(string relationshipAlias = "a") =>
+            BuildIsConfirmedUpdateSetClause(relationshipAlias, "Y");
+
+        public string BuildUnlockUpdateSetClause(string relationshipAlias = "a") =>
+            BuildIsConfirmedUpdateSetClause(relationshipAlias, "N");
+
+        private string BuildIsConfirmedUpdateSetClause(string relationshipAlias, string flagValue)
         {
-            var sets = new List<string>();
-            if (IsConfirmedColumn is not null)
+            if (IsConfirmedColumn is null)
             {
-                // Warehouse flag used by reports: is_confirmed = 'Y'.
-                sets.Add($"{relationshipAlias}.{Bracket(IsConfirmedColumn)} = 'Y'");
+                return string.Empty;
             }
 
-            return sets.Count == 0
-                ? string.Empty
-                : string.Join(",\n                    ", sets);
+            // Warehouse flag used by reports: is_confirmed = 'Y' (locked) or 'N' (unlocked).
+            return $"{relationshipAlias}.{Bracket(IsConfirmedColumn)} = '{flagValue}'";
         }
 
         public string BuildUpdateSetClause(string relationshipAlias = "a")
@@ -127,6 +130,7 @@ namespace kingsightapi.Services
                 SelectAliasOrNull(UpdateComment, relationshipAlias, "update_comment", "varchar(500)"),
                 SelectAliasOrNull(AiComments, relationshipAlias, "ai_comments", "varchar(max)"),
                 SelectAliasOrNull(AiConfidenceScore, relationshipAlias, "ai_confidence_score", "decimal(18, 4)"),
+                SelectAliasOrNull(IsConfirmedColumn, relationshipAlias, "is_confirmed", "varchar(1)"),
             };
 
             return ",\n                       " + string.Join(",\n                       ", parts);
