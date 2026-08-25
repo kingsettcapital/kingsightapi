@@ -26,7 +26,13 @@ namespace kingsightapi.Configuration
                 return error;
             }
 
-            if (IsMortgageUserRole(user!.RoleName))
+            // Admin always has full access — overrides Mortgage User read-only.
+            if (IsAdminRole(user!.RoleName))
+            {
+                return null;
+            }
+
+            if (IsMortgageUserRole(user.RoleName))
             {
                 return new ObjectResult(LtvForbiddenMessage)
                 {
@@ -51,15 +57,15 @@ namespace kingsightapi.Configuration
                 return error;
             }
 
-            if (!IsMortgageSuperUserRole(user!.RoleName))
+            if (IsAdminRole(user!.RoleName) || IsMortgageSuperUserRole(user.RoleName))
             {
-                return new ObjectResult(AliasAssignmentForbiddenMessage)
-                {
-                    StatusCode = StatusCodes.Status403Forbidden,
-                };
+                return null;
             }
 
-            return null;
+            return new ObjectResult(AliasAssignmentForbiddenMessage)
+            {
+                StatusCode = StatusCodes.Status403Forbidden,
+            };
         }
 
         /// <summary>Backward-compatible alias for LTV editor gate. </summary>
@@ -70,10 +76,17 @@ namespace kingsightapi.Configuration
             resolver.RequireLtvEditorAsync(userService, cancellationToken);
 
         public static bool CanEditLtvValidation(string? roleName) =>
-            !string.IsNullOrWhiteSpace(roleName) && !IsMortgageUserRole(roleName);
+            IsAdminRole(roleName)
+            || (!string.IsNullOrWhiteSpace(roleName) && !IsMortgageUserRole(roleName));
 
         public static bool CanEditAliasAssignment(string? roleName) =>
-            IsMortgageSuperUserRole(roleName);
+            IsAdminRole(roleName) || IsMortgageSuperUserRole(roleName);
+
+        public static bool IsAliasAssignmentAuditProfile(string? auditProfile)
+        {
+            var normalized = auditProfile?.Trim().ToLowerInvariant();
+            return normalized is null or "" or "loan_alias" or "alias" or "loan-alias";
+        }
 
         public static bool IsAdminRole(string? roleName)
         {
