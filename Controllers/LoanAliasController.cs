@@ -12,15 +12,18 @@ namespace kingsightapi.Controllers
     {
         private readonly ILoanAliasService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<LoanAliasController> _logger;
 
         public LoanAliasController(
             ILoanAliasService service,
             ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<LoanAliasController> logger)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
         }
 
@@ -82,6 +85,14 @@ namespace kingsightapi.Controllers
                 return BadRequest("Loan alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 request.CreatedBy,
                 "createdBy",
@@ -126,6 +137,14 @@ namespace kingsightapi.Controllers
                 return BadRequest("Loan alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 request.UpdatedBy,
                 "updatedBy",
@@ -160,8 +179,16 @@ namespace kingsightapi.Controllers
 
         // DELETE: api/LoanAlias/{loanAliasId}
         [HttpDelete("{loanAliasId:long}")]
-        public async Task<IActionResult> Delete(long loanAliasId)
+        public async Task<IActionResult> Delete(long loanAliasId, CancellationToken cancellationToken)
         {
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             try
             {
                 var deleted = await _service.DeleteAsync(loanAliasId);

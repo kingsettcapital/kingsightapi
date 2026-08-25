@@ -95,12 +95,12 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body must include at least one loan row.");
             }
 
-            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+            var editorError = await _currentUserResolver.RequireLtvEditorAsync(
                 _userService,
                 cancellationToken);
-            if (approverError is not null)
+            if (editorError is not null)
             {
-                return approverError;
+                return editorError;
             }
 
             var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
@@ -147,12 +147,12 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body must include at least one loan key or loan code.");
             }
 
-            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+            var editorError = await _currentUserResolver.RequireLtvEditorAsync(
                 _userService,
                 cancellationToken);
-            if (approverError is not null)
+            if (editorError is not null)
             {
-                return approverError;
+                return editorError;
             }
 
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
@@ -198,12 +198,12 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body must include at least one loan key or loan code.");
             }
 
-            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+            var editorError = await _currentUserResolver.RequireLtvEditorAsync(
                 _userService,
                 cancellationToken);
-            if (approverError is not null)
+            if (editorError is not null)
             {
-                return approverError;
+                return editorError;
             }
 
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(

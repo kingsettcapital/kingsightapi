@@ -12,15 +12,18 @@ namespace kingsightapi.Controllers
     {
         private readonly ILoanService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<LoansController> _logger;
 
         public LoansController(
             ILoanService service,
             ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<LoansController> logger)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
         }
 
@@ -90,6 +93,14 @@ namespace kingsightapi.Controllers
                 {
                     return BadRequest("Loan alias key is required.");
                 }
+            }
+
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
             }
 
             var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
