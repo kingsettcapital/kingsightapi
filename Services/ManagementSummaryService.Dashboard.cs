@@ -240,6 +240,36 @@ namespace kingsightapi.Services
                 .ToList();
             var watchlistAsAt = watchlistDates.Count == 0 ? (DateTime?)null : watchlistDates.Max();
 
+            var ltvReviewStatus = await _ltvValidationService.GetLtvReviewStatusAsync(cancellationToken);
+            var aliasConfirmFlags = await _ltvValidationService.GetLtvConfirmFlagsByLoanAliasNamesAsync(
+                aliasRows.Select(row => row.LoanAlias).ToArray(),
+                cancellationToken);
+            aliasRows = aliasRows
+                .Select(row => new LoanAliasSummaryRowDto
+                {
+                    LoanAliasKey = row.LoanAliasKey,
+                    LoanAlias = row.LoanAlias,
+                    Sponsor = row.Sponsor,
+                    DefaultDate = row.DefaultDate,
+                    MaturityDate = row.MaturityDate,
+                    InterestStatus = row.InterestStatus,
+                    Units = row.Units,
+                    Exit = row.Exit,
+                    Security = row.Security,
+                    Principal = row.Principal,
+                    OsInt = row.OsInt,
+                    Accrued = row.Accrued,
+                    LateInt = row.LateInt,
+                    TaxIns = row.TaxIns,
+                    IntAdv = row.IntAdv,
+                    Other = row.Other,
+                    TotalExposure = row.TotalExposure,
+                    Ltv = row.Ltv,
+                    Risk = row.Risk,
+                    IsLtvConfirmed = aliasConfirmFlags.TryGetValue(row.LoanAlias, out var confirmed) && confirmed,
+                })
+                .ToList();
+
             _logger.LogInformation(
                 "Management summary dashboard for {AsOfDate}: {LoanCount} loans, {AliasCount} alias rows, {WatchlistCount} watchlist rows, {ExposureAnalysisCount} exposure analysis rows.",
                 query.AsOfDate,
@@ -259,7 +289,9 @@ namespace kingsightapi.Services
                 WatchlistRows = watchlistRows,
                 WatchlistAsAt = watchlistAsAt,
                 FilterOptions = filterOptions,
-                ChartsPhase2 = charts
+                ChartsPhase2 = charts,
+                LtvAsOfDate = ltvReviewStatus.LtvAsOfDate,
+                IsLtvConfirmed = ltvReviewStatus.IsLtvConfirmed,
             };
         }
 
@@ -1304,6 +1336,33 @@ namespace kingsightapi.Services
                 taxTask);
 
             var portfolioRows = ApplyLoanDetailInvestorFilter(await portfolioTask, query.InvestorAliases);
+            var loanConfirmFlags = await _ltvValidationService.GetLtvConfirmFlagsByLoanCodesAsync(
+                portfolioRows.Select(row => row.LoanId).ToArray(),
+                cancellationToken);
+            portfolioRows = portfolioRows
+                .Select(row => new LoanPortfolioDetailRowDto
+                {
+                    LoanId = row.LoanId,
+                    Description = row.Description,
+                    Investor = row.Investor,
+                    Rank = row.Rank,
+                    Rate = row.Rate,
+                    Principal = row.Principal,
+                    DefInterest = row.DefInterest,
+                    AccruedInt = row.AccruedInt,
+                    LateInt = row.LateInt,
+                    IntAdj = row.IntAdj,
+                    TaxArrears = row.TaxArrears,
+                    OtherCosts = row.OtherCosts,
+                    TotalExposure = row.TotalExposure,
+                    Ltv = row.Ltv,
+                    MonthsInArrears = row.MonthsInArrears,
+                    TimesNsfd = row.TimesNsfd,
+                    AggregateFlag = row.AggregateFlag,
+                    IsLtvConfirmed = loanConfirmFlags.TryGetValue(row.LoanId, out var confirmed) && confirmed,
+                })
+                .ToList();
+            var ltvReviewStatus = await _ltvValidationService.GetLtvReviewStatusAsync(cancellationToken);
             var topBar = await topBarTask;
             var reportDetails = await reportDetailsTask;
             var keyDatesRaw = await keyDatesTask;
@@ -1377,7 +1436,9 @@ namespace kingsightapi.Services
                     DaysInDefault = daysInDefault > 0 ? daysInDefault : null,
                     MaturityDate = keyDatesRaw.MaturityDate,
                     InterestOffDate = keyDatesRaw.InterestOffDate,
-                    AsOfDate = query.AsOfDate
+                    AsOfDate = query.AsOfDate,
+                    LtvAsOfDate = ltvReviewStatus.LtvAsOfDate,
+                    IsLtvConfirmed = ltvReviewStatus.IsLtvConfirmed,
                 },
                 PropertyStats = new LoanDetailReportPropertyStatsDto
                 {

@@ -152,8 +152,10 @@ sealed class NoopNotificationService : INotificationService
 
         CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task CreateLtvReviewedAsync(string updatedBy, CancellationToken cancellationToken = default) =>
-
+    public Task CreateLtvReviewedAsync(
+        string updatedBy,
+        DateTime? asOfDate = null,
+        CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
 
 }

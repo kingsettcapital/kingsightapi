@@ -82,6 +82,7 @@ namespace kingsightapi.Services
         private readonly string _fnManagementSummarySponsorSummary;
         private readonly string _fnManagementSummaryExposureAnalysis;
         private readonly string _tblSubjectiveLoanAliasMaster;
+        private readonly ILtvValidationService _ltvValidationService;
         private readonly ILogger<ManagementSummaryService> _logger;
         private string? _loanStatusKeyColumn;
         private string? _parentLoanKeyColumn;
@@ -99,11 +100,13 @@ namespace kingsightapi.Services
         public ManagementSummaryService(
             IConfiguration configuration,
             ILogger<ManagementSummaryService> logger,
-            FabricWarehouseTables tables)
+            FabricWarehouseTables tables,
+            ILtvValidationService ltvValidationService)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _ltvValidationService = ltvValidationService;
             _tables = tables;
             _tblDimLoan = tables.Mort("dim_loan");
             _tblLoanAliasMaster = tables.Mort("loan_alias_master");

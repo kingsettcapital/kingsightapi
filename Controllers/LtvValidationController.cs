@@ -11,15 +11,18 @@ namespace kingsightapi.Controllers
     {
         private readonly ILtvValidationService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<LtvValidationController> _logger;
 
         public LtvValidationController(
             ILtvValidationService service,
             ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<LtvValidationController> logger)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
         }
 
@@ -92,6 +95,14 @@ namespace kingsightapi.Controllers
                 return BadRequest("Request body must include at least one loan row.");
             }
 
+            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+                _userService,
+                cancellationToken);
+            if (approverError is not null)
+            {
+                return approverError;
+            }
+
             var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 clientAudit,
@@ -124,7 +135,7 @@ namespace kingsightapi.Controllers
             }
         }
 
-        // POST: api/LtvValidation/confirm
+        // POST: api/LtvValidation/confirm — locks LTV (is_confirmed = 'Y')
         [HttpPost("confirm")]
         public async Task<IActionResult> Confirm(
             [FromBody] LtvValidationConfirmRequest? request,
@@ -134,6 +145,14 @@ namespace kingsightapi.Controllers
                 || (request.LoanKeys.Count == 0 && request.LoanCodes.Count == 0))
             {
                 return BadRequest("Request body must include at least one loan key or loan code.");
+            }
+
+            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+                _userService,
+                cancellationToken);
+            if (approverError is not null)
+            {
+                return approverError;
             }
 
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
@@ -152,18 +171,69 @@ namespace kingsightapi.Controllers
             }
             catch (InvalidOperationException ex)
             {
-                _logger.LogWarning(ex, "LTV validation confirm validation failed");
+                _logger.LogWarning(ex, "LTV validation lock validation failed");
                 return BadRequest(ex.Message);
             }
             catch (OperationCanceledException)
             {
-                _logger.LogInformation("Confirm LTV validation rows cancelled");
+                _logger.LogInformation("Lock LTV validation rows cancelled");
                 return StatusCode(499);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error confirming LTV validation rows");
-                return StatusCode(500, "An error occurred while confirming LTV validation rows.");
+                _logger.LogError(ex, "Error locking LTV validation rows");
+                return StatusCode(500, "An error occurred while locking LTV validation rows.");
+            }
+        }
+
+        // POST: api/LtvValidation/unlock — unlocks LTV (is_confirmed = 'N')
+        [HttpPost("unlock")]
+        public async Task<IActionResult> Unlock(
+            [FromBody] LtvValidationUnlockRequest? request,
+            CancellationToken cancellationToken)
+        {
+            if (request is null
+                || (request.LoanKeys.Count == 0 && request.LoanCodes.Count == 0))
+            {
+                return BadRequest("Request body must include at least one loan key or loan code.");
+            }
+
+            var approverError = await _currentUserResolver.RequireMortgageApproverAsync(
+                _userService,
+                cancellationToken);
+            if (approverError is not null)
+            {
+                return approverError;
+            }
+
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.UserUpdatedBy,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
+            try
+            {
+                var unlocked = await _service.UnlockAsync(request, auditDisplayName!, cancellationToken);
+                return unlocked ? Ok() : NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(ex, "LTV validation unlock validation failed");
+                return BadRequest(ex.Message);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Unlock LTV validation rows cancelled");
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error unlocking LTV validation rows");
+                return StatusCode(500, "An error occurred while unlocking LTV validation rows.");
             }
         }
     }

@@ -21,6 +21,9 @@ namespace kingsightapi.Entities
         public string? UserUpdatedBy { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
 
+        /// <summary>True when <c>is_confirmed = 'Y'</c> on loan_alias_relationship (LTV locked).</summary>
+        public bool IsConfirmed { get; init; }
+
         /// <summary>Legacy SPA field — same as <see cref="LoanCode"/>.</summary>
         public string ChildLoanId => LoanCode;
 
@@ -52,7 +55,15 @@ namespace kingsightapi.Entities
     public sealed class LtvValidationConfirmRequest
     {
         public List<long> LoanKeys { get; init; } = [];
-        /// <summary>Preferred: confirm by loan_code (sets is_confirmed = 'Y').</summary>
+        /// <summary>Preferred: lock by loan_code (sets is_confirmed = 'Y').</summary>
+        public List<string> LoanCodes { get; init; } = [];
+        public string UserUpdatedBy { get; init; } = "system";
+    }
+
+    /// <summary>Unlock LTV — same loan keys/codes as confirm; sets is_confirmed = 'N'.</summary>
+    public sealed class LtvValidationUnlockRequest
+    {
+        public List<long> LoanKeys { get; init; } = [];
         public List<string> LoanCodes { get; init; } = [];
         public string UserUpdatedBy { get; init; } = "system";
     }
@@ -70,5 +81,15 @@ namespace kingsightapi.Entities
 
         /// <summary>Latest confirmed prior LTV as_of_date (yyyy-MM-dd).</summary>
         public string? PriorLtvConfirmedDate { get; init; }
+
+        /// <summary>True when current LTV review is locked (<c>is_confirmed = 'Y'</c> on latest upload batch).</summary>
+        public bool IsCurrentLtvConfirmed { get; init; }
+    }
+
+    /// <summary>LTV lock status for reports (as-of date + confirm flag).</summary>
+    public sealed class LtvReviewStatusDto
+    {
+        public string? LtvAsOfDate { get; init; }
+        public bool IsLtvConfirmed { get; init; }
     }
 }
