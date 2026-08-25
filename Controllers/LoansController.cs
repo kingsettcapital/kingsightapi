@@ -95,12 +95,16 @@ namespace kingsightapi.Controllers
                 }
             }
 
-            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
-                _userService,
-                cancellationToken);
-            if (superUserError is not null)
+            var auditProfile = request.AuditProfile;
+            if (MortgageApproverExtensions.IsAliasAssignmentAuditProfile(auditProfile))
             {
-                return superUserError;
+                var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                    _userService,
+                    cancellationToken);
+                if (superUserError is not null)
+                {
+                    return superUserError;
+                }
             }
 
             var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
