@@ -16,16 +16,19 @@ namespace kingsightapi.Controllers
     {
         private readonly IInvestorAliasService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<InvestorAliasController> _logger;
         private static readonly ILog log = LogManager.GetLogger(typeof(InvestorAliasController));
         public InvestorAliasController(
             IInvestorAliasService service,
             ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<InvestorAliasController> logger,
             IConfiguration config)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
             var log4netConfigPath = config.GetSection("log4netConfigFile")?.Value;
             if (string.IsNullOrWhiteSpace(log4netConfigPath))
@@ -95,6 +98,14 @@ namespace kingsightapi.Controllers
                 return BadRequest("Investor alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 request.CreatedBy,
                 "createdBy",
@@ -139,6 +150,14 @@ namespace kingsightapi.Controllers
                 return BadRequest("Investor alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 request.UpdatedBy,
                 "updatedBy",
@@ -173,8 +192,16 @@ namespace kingsightapi.Controllers
 
         // DELETE: api/InvestorAlias/{investorAliasId}
         [HttpDelete("{investorAliasId:long}")]
-        public async Task<IActionResult> Delete(long investorAliasId)
+        public async Task<IActionResult> Delete(long investorAliasId, CancellationToken cancellationToken)
         {
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             try
             {
                 var deleted = await _service.DeleteAsync(investorAliasId);

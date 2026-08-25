@@ -12,15 +12,18 @@ namespace kingsightapi.Controllers
     {
         private readonly IInvestorService _service;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<InvestorsController> _logger;
 
         public InvestorsController(
             IInvestorService service,
             ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<InvestorsController> logger)
         {
             _service = service;
             _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
         }
 
@@ -109,6 +112,14 @@ namespace kingsightapi.Controllers
                 {
                     return BadRequest("Investor code is required.");
                 }
+            }
+
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
             }
 
             var clientAudit = request.Investors.FirstOrDefault()?.UserUpdatedBy;
