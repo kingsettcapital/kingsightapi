@@ -57,6 +57,10 @@ namespace kingsightapi.Services
         private readonly string _loanAliasMaster;
         private readonly string _tblSharedDimLoan;
         private readonly string _tblDimStatus;
+        private readonly string _tblYardiCollateralValue;
+        private readonly string _tblYardiCollateralXref;
+        private readonly string _tblYardiCollateral;
+        private readonly string _tblYardiLookupValues;
         private readonly string _investorJoinSql;
         private readonly SubjectiveInputSql _subjectiveInputSql;
         private readonly string _loanEligibleSql;
@@ -92,6 +96,10 @@ namespace kingsightapi.Services
             _loanAliasRelationshipHistory = tables.SubjectiveInput("loan_alias_relationship_history");
             _fileUploadHistoryTable = tables.SubjectiveInput("file_upload_history");
             _loanAliasMaster = subjective.LoanAliasMaster;
+            _tblYardiCollateralValue = tables.Yardi("Collateral_Value");
+            _tblYardiCollateralXref = tables.Yardi("collateral_xref");
+            _tblYardiCollateral = tables.Yardi("collateral");
+            _tblYardiLookupValues = tables.Yardi("Lookup_Values");
             _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("l", "d");
 
             _loanEligibleSql = $"""
@@ -873,16 +881,59 @@ namespace kingsightapi.Services
             string? loanStatusKeyColumn,
             string? loanStatusDescriptionColumn)
         {
-            // Aligns with warehouse list shape: relationship + master + dim_loan + investor_alias.
+            // List shape: relationship + master + dim_loan + investor_alias + Yardi RE collateral.
+            // security_value = coalesce(nullif(master.security_value, 0), yardi_collateral) — same rule as Loan Security Value.
             // Status filter uses current dim_loan.funding_status_code / funding_status_description.
             var sql = new StringBuilder($"""
+                with latest_collateral_value as (
+                    select collateral_id, valuation_date, collateral_amount
+                    from (
+                        select collateral_id, valuation_date, collateral_amount,
+                               row_number() over (partition by collateral_id order by valuation_date desc) as rn
+                        from {_tblYardiCollateralValue}
+                    ) t
+                    where rn = 1
+                ),
+                dataset as (
+                    select e.loan_alias_name,
+                           e.loan_code,
+                           col.collateral_name,
+                           cv.collateral_amount,
+                           row_number() over (
+                               partition by e.loan_alias_name, col.collateral_name
+                               order by e.loan_alias_name, col.collateral_name
+                           ) as rn
+                    from {_loanAliasRelationship} e
+                    inner join {_tblSharedDimLoan} f
+                        on {SubjectiveInputSql.EqualsVarchar("e", "loan_code", "f", "loan_code")}
+                    inner join {_loanAliasMaster} g
+                        on e.loan_alias_name = g.loan_alias_name
+                    left join (
+                        select distinct collateral_id, loan_id
+                        from {_tblYardiCollateralXref}
+                    ) xref on xref.loan_id = f.loan_id
+                    left join {_tblYardiCollateral} col
+                        on xref.collateral_id = col.collateral_id
+                    inner join {_tblYardiLookupValues} lv
+                        on col.collateral_type = lv.lookup_sk
+                       and lv.lookup_value = 'Real Estate'
+                    left join latest_collateral_value cv
+                        on col.collateral_id = cv.collateral_id
+                ),
+                dataset2 as (
+                    select loan_alias_name,
+                           sum(collateral_amount) as collateral
+                    from dataset
+                    where rn = 1
+                    group by loan_alias_name
+                )
                 select {SubjectiveInputSql.LoanKeySelect("a", "l")},
                        parent_loan_code = isnull(l.parent_loan_code, ''),
                        loan_code = a.loan_code,
                        loan_name = isnull(a.loan_description, ''),
                        loan_alias_name = isnull(a.loan_alias_name, ''),
                        investor_alias_name = isnull(d.investor_alias_name, ''),
-                       b.security_value,
+                       security_value = coalesce(nullif(b.security_value, 0), e.collateral),
                        a.exposure,
                        a.ranking,
                        {schema.Optional.BuildLtvSelectExpression("a")},
@@ -896,6 +947,8 @@ namespace kingsightapi.Services
                     on a.loan_alias_name = b.loan_alias_name
                 {_subjectiveInputSql.SharedDimLoanOuterApplyOnLoanCode("a", "l")}
                 {_investorJoinSql}
+                left join dataset2 e
+                    on a.loan_alias_name = e.loan_alias_name
                 """);
 
             sql.AppendLine();
