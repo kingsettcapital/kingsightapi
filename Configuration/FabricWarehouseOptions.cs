@@ -23,7 +23,7 @@ public sealed class FabricWarehouseOptions
     /// <summary>
     /// Silver lakehouse with Yardi shortcuts (e.g. <c>yardi.collateral</c>, <c>yardi.Collateral_Value</c>).
     /// </summary>
-    public string SilverLakehouseDatabase { get; set; } = "shortcut_lh_silver1";
+    public string SilverLakehouseDatabase { get; set; } = "shortcut_lh_silver";
 
     /// <summary>
     /// Bronze lakehouse shortcuts for CMHC watchlist and related external tables.
