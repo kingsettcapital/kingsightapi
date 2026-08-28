@@ -223,9 +223,11 @@ public sealed partial class DataExplorerService : IDataExplorerService
         var (schema, table, viewName, classify) = ResolveProductSchema(product);
         // Fabric uses a case-sensitive (BIN2) collation, so system views/columns must be upper-cased.
         // Alias to lower-case names so the reader lookups stay consistent with the rest of the codebase.
-        const string sql =
+        // Qualify INFORMATION_SCHEMA with FabricWarehouse:Database so column catalog does not
+        // depend on the connection default catalog.
+        var sql =
             " select COLUMN_NAME as column_name, DATA_TYPE as data_type, ORDINAL_POSITION as ordinal_position " +
-            " from INFORMATION_SCHEMA.COLUMNS " +
+            $" from [{WarehouseTables.Database}].INFORMATION_SCHEMA.COLUMNS " +
             " where TABLE_SCHEMA = @schema and TABLE_NAME = @table " +
             " order by ORDINAL_POSITION ";
 

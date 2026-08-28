@@ -241,7 +241,7 @@ public sealed class PortalFilterService : IPortalFilterService
                 d.calendar_year,
                 date_key = max(d.date_key)
             from {WarehouseTables.FactInvestorPortfolioQuarterly} q
-            inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year
+            inner join {WarehouseTables.DimDate} d on {WarehouseSql.QuarterYearEquals("d.quarter_year", "q.quarter_year")}
             group by d.quarter_year, d.calendar_year
             order by d.calendar_year desc, d.quarter_year desc
             """;

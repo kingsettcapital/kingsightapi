@@ -26,8 +26,6 @@ var tables = new FabricWarehouseTables(Options.Create(new FabricWarehouseOptions
 
     Database = config["FabricWarehouse:Database"] ?? "wh_gold",
 
-    SubjectiveInputDatabase = config["FabricWarehouse:SubjectiveInputDatabase"] ?? "wh_gold1",
-
 }));
 
 

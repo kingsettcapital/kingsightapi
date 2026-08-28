@@ -1,5 +1,5 @@
 -- Seed notification master rules (Phase I: role_id NULL = all users).
--- Run against wh_gold1 (FabricWarehouse:SubjectiveInputDatabase).
+-- Run against wh_gold (FabricWarehouse:Database).
 DELETE FROM [wh_gold1].[subjective_input].[notification_master]
 WHERE [screen_name] IN (
     'Loan Attribute Assignment',
