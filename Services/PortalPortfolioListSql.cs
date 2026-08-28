@@ -4,7 +4,7 @@ using Microsoft.Data.SqlClient;
 
 namespace kingsightapi.Services;
 
-/// <summary>Shared SQL for investor/fund module list pages (fact_investor_portfolio_ltd | quarterly).</summary>
+/// <summary>Shared SQL for investor/fund module list pages (fact_investor_portfolio_itd | quarterly).</summary>
 internal static class PortalPortfolioListSql
 {
     public static string PortfolioTable(TimeGranularity view) =>
@@ -103,16 +103,14 @@ internal static class PortalPortfolioListSql
     {
         if (period?.HasDateKey == true)
         {
-            sql.Append($" and {factAlias}.quarter_year = ( ");
-            sql.Append($" select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey ");
-            sql.Append(" ) ");
+            sql.Append($" and {WarehouseSql.QuarterYearEquals($"{factAlias}.quarter_year", $"(select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey)")} ");
             return;
         }
 
         if (period?.HasCalendarYear == true)
         {
-            sql.Append($" and {factAlias}.quarter_year in ( ");
-            sql.Append($" select distinct quarter_year from {WarehouseTables.DimDate} where calendar_year = @calendarYear ");
+            sql.Append($" and {factAlias}.quarter_year collate {WarehouseSql.QuarterYearCollation} in ( ");
+            sql.Append($" select distinct quarter_year collate {WarehouseSql.QuarterYearCollation} from {WarehouseTables.DimDate} where calendar_year = @calendarYear ");
             sql.Append(" ) ");
         }
     }

@@ -3,40 +3,59 @@ using kingsightapi.Configuration;
 namespace kingsightapi.Services;
 
 /// <summary>
-/// Enterprise capital / portal table names (<c>dbo.*</c>).
-/// Uses two-part names because the Fabric connection context already targets the enterprise warehouse.
+/// Capital portal / Data Explorer table names as three-part
+/// <c>{FabricWarehouse:Database}.schema.table</c> (default <c>wh_gold</c>).
+/// Dimensions live in <c>shared</c> / <c>investor_servicing</c>; facts in <c>investor_servicing</c>.
 /// </summary>
 internal static class WarehouseTables
 {
+    private static string _database = "wh_gold";
+
     internal static void Configure(FabricWarehouseOptions options)
     {
-        // Mortgage <c>Database</c> is used by <see cref="FabricWarehouseTables"/>; portal tables stay dbo.*.
+        ArgumentNullException.ThrowIfNull(options);
+        _database = string.IsNullOrWhiteSpace(options.Database)
+            ? "wh_gold"
+            : options.Database.Trim();
     }
 
-    public static string DimDate => "dbo.dim_date";
-    public static string DimFund => "dbo.dim_fund";
-    public static string DimInvestor => "dbo.dim_investor";
-    public static string DimProperty => "dbo.dim_property";
-    /// <summary>Maps leaf <c>property_id</c> to consolidated asset key for Assets list roll-up.</summary>
-    public static string StgEntityRelation => "stg.stg_EntityRelation";
-    public static string DimTransactionType => "dbo.dim_transaction_type";
-    public static string FactCommitted => "dbo.fact_commitment";
-    public static string FactInvestment => "dbo.fact_investment";
-    public static string FactDistribution => "dbo.fact_distribution";
-    public static string FactInvestorPortfolioLtd => "dbo.fact_investor_portfolio_ltd";
-    public static string FactInvestorPortfolioQuarterly => "dbo.fact_investor_portfolio_quarterly";
-    public static string FactFundNav => "dbo.fact_fund_nav";
-    public static string FactAssetMetrics => "dbo.fact_asset_metrics";
+    /// <summary>Warehouse catalog used for capital portal SQL (<c>FabricWarehouse:Database</c>).</summary>
+    public static string Database => _database;
 
-    public const string ViewInvestorPortfolioLtdSchema = "dbo";
-    public const string ViewInvestorPortfolioLtdName = "view_investor_portfolio_ltd";
-    public const string ViewInvestorPortfolioLtd = "[dbo].[view_investor_portfolio_ltd]";
+    private static string Shared(string table) => $"{_database}.shared.{table}";
 
-    public const string ViewInvestorFundAssetSchema = "dbo";
-    public const string ViewInvestorFundAssetName = "view_investor_fund_asset";
-    public const string ViewInvestorFundAsset = "[dbo].[view_investor_fund_asset]";
+    private static string InvestorServicing(string table) => $"{_database}.investor_servicing.{table}";
 
-    public static string DataExplorerTemplate => "dbo.data_explorer_template";
-    public static string DataExplorerTemplateColumn => "dbo.data_explorer_template_column";
-    public static string DataExplorerTemplateFilter => "dbo.data_explorer_template_filter";
+    private static string Dbo(string table) => $"{_database}.dbo.{table}";
+
+    public static string DimDate => Shared("dim_date");
+    public static string DimFund => Shared("dim_fund");
+    public static string DimInvestor => InvestorServicing("dim_investor");
+    public static string DimProperty => Shared("dim_property");
+    /// <summary>Maps leaf <c>property_key</c> to consolidated asset for Assets list roll-up.</summary>
+    public static string DimOwnershipHierarchy => Shared("dim_ownership_hierarchy");
+    public static string DimTransactionType => InvestorServicing("dim_transaction_type");
+    public static string FactCommitted => InvestorServicing("fact_commitment");
+    public static string FactInvestment => InvestorServicing("fact_investment");
+    public static string FactDistribution => InvestorServicing("fact_distribution");
+    /// <summary>ITD portfolio fact (warehouse name <c>fact_investor_portfolio_itd</c>).</summary>
+    public static string FactInvestorPortfolioLtd => InvestorServicing("fact_investor_portfolio_itd");
+    public static string FactInvestorPortfolioQuarterly => InvestorServicing("fact_investor_portfolio_quarterly");
+    public static string FactFundNav => InvestorServicing("fact_fund_nav");
+    public static string FactAssetMetrics => InvestorServicing("fact_asset_metrics");
+
+    public const string ViewInvestorPortfolioLtdSchema = "investor_servicing";
+    public const string ViewInvestorPortfolioLtdName = "vw_investor_portfolio_itd";
+    public static string ViewInvestorPortfolioLtd =>
+        $"[{_database}].[{ViewInvestorPortfolioLtdSchema}].[{ViewInvestorPortfolioLtdName}]";
+
+    public const string ViewInvestorFundAssetSchema = "investor_servicing";
+    public const string ViewInvestorFundAssetName = "vw_investor_fund_asset";
+    public static string ViewInvestorFundAsset =>
+        $"[{_database}].[{ViewInvestorFundAssetSchema}].[{ViewInvestorFundAssetName}]";
+
+    // Templates still under dbo when present; keep qualified for Initial Catalog safety.
+    public static string DataExplorerTemplate => Dbo("data_explorer_template");
+    public static string DataExplorerTemplateColumn => Dbo("data_explorer_template_column");
+    public static string DataExplorerTemplateFilter => Dbo("data_explorer_template_filter");
 }

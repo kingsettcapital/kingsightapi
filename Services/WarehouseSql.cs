@@ -5,6 +5,16 @@ namespace kingsightapi.Services;
 /// <summary>Shared SQL fragments appended via StringBuilder (dim/fund SCD, fact aggregates).</summary>
 internal static class WarehouseSql
 {
+    /// <summary>
+    /// Fabric collation bridge between <c>shared.dim_date.quarter_year</c> and
+    /// <c>investor_servicing</c> portfolio fact <c>quarter_year</c> columns.
+    /// </summary>
+    public const string QuarterYearCollation = "Latin1_General_100_CI_AS_KS_WS_SC_UTF8";
+
+    /// <summary>Equality on <c>quarter_year</c> with shared UTF-8 collation.</summary>
+    public static string QuarterYearEquals(string leftExpr, string rightExpr) =>
+        $"{leftExpr} collate {QuarterYearCollation} = {rightExpr} collate {QuarterYearCollation}";
+
     public static void AppendCurrentFundFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" ( ");
@@ -250,7 +260,7 @@ internal static class WarehouseSql
         AppendCurrentFundFilter(sql, fundAlias);
     }
 
-    /// <summary>Limit to funds where the investor has LTD portfolio exposure.</summary>
+    /// <summary>Limit to funds where the investor has ITD portfolio exposure.</summary>
     public static void AppendInvestorFundKeyScopeFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append($" and {fundAlias}.fund_key in ( ");
@@ -285,16 +295,16 @@ internal static class WarehouseSql
     }
 
     /// <summary>
-    /// Leaf property → entity relation → consolidated asset.
+    /// Leaf property → ownership hierarchy → consolidated asset.
     /// Metrics stay on leaf <c>p</c>; list/KPIs group by consolidated <c>c</c>.
     /// </summary>
     public static void AppendConsolidatedAssetFrom(StringBuilder sql)
     {
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append($" inner join {WarehouseTables.StgEntityRelation} e ");
-        sql.Append(" on p.property_id = e.property_key ");
+        sql.Append($" inner join {WarehouseTables.DimOwnershipHierarchy} e ");
+        sql.Append(" on p.property_key = e.property_key ");
         sql.Append($" inner join {WarehouseTables.DimProperty} c ");
-        sql.Append(" on e.consolidated_asset_key = c.property_id ");
+        sql.Append(" on e.consolidated_asset_key = c.property_key ");
     }
 
     /// <summary>GROUP BY consolidated asset attributes (Assets list roll-up).</summary>
@@ -315,8 +325,8 @@ internal static class WarehouseSql
     }
 
     /// <summary>
-    /// Latest <c>fact_asset_metrics</c> per property: sum rows for the same <c>date_key</c>,
-    /// then take the most recent date (matches consolidated Assets list SQL).
+    /// Latest <c>investor_servicing.fact_asset_metrics</c> per property: sum rows for the same
+    /// <c>date_key</c>, then take the most recent date (matches consolidated Assets list SQL).
     /// </summary>
     public static void AppendLatestAssetMetricsApply(
         StringBuilder sql,

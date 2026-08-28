@@ -106,6 +106,11 @@ public sealed partial class InvestorPortalService
             });
     }
 
+    /// <summary>
+    /// Investor detail Underlying Assets grid:
+    /// <c>shared.dim_property</c> × <c>shared.dim_fund</c>, scoped to funds in
+    /// <c>investor_servicing.fact_investor_portfolio_itd</c> for the investor.
+    /// </summary>
     private async Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsInternalAsync(
         long investorKey,
         string? search,

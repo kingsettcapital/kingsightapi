@@ -3,22 +3,19 @@ namespace kingsightapi.Configuration;
 /// <summary>
 /// Fabric warehouse / lakehouse database names for three-part SQL.
 /// Values are environment-specific via <c>appsettings.{Environment}.json</c>
-/// (Dev and UAT subjective input: <c>wh_gold</c>).
+/// (Dev and UAT warehouse: <c>wh_gold</c>).
 /// </summary>
 public sealed class FabricWarehouseOptions
 {
     public const string SectionName = "FabricWarehouse";
 
     /// <summary>
-    /// Primary warehouse: <c>mort.*</c>, <c>input.*</c>, and related Kingsight mortgage tables.
-    /// </summary>
-    public string Database { get; set; } = "wh_gold";
-
-    /// <summary>
-    /// Subjective input schema database: <c>subjective_input.*</c> master and relationship tables.
+    /// Gold warehouse for capital (<c>dbo.*</c> / <c>stg.*</c>), mortgage
+    /// (<c>mort.*</c>, <c>input.*</c>), and subjective schemas
+    /// (<c>subjective_input.*</c>, <c>shared.*</c>, <c>mortgage.*</c>).
     /// Dev and UAT = <c>wh_gold</c>.
     /// </summary>
-    public string SubjectiveInputDatabase { get; set; } = "wh_gold";
+    public string Database { get; set; } = "wh_gold";
 
     /// <summary>
     /// Silver lakehouse with Yardi shortcuts (e.g. <c>yardi.collateral</c>, <c>yardi.Collateral_Value</c>).

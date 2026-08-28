@@ -932,7 +932,7 @@ public sealed partial class FundPortalService : IFundPortalService
             or FundMetricSource.UnfundedCommitments)
         {
             sql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} q ");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on {WarehouseSql.QuarterYearEquals("d.quarter_year", "q.quarter_year")} ");
             sql.Append(" where q.fund_key = @fundKey ");
             sql.Append(" group by d.quarter_year, d.calendar_year ");
         }

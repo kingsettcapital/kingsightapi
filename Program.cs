@@ -129,9 +129,8 @@ namespace kingsightapi
             var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Startup");
             startupLogger.LogInformation("Kingsight API started.");
             startupLogger.LogInformation(
-            "Environment={Environment}; FabricWarehouse SubjectiveInputDatabase={SubjectiveDb}, Database={Database}, Silver={Silver}, Bronze={Bronze}; CmhcUpload Workspace={WorkspaceId} Lakehouse={LakehouseId} Path=Files/{UploadPath}",
+            "Environment={Environment}; FabricWarehouse Database={Database}, Silver={Silver}, Bronze={Bronze}; CmhcUpload Workspace={WorkspaceId} Lakehouse={LakehouseId} Path=Files/{UploadPath}",
                 app.Environment.EnvironmentName,
-                warehouseOptions.SubjectiveInputDatabase,
                 warehouseOptions.Database,
                 warehouseOptions.SilverLakehouseDatabase,
                 warehouseOptions.BronzeLakehouseDatabase,

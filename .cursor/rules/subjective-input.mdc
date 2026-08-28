@@ -42,7 +42,6 @@ Writes update `loan_to_value` on `loan_alias_relationship`. Confirm stamps audit
 ```json
 "FabricWarehouse": {
   "Database": "wh_gold",
-  "SubjectiveInputDatabase": "wh_gold",
   "SilverLakehouseDatabase": "shortcut_lh_silver"
 }
 ```
