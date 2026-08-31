@@ -353,7 +353,7 @@ internal static class WarehouseSql
         sql.Append(" date_key, ");
         sql.Append(" gross_leasable_area_sqft = sum(gross_leasable_area_sqft), ");
         sql.Append(" occupied_area_sqft = sum(occupied_area_sqft), ");
-        sql.Append(" committed_area_sqft = sum(committed_area_sqft), ");
+        sql.Append(" committed_area_sqft = sum(committed_area_sqft+occupied_area_sqft), ");
         sql.Append(" vacant_area_sqft = sum(vacant_area_sqft), ");
         sql.Append(" total_units = sum(total_units), ");
         sql.Append(" occupied_units = sum(occupied_units), ");
