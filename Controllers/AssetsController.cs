@@ -162,6 +162,56 @@ public class AssetsController : ControllerBase
         }
     }
 
+    // GET: api/assets/{propertyKey}/property-details
+    [HttpGet("{propertyKey:long}/property-details")]
+    public async Task<ActionResult<IReadOnlyList<AssetPropertyDetailRowDto>>> GetPropertyDetails(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyDetailsAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get property details for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving property details for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset property details.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/asset-type-summary
+    [HttpGet("{propertyKey:long}/asset-type-summary")]
+    public async Task<ActionResult<IReadOnlyList<AssetTypeSummaryRowDto>>> GetAssetTypeSummary(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetAssetTypeSummaryAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get asset type summary for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving asset type summary for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving the asset type summary.");
+        }
+    }
+
     // GET: api/assets/{propertyKey}/investments
     [HttpGet("{propertyKey:long}/investments")]
     public async Task<ActionResult<IReadOnlyList<PropertyInvestmentDto>>> GetInvestments(long propertyKey)

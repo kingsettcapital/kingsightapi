@@ -243,3 +243,75 @@ public sealed class PropertyFundHoldingDto
     [JsonPropertyName("fund_start_date")]
     public DateTime? FundStartDate { get; init; }
 }
+
+/// <summary>
+/// Leaf properties under a consolidated asset for GET /api/Assets/{propertyKey}/property-details.
+/// </summary>
+public sealed class AssetPropertyDetailRowDto
+{
+    [JsonPropertyName("property_code")]
+    public string PropertyCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("property_name")]
+    public string PropertyName { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_to_share_pct")]
+    public decimal? AssetToSharePct { get; init; }
+
+    [JsonPropertyName("asset_type")]
+    public string AssetType { get; init; } = string.Empty;
+
+    [JsonPropertyName("investment_type")]
+    public string InvestmentType { get; init; } = string.Empty;
+
+    [JsonPropertyName("development_type")]
+    public string DevelopmentType { get; init; } = string.Empty;
+
+    [JsonPropertyName("gross_leasable_area_sqft")]
+    public decimal? GrossLeasableAreaSqft { get; init; }
+
+    [JsonPropertyName("committed_area_sqft")]
+    public decimal? CommittedAreaSqft { get; init; }
+
+    [JsonPropertyName("vacant_area_sqft")]
+    public decimal? VacantAreaSqft { get; init; }
+
+    [JsonPropertyName("occupancy_rate")]
+    public decimal? OccupancyRate { get; init; }
+
+    [JsonPropertyName("vacancy_rate")]
+    public decimal? VacancyRate { get; init; }
+}
+
+/// <summary>
+/// Area metrics grouped by asset type for GET /api/Assets/{propertyKey}/asset-type-summary.
+/// </summary>
+public sealed class AssetTypeSummaryRowDto
+{
+    [JsonPropertyName("consolidated_asset_key")]
+    public long ConsolidatedAssetKey { get; init; }
+
+    [JsonPropertyName("consolidated_asset_code")]
+    public string ConsolidatedAssetCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("consolidated_asset_name")]
+    public string ConsolidatedAssetName { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_type")]
+    public string AssetType { get; init; } = string.Empty;
+
+    [JsonPropertyName("gross_leasable_area_sqft")]
+    public decimal? GrossLeasableAreaSqft { get; init; }
+
+    [JsonPropertyName("committed_area_sqft")]
+    public decimal? CommittedAreaSqft { get; init; }
+
+    [JsonPropertyName("vacant_area_sqft")]
+    public decimal? VacantAreaSqft { get; init; }
+
+    [JsonPropertyName("occupancy_rate")]
+    public decimal? OccupancyRate { get; init; }
+
+    [JsonPropertyName("vacancy_rate")]
+    public decimal? VacancyRate { get; init; }
+}
