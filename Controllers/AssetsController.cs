@@ -212,6 +212,31 @@ public class AssetsController : ControllerBase
         }
     }
 
+    // GET: api/assets/{propertyKey}/financial-metrics
+    [HttpGet("{propertyKey:long}/financial-metrics")]
+    public async Task<ActionResult<AssetFinancialMetricsDto?>> GetFinancialMetrics(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetAssetFinancialMetricsAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get financial metrics for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving financial metrics for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset financial metrics.");
+        }
+    }
+
     // GET: api/assets/{propertyKey}/investments
     [HttpGet("{propertyKey:long}/investments")]
     public async Task<ActionResult<IReadOnlyList<PropertyInvestmentDto>>> GetInvestments(long propertyKey)

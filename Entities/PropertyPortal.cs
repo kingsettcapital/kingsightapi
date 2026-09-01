@@ -315,3 +315,108 @@ public sealed class AssetTypeSummaryRowDto
     [JsonPropertyName("vacancy_rate")]
     public decimal? VacancyRate { get; init; }
 }
+
+/// <summary>
+/// Financial metrics for GET /api/Assets/{propertyKey}/financial-metrics.
+/// </summary>
+public sealed class AssetFinancialMetricsDto
+{
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_key")]
+    public long AssetKey { get; init; }
+
+    [JsonPropertyName("asset_code")]
+    public string AssetCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_name")]
+    public string AssetName { get; init; } = string.Empty;
+
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+
+    [JsonPropertyName("asset_ks_ownership_pct")]
+    public decimal? AssetKsOwnershipPct { get; init; }
+
+    [JsonPropertyName("asset_cash_at_quarter_end")]
+    public decimal? AssetCashAtQuarterEnd { get; init; }
+
+    [JsonPropertyName("asset_total_asset_value")]
+    public decimal? AssetTotalAssetValue { get; init; }
+
+    [JsonPropertyName("asset_debt")]
+    public decimal? AssetDebt { get; init; }
+
+    [JsonPropertyName("asset_equity")]
+    public decimal? AssetEquity { get; init; }
+
+    [JsonPropertyName("asset_noi")]
+    public decimal? AssetNoi { get; init; }
+
+    [JsonPropertyName("asset_ffo")]
+    public decimal? AssetFfo { get; init; }
+
+    [JsonPropertyName("asset_ncf")]
+    public decimal? AssetNcf { get; init; }
+
+    [JsonPropertyName("asset_capex")]
+    public decimal? AssetCapex { get; init; }
+
+    [JsonPropertyName("asset_nav_amount")]
+    public decimal? AssetNavAmount { get; init; }
+
+    [JsonPropertyName("asset_ebitda")]
+    public decimal? AssetEbitda { get; init; }
+
+    [JsonPropertyName("asset_revenue")]
+    public decimal? AssetRevenue { get; init; }
+
+    [JsonPropertyName("asset_expense")]
+    public decimal? AssetExpense { get; init; }
+
+    [JsonPropertyName("asset_gross_market_value")]
+    public decimal? AssetGrossMarketValue { get; init; }
+
+    [JsonPropertyName("asset_gav_amount")]
+    public decimal? AssetGavAmount { get; init; }
+
+    [JsonPropertyName("asset_ltv")]
+    public decimal? AssetLtv { get; init; }
+
+    [JsonPropertyName("asset_affo")]
+    public decimal? AssetAffo { get; init; }
+
+    [JsonPropertyName("asset_capex_pct_noi")]
+    public decimal? AssetCapexPctNoi { get; init; }
+
+    [JsonPropertyName("total_noi_growth_amount")]
+    public decimal? TotalNoiGrowthAmount { get; init; }
+
+    [JsonPropertyName("total_noi_growth_pct")]
+    public decimal? TotalNoiGrowthPct { get; init; }
+
+    [JsonPropertyName("same_store_noi_growth_amount")]
+    public decimal? SameStoreNoiGrowthAmount { get; init; }
+
+    [JsonPropertyName("same_store_noi_growth_pct")]
+    public decimal? SameStoreNoiGrowthPct { get; init; }
+
+    [JsonPropertyName("current_cost_amount")]
+    public decimal? CurrentCostAmount { get; init; }
+
+    [JsonPropertyName("cost_basis_amount")]
+    public decimal? CostBasisAmount { get; init; }
+
+    [JsonPropertyName("budgeted_noi_current_year")]
+    public decimal? BudgetedNoiCurrentYear { get; init; }
+
+    [JsonPropertyName("forecasted_noi_current_year")]
+    public decimal? ForecastedNoiCurrentYear { get; init; }
+
+    [JsonPropertyName("budgeted_ffo")]
+    public decimal? BudgetedFfo { get; init; }
+
+    [JsonPropertyName("forecasted_ffo")]
+    public decimal? ForecastedFfo { get; init; }
+}
