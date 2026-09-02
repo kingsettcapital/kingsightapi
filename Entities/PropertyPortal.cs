@@ -420,3 +420,96 @@ public sealed class AssetFinancialMetricsDto
     [JsonPropertyName("forecasted_ffo")]
     public decimal? ForecastedFfo { get; init; }
 }
+
+/// <summary>
+/// Acquisition + at-sale snapshot for GET /api/Assets/{propertyKey}/acquisition-sale.
+/// </summary>
+public sealed class AssetAcquisitionSaleDto
+{
+    [JsonPropertyName("acquisition")]
+    public AssetAcquisitionDto? Acquisition { get; init; }
+
+    [JsonPropertyName("sale")]
+    public AssetSaleDto? Sale { get; init; }
+}
+
+public sealed class AssetAcquisitionDto
+{
+    [JsonPropertyName("fund_key")]
+    public long FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_key")]
+    public long AssetKey { get; init; }
+
+    [JsonPropertyName("asset_code")]
+    public string AssetCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_name")]
+    public string AssetName { get; init; } = string.Empty;
+
+    [JsonPropertyName("acquisition_date")]
+    public DateTime? AcquisitionDate { get; init; }
+
+    [JsonPropertyName("at_acquisition_debt")]
+    public decimal? AtAcquisitionDebt { get; init; }
+
+    [JsonPropertyName("at_acquisition_equity")]
+    public decimal? AtAcquisitionEquity { get; init; }
+
+    [JsonPropertyName("at_acquisition_total_asset_value")]
+    public decimal? AtAcquisitionTotalAssetValue { get; init; }
+
+    [JsonPropertyName("at_acquisition_purchase_costs")]
+    public decimal? AtAcquisitionPurchaseCosts { get; init; }
+
+    [JsonPropertyName("at_acquisition_ltv")]
+    public decimal? AtAcquisitionLtv { get; init; }
+}
+
+public sealed class AssetSaleDto
+{
+    [JsonPropertyName("fund_key")]
+    public long FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_name")]
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_key")]
+    public long AssetKey { get; init; }
+
+    [JsonPropertyName("asset_code")]
+    public string AssetCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_name")]
+    public string AssetName { get; init; } = string.Empty;
+
+    [JsonPropertyName("sale_date")]
+    public DateTime? SaleDate { get; init; }
+
+    [JsonPropertyName("at_sale_debt")]
+    public decimal? AtSaleDebt { get; init; }
+
+    [JsonPropertyName("at_sale_equity")]
+    public decimal? AtSaleEquity { get; init; }
+
+    [JsonPropertyName("at_sale_total_asset_value")]
+    public decimal? AtSaleTotalAssetValue { get; init; }
+
+    [JsonPropertyName("at_sale_selling_costs")]
+    public decimal? AtSaleSellingCosts { get; init; }
+
+    [JsonPropertyName("at_sale_ltv")]
+    public decimal? AtSaleLtv { get; init; }
+
+    [JsonPropertyName("at_sale_noi")]
+    public decimal? AtSaleNoi { get; init; }
+}

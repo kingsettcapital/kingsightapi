@@ -237,6 +237,31 @@ public class AssetsController : ControllerBase
         }
     }
 
+    // GET: api/assets/{propertyKey}/acquisition-sale
+    [HttpGet("{propertyKey:long}/acquisition-sale")]
+    public async Task<ActionResult<AssetAcquisitionSaleDto>> GetAcquisitionSale(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetAssetAcquisitionSaleAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get acquisition/sale for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving acquisition/sale for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset acquisition and sale data.");
+        }
+    }
+
     // GET: api/assets/{propertyKey}/investments
     [HttpGet("{propertyKey:long}/investments")]
     public async Task<ActionResult<IReadOnlyList<PropertyInvestmentDto>>> GetInvestments(long propertyKey)
