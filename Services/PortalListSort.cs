@@ -200,8 +200,13 @@ internal static class PortalListSort
     private static readonly Dictionary<string, string> FundObligationsColumns =
         BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), ObligationMetrics);
 
-    private static readonly Dictionary<string, string> FundNetAssetsColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), NetAssetsMetrics);
+    private static readonly Dictionary<string, string> FundNetAssetsColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["quarterYear"] = "quarter_year",
+        ["quarter_year"] = "quarter_year",
+        ["period"] = "period",
+        ["nav"] = "nav"
+    };
 
     private static Dictionary<string, string> BuildTransactionSortMap(
         (string Camel, string Snake) code,
@@ -353,8 +358,8 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundNetAssetsColumns,
-            "investorCode, investorName, quarterYear, period, nav",
-            "investor_name",
+            "quarterYear, period, nav",
+            "period",
             out sort,
             out error);
 

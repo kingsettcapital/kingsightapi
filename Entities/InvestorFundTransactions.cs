@@ -336,7 +336,7 @@ public sealed class FundInvestorObligationDto
     public decimal ReleasedCapitalAmount { get; init; }
 }
 
-/// <summary>Net asset value row — fund detail, unitized funds only, quarterly NAV per investor.</summary>
+/// <summary>Net asset value row — fund detail, unitized funds only, quarterly fund-level NAV.</summary>
 public sealed class FundInvestorNetAssetsDto
 {
     [JsonPropertyName("investor_code")]
