@@ -297,12 +297,16 @@ internal static class WarehouseSql
     /// <summary>
     /// Leaf property → ownership hierarchy → consolidated asset.
     /// Metrics stay on leaf <c>p</c>; list/KPIs group by consolidated <c>c</c>.
+    /// Hierarchy uses <c>SELECT DISTINCT property_key, consolidated_asset_key</c> to avoid
+    /// duplicate join rows that inflate area sums on the Assets list.
     /// </summary>
     public static void AppendConsolidatedAssetFrom(StringBuilder sql)
     {
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append($" inner join {WarehouseTables.DimOwnershipHierarchy} e ");
-        sql.Append(" on p.property_key = e.property_key ");
+        sql.Append(" inner join ( ");
+        sql.Append(" select distinct property_key, consolidated_asset_key ");
+        sql.Append($" from {WarehouseTables.DimOwnershipHierarchy} ");
+        sql.Append(" ) e on p.property_key = e.property_key ");
         sql.Append($" inner join {WarehouseTables.DimProperty} c ");
         sql.Append(" on e.consolidated_asset_key = c.property_key ");
     }

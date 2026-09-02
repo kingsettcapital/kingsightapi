@@ -27,6 +27,7 @@ public interface IPropertyPortalService
     Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsAsync(long consolidatedPropertyKey);
     Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryAsync(long consolidatedPropertyKey);
     Task<AssetFinancialMetricsDto?> GetAssetFinancialMetricsAsync(long assetKey);
+    Task<AssetAcquisitionSaleDto> GetAssetAcquisitionSaleAsync(long assetKey);
 }
 
 public sealed partial class PropertyPortalService : IPropertyPortalService
