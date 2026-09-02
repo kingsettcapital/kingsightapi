@@ -114,11 +114,7 @@ internal static class PortalPortfolioTransactionSql
         sql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = n.fund_key ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
-        sql.Append($" inner join {WarehouseTables.FactInvestorPortfolioLtd} p on p.fund_key = n.fund_key ");
-        sql.Append(" and p.fund_key = @fundKey ");
-        sql.Append($" inner join {WarehouseTables.DimInvestor} i on i.investor_key = p.investor_key ");
-        sql.Append(" and ");
-        WarehouseSql.AppendCurrentInvestorFilter(sql, "i");
+        sql.Append(" and f.fund_key = @fundKey ");
         sql.Append($" inner join {WarehouseTables.DimDate} d on d.date_key = n.date_key ");
     }
 }

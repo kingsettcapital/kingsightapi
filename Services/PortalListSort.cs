@@ -62,6 +62,8 @@ internal static class PortalListSort
         ["net_distributed_amount"] = "sum(isnull(a.preferred_return_amount, 0)) + sum(isnull(a.sales_gain_amount, 0)) + sum(isnull(a.excess_cash_amount, 0))",
         ["reservedAmount"] = "sum(isnull(a.reserved_amount, 0))",
         ["reserved_amount"] = "sum(isnull(a.reserved_amount, 0))",
+        ["unfundedAmount"] = "sum(isnull(a.unfunded_amount, 0))",
+        ["unfunded_amount"] = "sum(isnull(a.unfunded_amount, 0))",
         ["releasedCapitalAmount"] = "sum(isnull(a.released_capital_amount, 0))",
         ["released_capital_amount"] = "sum(isnull(a.released_capital_amount, 0))",
         ["investorCount"] = "isnull(max(inv.investors_count), 0)",
@@ -198,8 +200,13 @@ internal static class PortalListSort
     private static readonly Dictionary<string, string> FundObligationsColumns =
         BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), ObligationMetrics);
 
-    private static readonly Dictionary<string, string> FundNetAssetsColumns =
-        BuildTransactionSortMap(("investorCode", "investor_code"), ("investorName", "investor_name"), NetAssetsMetrics);
+    private static readonly Dictionary<string, string> FundNetAssetsColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["quarterYear"] = "quarter_year",
+        ["quarter_year"] = "quarter_year",
+        ["period"] = "period",
+        ["nav"] = "nav"
+    };
 
     private static Dictionary<string, string> BuildTransactionSortMap(
         (string Camel, string Snake) code,
@@ -351,8 +358,8 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundNetAssetsColumns,
-            "investorCode, investorName, quarterYear, period, nav",
-            "investor_name",
+            "quarterYear, period, nav",
+            "period",
             out sort,
             out error);
 
@@ -379,7 +386,7 @@ internal static class PortalListSort
             sortBy,
             sortDir,
             FundColumns,
-            "fundName, fundType, strategy, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, releasedCapitalAmount",
+            "fundName, fundType, strategy, commitmentAmount, netInvestedCapitalAmount, netDistributedAmount, reservedAmount, unfundedAmount, releasedCapitalAmount",
             "b.fund_name",
             out sort,
             out error);

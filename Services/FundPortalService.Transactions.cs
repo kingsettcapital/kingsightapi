@@ -258,18 +258,13 @@ public sealed partial class FundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" isnull(cast(i.investor_id as varchar(20)), '') as investor_code, ");
-        pageSql.Append(" max(isnull(i.investor_name, '')) as investor_name, ");
         pageSql.Append(" isnull(d.quarter_year, '') as quarter_year, ");
         pageSql.Append(" isnull(d.quarter_year, '') as period, ");
-        pageSql.Append(" sum(isnull(n.nav, 0)) as nav ");
+        pageSql.Append(" isnull(n.nav, 0) as nav ");
         PortalPortfolioTransactionSql.AppendFundNavFrom(pageSql);
         pageSql.Append(" where 1=1 ");
         PortalPortfolioTransactionSql.AppendUnitizedFundFilter(pageSql);
         PortalPortfolioTransactionSql.AppendNavQuarterlyPeriodFilter(pageSql, period);
-        WarehouseSql.AppendInvestorCodeOrNameSearchFilter(pageSql, "i");
-        WarehouseSql.AppendInvestorNameFilter(pageSql, "i");
-        pageSql.Append(" group by i.investor_key, i.investor_id, d.quarter_year ");
         orderBy.AppendOrderBy(pageSql);
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
@@ -278,14 +273,12 @@ public sealed partial class FundPortalService
             pageSql,
             fundKey,
             period,
-            search,
-            investorName,
+            search: null,
+            investorName: null,
             page,
             pageSize,
             static reader => new FundInvestorNetAssetsDto
             {
-                InvestorCode = reader.GetStringOrEmpty("investor_code"),
-                InvestorName = reader.GetStringOrEmpty("investor_name"),
                 QuarterYear = reader.GetStringOrEmpty("quarter_year"),
                 Period = reader.GetStringOrEmpty("period"),
                 Nav = reader.GetDecimalOrDefault("nav")
@@ -311,16 +304,11 @@ public sealed partial class FundPortalService
     private static StringBuilder BuildFundNavCountSql(FundPeriodFilter? period)
     {
         var sql = new StringBuilder();
-        sql.Append(" select count(*) from ( ");
-        sql.Append(" select i.investor_key, d.quarter_year ");
+        sql.Append(" select count(*) ");
         PortalPortfolioTransactionSql.AppendFundNavFrom(sql);
         sql.Append(" where 1=1 ");
         PortalPortfolioTransactionSql.AppendUnitizedFundFilter(sql);
         PortalPortfolioTransactionSql.AppendNavQuarterlyPeriodFilter(sql, period);
-        WarehouseSql.AppendInvestorCodeOrNameSearchFilter(sql, "i");
-        WarehouseSql.AppendInvestorNameFilter(sql, "i");
-        sql.Append(" group by i.investor_key, i.investor_id, d.quarter_year ");
-        sql.Append(" ) nav_rows ");
         return sql;
     }
 
