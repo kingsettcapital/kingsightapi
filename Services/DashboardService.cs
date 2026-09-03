@@ -281,7 +281,7 @@ public sealed class DashboardService : IDashboardService
         {
             Value = kpi.TotalAum,
             YtdChangePercent = kpi.YtdReturnPercent,
-            Subtitle = "Market Value",
+            Subtitle = "Equity Under Management",
             Format = "money"
         };
 
