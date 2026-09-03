@@ -24,6 +24,7 @@ public sealed partial class FundPortalService
         sql.Append(" isnull(port.net_invested_capital, 0) as net_invested_capital, ");
         sql.Append(" isnull(port.net_distributed, 0) as net_distributed, ");
         sql.Append(" isnull(port.reserved_uncalled, 0) as reserved_uncalled, ");
+        sql.Append(" isnull(port.unfunded, 0) as unfunded, ");
         sql.Append(" port.released_capital as released_capital, ");
         sql.Append(" isnull(assets.assets_count, 0) as asset_count, ");
         sql.Append(" isnull(inv.investors_count, 0) as investor_count ");
@@ -37,6 +38,7 @@ public sealed partial class FundPortalService
         sql.Append(" + sum(isnull(sales_gain_amount, 0)) ");
         sql.Append(" + sum(isnull(excess_cash_amount, 0)) as net_distributed, ");
         sql.Append(" sum(isnull(reserved_amount, 0)) as reserved_uncalled, ");
+        sql.Append(" sum(isnull(unfunded_amount, 0)) as unfunded, ");
         sql.Append(" sum(isnull(released_capital_amount, 0)) as released_capital ");
         sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
         sql.Append(" where fund_key = f.fund_key ");
@@ -88,6 +90,7 @@ public sealed partial class FundPortalService
         var netInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital");
         var netDistributed = reader.GetDecimalOrDefault("net_distributed");
         var reservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled");
+        var unfunded = reader.GetDecimalOrDefault("unfunded");
         var releasedCapital = reader.GetNullableDecimal("released_capital");
         var assetCount = reader.GetInt32OrDefault("asset_count");
         var investorCountFromSql = reader.GetInt32OrDefault("investor_count");
@@ -111,6 +114,7 @@ public sealed partial class FundPortalService
             NetInvestedCapital = netInvestedCapital,
             NetDistributed = netDistributed,
             ReservedUncalled = reservedUncalled,
+            Unfunded = unfunded,
             ReleasedCapital = releasedCapital,
             AssetCount = assetCount,
             InvestorCount = investors.Count > 0 ? investors.Count : investorCountFromSql,
