@@ -448,7 +448,7 @@ Includes `<fund_code scalar>` on page queries.
 
 | view | Group by | Period column |
 |------|----------|---------------|
-| **ltd** | `transaction_type` | `Period = 'LTD'` |
+| **ltd** | `transaction_type` | `Period = 'ITD'` |
 | **quarterly** | `transaction_type`, `d.quarter_year` | `Period = d.quarter_year` |
 | **daily** | `transaction_type`, `posted_date_key` | date from `posted_date_key` |
 
@@ -457,7 +457,7 @@ Includes `<fund_code scalar>` on page queries.
 SELECT
   <fund_code scalar>,
   transaction_type = ISNULL(tt.transaction_type_name, ''),
-  Period = 'LTD',
+  Period = 'ITD',
   MAX(fd.posted_date_key) AS posted_date_key,
   TRY_CONVERT(date, CAST(MAX(fd.posted_date_key) AS varchar(8)), 112) AS full_date,
   units = SUM(ISNULL(fd.distributed_units, 0)),

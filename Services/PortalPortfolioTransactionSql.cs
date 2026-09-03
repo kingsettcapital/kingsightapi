@@ -23,7 +23,7 @@ internal static class PortalPortfolioTransactionSql
     {
         if (view == TimeGranularity.Ltd)
         {
-            sql.Append(" 'LTD' as period, ");
+            sql.Append(" 'ITD' as period, ");
             sql.Append(" cast('' as varchar(50)) as quarter_year, ");
             return;
         }
