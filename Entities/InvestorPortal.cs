@@ -117,6 +117,10 @@ public sealed class InvestorProfileDto
 
     [JsonPropertyName("capital_deployed")]
     public decimal CapitalDeployed { get; init; }
+
+
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded{ get; init; }
 }
 
 public sealed class InvestorProfileFundDto
@@ -149,6 +153,7 @@ public sealed class InvestorFundHoldingDto
     public decimal NetInvested { get; init; }
 
     public decimal Distributed { get; init; }
+    public decimal Reserved { get; init; }
 }
 
 /// <summary>Investor fund holdings from latest <c>fact_investor_portfolio_ltd</c> snapshot.</summary>
