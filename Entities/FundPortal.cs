@@ -81,6 +81,9 @@ public sealed class FundProfileDto
     [JsonPropertyName("reserved_uncalled")]
     public decimal ReservedUncalled { get; init; }
 
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded { get; init; }
+
     [JsonPropertyName("released_capital")]
     public decimal? ReleasedCapital { get; init; }
 
