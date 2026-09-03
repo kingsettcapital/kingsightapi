@@ -281,7 +281,7 @@ public sealed class DashboardService : IDashboardService
         {
             Value = kpi.TotalAum,
             YtdChangePercent = kpi.YtdReturnPercent,
-            Subtitle = "Market Value",
+            Subtitle = "Equity Under Management",
             Format = "money"
         };
 
@@ -437,7 +437,8 @@ public sealed class DashboardService : IDashboardService
         sql.Append(" isnull(nullif(ltrim(rtrim(p.asset_type)), ''), 'Unknown') as asset_type, ");
         sql.Append(" property_count = count(*) ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
+        //sql.Append(" where  ");
+        sql.Append(" where p.property_status <> 'SOLD' and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         sql.Append(" group by isnull(nullif(ltrim(rtrim(p.asset_type)), ''), 'Unknown') ");
@@ -619,7 +620,7 @@ public sealed class DashboardService : IDashboardService
         sql.Append(" end, ");
         sql.Append(" property_count = count(*) ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
+        sql.Append(" where p.property_status <> 'SOLD' and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         sql.Append(" group by case ");

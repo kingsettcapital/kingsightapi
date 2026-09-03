@@ -387,39 +387,40 @@ public sealed partial class InvestorPortalService
         }
     }
 
-    // LTD fact table has no IRR columns; emit 0 for LTD until those columns are available.
+    // LTD fact table contains IRR columns (ITD performance).
     private static void AppendIrrColumns(StringBuilder sql, bool isLtd, TimeGranularity view, FundPeriodFilter? period)
     {
         var perQuarter = PortalPortfolioListSql.GroupsPortfolioByQuarterYear(view, period);
 
         if (isLtd)
         {
-            sql.Append(" cast(0 as decimal(18,6)) as irr_1_year_pct, ");
-            sql.Append(" cast(0 as decimal(18,6)) as irr_3_year_pct, ");
-            sql.Append(" cast(0 as decimal(18,6)) as irr_5_year_pct, ");
-            sql.Append(" cast(0 as decimal(18,6)) as irr_7_year_pct, ");
-            sql.Append(" cast(0 as decimal(18,6)) as irr_10_year_pct, ");
-            sql.Append(" cast(0 as decimal(18,6)) as irr_ltd_pct ");
+            sql.Append(" cast(p.irr_1_year_pct as decimal(18,1)) as irr_1_year_pct, ");
+            sql.Append(" cast(p.irr_3_year_pct as decimal(18,1)) as irr_3_year_pct, ");
+            sql.Append(" cast(p.irr_5_year_pct as decimal(18,1)) as irr_5_year_pct, ");
+            // 7Y IRR is not shown in the UI, but the API DTO still expects this column.
+            sql.Append(" cast(0 as decimal(18,1)) as irr_7_year_pct, ");
+            sql.Append(" cast(p.irr_10_year_pct as decimal(18,1)) as irr_10_year_pct, ");
+            sql.Append(" cast(p.irr_ltd_pct as decimal(18,1)) as irr_ltd_pct ");
             return;
         }
 
         if (perQuarter)
         {
-            sql.Append(" max(p.irr_1_year_pct) as irr_1_year_pct, ");
-            sql.Append(" max(p.irr_3_year_pct) as irr_3_year_pct, ");
-            sql.Append(" max(p.irr_5_year_pct) as irr_5_year_pct, ");
-            sql.Append(" max(p.irr_7_year_pct) as irr_7_year_pct, ");
-            sql.Append(" max(p.irr_10_year_pct) as irr_10_year_pct, ");
-            sql.Append(" max(p.irr_ltd_pct) as irr_ltd_pct ");
+            sql.Append(" cast(max(p.irr_1_year_pct) as decimal(18,1)) as irr_1_year_pct, ");
+            sql.Append(" cast(max(p.irr_3_year_pct) as decimal(18,1)) as irr_3_year_pct, ");
+            sql.Append(" cast(max(p.irr_5_year_pct) as decimal(18,1)) as irr_5_year_pct, ");
+            sql.Append(" cast(max(p.irr_7_year_pct) as decimal(18,1)) as irr_7_year_pct, ");
+            sql.Append(" cast(max(p.irr_10_year_pct) as decimal(18,1)) as irr_10_year_pct, ");
+            sql.Append(" cast(max(p.irr_ltd_pct) as decimal(18,1)) as irr_ltd_pct ");
             return;
         }
 
-        sql.Append(" max(p.irr_1_year_pct) as irr_1_year_pct, ");
-        sql.Append(" max(p.irr_3_year_pct) as irr_3_year_pct, ");
-        sql.Append(" max(p.irr_5_year_pct) as irr_5_year_pct, ");
-        sql.Append(" max(p.irr_7_year_pct) as irr_7_year_pct, ");
-        sql.Append(" max(p.irr_10_year_pct) as irr_10_year_pct, ");
-        sql.Append(" max(p.irr_ltd_pct) as irr_ltd_pct ");
+        sql.Append(" cast(max(p.irr_1_year_pct) as decimal(18,1)) as irr_1_year_pct, ");
+        sql.Append(" cast(max(p.irr_3_year_pct) as decimal(18,1)) as irr_3_year_pct, ");
+        sql.Append(" cast(max(p.irr_5_year_pct) as decimal(18,1)) as irr_5_year_pct, ");
+        sql.Append(" cast(max(p.irr_7_year_pct) as decimal(18,1)) as irr_7_year_pct, ");
+        sql.Append(" cast(max(p.irr_10_year_pct) as decimal(18,1)) as irr_10_year_pct, ");
+        sql.Append(" cast(max(p.irr_ltd_pct) as decimal(18,1)) as irr_ltd_pct ");
     }
 
     private static void AppendPortfolioPeriodFilter(StringBuilder sql, TimeGranularity view, FundPeriodFilter? period)

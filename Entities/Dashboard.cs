@@ -22,7 +22,7 @@ public static class DashboardWidgetIds
     private static readonly IReadOnlyDictionary<string, string> Labels =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            [PortfolioValue] = "Portfolio Value",
+            [PortfolioValue] = "Total Equity Under Management",
             [ActiveFunds] = "Active Funds",
             [TotalAum] = "Total AUM",
             [YtdReturns] = "YTD Returns",
