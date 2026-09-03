@@ -74,10 +74,12 @@ internal static class PortalPortfolioListSql
         sql.Append($" sum(isnull({factAlias}.preferred_return_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.sales_gain_amount, 0)) ");
         sql.Append($" + sum(isnull({factAlias}.excess_cash_amount, 0)) as net_distributed, ");
-        AppendReservedAmountExpression(sql, factAlias);
-        sql.Append(" as reserved, ");
-        AppendUnfundedAmountExpression(sql, factAlias);
-        sql.Append(" as unfunded, ");
+        sql.Append($" sum(isnull({factAlias}.reserved_amount, 0)) as reserved, ");
+        sql.Append($" sum(isnull({factAlias}.unfunded_amount, 0)) as unfunded, ");
+        //AppendReservedAmountExpression(sql, factAlias);
+        //sql.Append(" as reserved, ");
+        //AppendUnfundedAmountExpression(sql, factAlias);
+        //sql.Append(" as unfunded, ");
         sql.Append($" sum(isnull({factAlias}.released_capital_amount, 0)) as released_capital ");
     }
 
@@ -135,7 +137,7 @@ internal static class PortalPortfolioListSql
         if (view == TimeGranularity.Ltd)
         {
             sql.Append($" max(isnull(cast({factAlias}.date_key as varchar(20)), '')) as quarter_year, ");
-            sql.Append(" 'LTD' as period, ");
+            sql.Append(" 'ITD' as period, ");
             return;
         }
 

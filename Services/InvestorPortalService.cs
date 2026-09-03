@@ -370,6 +370,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             NetDistributed = metrics.NetDistributed,
             ReservedUncalled = metrics.ReservedAmount,
             ReleasedCapital = metrics.ReleasedCapitalAmount,
+            Unfunded = metrics.Unfunded,
             FundCount = funds.Count > 0 ? funds.Count : metrics.FundCount,
             Funds = funds,
             CapitalDeployed = capitalDeployed

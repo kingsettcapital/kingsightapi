@@ -150,8 +150,9 @@ public sealed partial class InvestorPortalService
         sql.Append(" max(isnull(f.fund_name, '')) as fund_name, ");
         sql.Append(" min(since_dates.since_date) as since_date, ");
         sql.Append(" sum(isnull(p.commitment_amount, 0)) as commitment, ");
-        PortalPortfolioListSql.AppendUnfundedAmountExpression(sql, "p");
-        sql.Append(" as unfunded, ");
+        sql.Append(" sum(isnull(p.unfunded_amount, 0)) as unfunded, ");
+        //PortalPortfolioListSql.AppendUnfundedAmountExpression(sql, "p");
+        sql.Append(" sum(isnull(p.reserved_amount, 0)) as reserved, ");
         sql.Append(" sum(isnull(p.net_invested_capital_amount, 0)) as net_invested, ");
         sql.Append(" sum(isnull(p.preferred_return_amount, 0)) ");
         sql.Append(" + sum(isnull(p.sales_gain_amount, 0)) ");
@@ -204,6 +205,7 @@ public sealed partial class InvestorPortalService
                     Commitment = reader.GetDecimalOrDefault("commitment"),
                     Unfunded = reader.GetDecimalOrDefault("unfunded"),
                     NetInvested = reader.GetDecimalOrDefault("net_invested"),
+                    Reserved = reader.GetDecimalOrDefault("reserved"),
                     Distributed = reader.GetDecimalOrDefault("distributed_amount")
                 });
             }
