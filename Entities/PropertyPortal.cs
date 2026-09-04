@@ -454,7 +454,7 @@ public sealed class AssetAcquisitionDto
     public string AssetName { get; init; } = string.Empty;
 
     [JsonPropertyName("acquisition_date")]
-    public DateTime? AcquisitionDate { get; init; }
+    public string? AcquisitionDate { get; init; }
 
     [JsonPropertyName("at_acquisition_debt")]
     public decimal? AtAcquisitionDebt { get; init; }
@@ -493,7 +493,7 @@ public sealed class AssetSaleDto
     public string AssetName { get; init; } = string.Empty;
 
     [JsonPropertyName("sale_date")]
-    public DateTime? SaleDate { get; init; }
+    public string? SaleDate { get; init; }
 
     [JsonPropertyName("at_sale_debt")]
     public decimal? AtSaleDebt { get; init; }
