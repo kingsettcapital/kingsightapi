@@ -56,7 +56,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" a.asset_key, ");
         sql.Append(" isnull(b.property_code, '') as asset_code, ");
         sql.Append(" isnull(b.property_name, '') as asset_name, ");
-        sql.Append(" a.acquisition_date_key as acquisition_date, ");
+        sql.Append(" isnull(cast(a.acquisition_date_key as varchar(50)), '') as acquisition_date, ");
         sql.Append(" a.at_acquisition_debt, ");
         sql.Append(" a.at_acquisition_equity, ");
         sql.Append(" a.at_acquisition_total_asset_value, ");
@@ -90,7 +90,7 @@ public sealed partial class PropertyPortalService
             AssetKey = reader.GetInt64OrDefault("asset_key"),
             AssetCode = reader.GetStringOrEmpty("asset_code"),
             AssetName = reader.GetStringOrEmpty("asset_name"),
-            AcquisitionDate = reader.GetNullableDateTimeFlexible("acquisition_date"),
+            AcquisitionDate = reader.GetNullableTrimmedString("acquisition_date"),
             AtAcquisitionDebt = reader.GetNullableDecimal("at_acquisition_debt"),
             AtAcquisitionEquity = reader.GetNullableDecimal("at_acquisition_equity"),
             AtAcquisitionTotalAssetValue = reader.GetNullableDecimal("at_acquisition_total_asset_value"),
@@ -111,7 +111,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" a.asset_key, ");
         sql.Append(" isnull(b.property_code, '') as asset_code, ");
         sql.Append(" isnull(b.property_name, '') as asset_name, ");
-        sql.Append(" a.sale_date_key as sale_date, ");
+        sql.Append(" isnull(cast(a.sale_date_key as varchar(50)), '') as sale_date, ");
         sql.Append(" a.at_sale_debt, ");
         sql.Append(" a.at_sale_equity, ");
         sql.Append(" a.at_sale_total_asset_value, ");
@@ -146,7 +146,7 @@ public sealed partial class PropertyPortalService
             AssetKey = reader.GetInt64OrDefault("asset_key"),
             AssetCode = reader.GetStringOrEmpty("asset_code"),
             AssetName = reader.GetStringOrEmpty("asset_name"),
-            SaleDate = reader.GetNullableDateTimeFlexible("sale_date"),
+            SaleDate = reader.GetNullableTrimmedString("sale_date"),
             AtSaleDebt = reader.GetNullableDecimal("at_sale_debt"),
             AtSaleEquity = reader.GetNullableDecimal("at_sale_equity"),
             AtSaleTotalAssetValue = reader.GetNullableDecimal("at_sale_total_asset_value"),
