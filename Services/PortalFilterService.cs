@@ -127,6 +127,10 @@ public sealed class PortalFilterService : IPortalFilterService
                 connection,
                 BuildPropertyDistinctSql("property_status"));
 
+            var fundCodes = await ReadDistinctOptionsAsync(
+                connection,
+                BuildCurrentFundDistinctSql("fund_code"));
+
             var quarterlyPeriods = await ReadAssetQuarterlyPeriodOptionsAsync(connection);
 
             return new AssetListFilterOptionsDto
@@ -135,6 +139,7 @@ public sealed class PortalFilterService : IPortalFilterService
                 InvestmentTypes = investmentTypes,
                 Geographies = geographies,
                 Statuses = statuses,
+                FundCodes = fundCodes,
                 QuarterlyPeriods = quarterlyPeriods
             };
         }

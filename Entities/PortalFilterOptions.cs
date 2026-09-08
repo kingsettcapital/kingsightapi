@@ -69,6 +69,9 @@ public sealed class AssetListFilterOptionsDto
 
     public IReadOnlyList<PortalFilterOptionDto> Statuses { get; init; } = [];
 
+    [JsonPropertyName("fund_codes")]
+    public IReadOnlyList<PortalFilterOptionDto> FundCodes { get; init; } = [];
+
     [JsonPropertyName("quarterly_periods")]
     public IReadOnlyList<PortalQuarterPeriodOptionDto> QuarterlyPeriods { get; init; } = [];
 }

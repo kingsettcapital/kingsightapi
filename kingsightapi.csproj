@@ -31,6 +31,14 @@
     <EmbeddedResource Remove="tools/**" />
   </ItemGroup>
 
+  <!-- Exclude local agent/verify build output (nested publish trees broke dotnet build) -->
+  <ItemGroup>
+    <Compile Remove="artifacts/**" />
+    <Content Remove="artifacts/**" />
+    <None Remove="artifacts/**" />
+    <EmbeddedResource Remove="artifacts/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Update="log4net.config">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
