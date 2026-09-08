@@ -42,6 +42,8 @@ internal static class WarehouseTables
     public static string FactInvestorPortfolioLtd => InvestorServicing("fact_investor_portfolio_itd");
     public static string FactInvestorPortfolioQuarterly => InvestorServicing("fact_investor_portfolio_quarterly");
     public static string FactFundNav => InvestorServicing("fact_fund_nav");
+    public static string FactFundFinancialItd => InvestorServicing("fact_fund_financial_itd");
+    public static string FactFundFinancialQuarterly => InvestorServicing("fact_fund_financial_quarterly");
     public static string FactAssetMetrics => InvestorServicing("fact_asset_metrics");
     public static string FactAssetFinancialKsItd => InvestorServicing("fact_asset_financial_ks_itd");
     public static string FactAssetAcquisition => InvestorServicing("fact_asset_acquisition");

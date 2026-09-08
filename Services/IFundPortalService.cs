@@ -138,4 +138,13 @@ public interface IFundPortalService
         int fundKey,
         TimeGranularity view,
         FundPeriodFilter? period);
+
+    /// <summary>
+    /// Fund financial metrics from ITD or quarterly fact tables
+    /// (<c>fact_fund_financial_itd</c> / <c>fact_fund_financial_quarterly</c>).
+    /// </summary>
+    Task<FundFinancialMetricsDto?> GetFundFinancialMetricsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
 }
