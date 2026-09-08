@@ -64,6 +64,7 @@ public sealed partial class PropertyPortalService
         await reader.DisposeAsync();
 
         var investments = await GetPropertyInvestmentsInternalAsync(propertyKey, connection);
+        var totalJvPartners = await GetTotalJvPartnersAsync(connection, propertyKey);
         var (occupancyRate, vacancyRate) = ComputeAreaRates(totalGlaSf, committedAreaSf, vacantAreaSf);
 
         return new PropertyProfileDto
@@ -86,10 +87,38 @@ public sealed partial class PropertyPortalService
             OccupiedAreaSf = occupiedAreaSf,
             OccupancyRate = occupancyRate,
             VacancyRate = vacancyRate,
+            TotalJvPartners = totalJvPartners,
             EstMarketValue = null,
             EstAnnualNoi = null,
             InvestmentCount = investments.Count
         };
+    }
+
+    /// <summary>
+    /// Count of distinct JV partner <c>asset_code</c> values for a consolidated asset
+    /// (share percentage strictly between 0 and 100).
+    /// </summary>
+    private static async Task<int> GetTotalJvPartnersAsync(SqlConnection connection, long consolidatedAssetKey)
+    {
+        string sql =
+            " select count(distinct asset_code) as jv_count " +
+            $" from {WarehouseTables.DimOwnershipHierarchy} " +
+            " where consolidated_asset_key = @propertyKey " +
+            " and isnull(asset_to_share_pct, 0) < 100 " +
+            " and isnull(asset_to_share_pct, 0) > 0 ";
+
+        await using var command = new SqlCommand(sql, connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        command.Parameters.AddWithValue("@propertyKey", consolidatedAssetKey);
+        var result = await command.ExecuteScalarAsync();
+        if (result is null || result == DBNull.Value)
+        {
+            return 0;
+        }
+
+        return Convert.ToInt32(result);
     }
 
     private static string ResolvePropertyGeography(SqlDataReader reader, string city, string province)

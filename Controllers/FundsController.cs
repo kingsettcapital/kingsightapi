@@ -825,6 +825,48 @@ public class FundsController : ControllerBase
         }
     }
 
+    // GET: api/funds/{fundKey}/financial-metrics?view=ltd|quarterly&dateKey=
+    [HttpGet("{fundKey:int}/financial-metrics")]
+    public async Task<ActionResult<FundFinancialMetricsDto?>> GetFinancialMetrics(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
+        }
+
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
+        {
+            return BadRequest("Financial metrics support view=ltd or view=quarterly only.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey);
+            var result = await _service.GetFundFinancialMetricsAsync(fundKey, view.Value, period);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} financial metrics for fund {FundKey} cancelled", view, fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving {View} financial metrics for fund {FundKey}", view, fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund financial metrics.");
+        }
+    }
+
     private static FundPeriodFilter? BuildPeriodFilter(int? dateKey, int? calendarYear = null)
     {
         if (dateKey is not > 0 && calendarYear is not > 1900)

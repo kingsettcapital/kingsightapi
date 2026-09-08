@@ -100,6 +100,13 @@ public sealed class PropertyProfileDto
     [JsonPropertyName("vacancy_rate")]
     public decimal? VacancyRate { get; init; }
 
+    /// <summary>
+    /// Distinct JV partner assets under this consolidated asset
+    /// (<c>dim_ownership_hierarchy</c> rows with share pct between 0 and 100 exclusive).
+    /// </summary>
+    [JsonPropertyName("total_jv_partners")]
+    public int TotalJvPartners { get; init; }
+
     [JsonPropertyName("est_market_value")]
     public decimal? EstMarketValue { get; init; }
 

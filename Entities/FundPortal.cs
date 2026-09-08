@@ -413,3 +413,82 @@ public sealed class FundDistributionGroupDto
     [JsonPropertyName("total_units")]
     public decimal TotalUnits { get; init; }
 }
+
+/// <summary>
+/// Financial metrics for GET /api/Funds/{fundKey}/financial-metrics
+/// from <c>fact_fund_financial_itd</c> / <c>fact_fund_financial_quarterly</c>.
+/// </summary>
+public sealed class FundFinancialMetricsDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund_code")]
+    public string FundCode { get; init; } = string.Empty;
+
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+
+    [JsonPropertyName("quarter_year")]
+    public string? QuarterYear { get; init; }
+
+    [JsonPropertyName("fund_cash_at_quarter_end")]
+    public decimal? FundCashAtQuarterEnd { get; init; }
+
+    [JsonPropertyName("fund_total_asset_value")]
+    public decimal? FundTotalAssetValue { get; init; }
+
+    [JsonPropertyName("fund_debt")]
+    public decimal? FundDebt { get; init; }
+
+    [JsonPropertyName("fund_equity")]
+    public decimal? FundEquity { get; init; }
+
+    [JsonPropertyName("fund_noi")]
+    public decimal? FundNoi { get; init; }
+
+    [JsonPropertyName("fund_ffo")]
+    public decimal? FundFfo { get; init; }
+
+    [JsonPropertyName("fund_ncf")]
+    public decimal? FundNcf { get; init; }
+
+    [JsonPropertyName("fund_capex")]
+    public decimal? FundCapex { get; init; }
+
+    [JsonPropertyName("fund_nav_amount")]
+    public decimal? FundNavAmount { get; init; }
+
+    [JsonPropertyName("fund_ebitda")]
+    public decimal? FundEbitda { get; init; }
+
+    [JsonPropertyName("fund_revenue")]
+    public decimal? FundRevenue { get; init; }
+
+    [JsonPropertyName("fund_expense")]
+    public decimal? FundExpense { get; init; }
+
+    [JsonPropertyName("fund_gross_market_value")]
+    public decimal? FundGrossMarketValue { get; init; }
+
+    [JsonPropertyName("fund_gav_amount")]
+    public decimal? FundGavAmount { get; init; }
+
+    [JsonPropertyName("fund_ltv")]
+    public decimal? FundLtv { get; init; }
+
+    [JsonPropertyName("jv_partners_count")]
+    public int? JvPartnersCount { get; init; }
+
+    [JsonPropertyName("jv_investments_amount")]
+    public decimal? JvInvestmentsAmount { get; init; }
+
+    [JsonPropertyName("jv_investments_pct_of_gav")]
+    public decimal? JvInvestmentsPctOfGav { get; init; }
+
+    [JsonPropertyName("asset_held_count")]
+    public int? AssetHeldCount { get; init; }
+
+    [JsonPropertyName("property_held_count")]
+    public int? PropertyHeldCount { get; init; }
+}
