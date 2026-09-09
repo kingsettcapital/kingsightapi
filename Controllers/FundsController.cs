@@ -19,15 +19,18 @@ public class FundsController : ControllerBase
 {
     private readonly IFundPortalService _service;
     private readonly IPortalFilterService _filterService;
+    private readonly IFundSharePointDocumentsService _documentsService;
     private readonly ILogger<FundsController> _logger;
 
     public FundsController(
         IFundPortalService service,
         IPortalFilterService filterService,
+        IFundSharePointDocumentsService documentsService,
         ILogger<FundsController> logger)
     {
         _service = service;
         _filterService = filterService;
+        _documentsService = documentsService;
         _logger = logger;
     }
 
@@ -864,6 +867,75 @@ public class FundsController : ControllerBase
             ConnectionLogging.LogControllerError(
                 _logger, ex, "Error retrieving {View} financial metrics for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving fund financial metrics.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/documents
+    [HttpGet("{fundKey:int}/documents")]
+    public async Task<ActionResult<FundDocumentsResultDto>> GetDocuments(
+        int fundKey,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _documentsService.GetFundDocumentsAsync(fundKey, cancellationToken);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound($"Fund {fundKey} was not found.");
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get documents for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving SharePoint documents for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund documents.");
+        }
+    }
+
+    // PUT: api/funds/{fundKey}/documents/library
+    [HttpPut("{fundKey:int}/documents/library")]
+    public async Task<IActionResult> UpsertDocumentsLibrary(
+        int fundKey,
+        [FromBody] UpsertFundSharePointLibraryRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.SharePointUrl))
+        {
+            return BadRequest("sharepoint_url is required.");
+        }
+
+        try
+        {
+            await _documentsService.UpsertFundLibraryUrlAsync(
+                fundKey,
+                request.SharePointUrl,
+                auditUser: User?.Identity?.Name,
+                cancellationToken);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound($"Fund {fundKey} was not found.");
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error saving SharePoint library URL for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while saving the SharePoint library URL.");
         }
     }
 

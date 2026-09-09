@@ -49,6 +49,12 @@ internal static class WarehouseTables
     public static string FactAssetAcquisition => InvestorServicing("fact_asset_acquisition");
     public static string FactAssetSale => InvestorServicing("fact_asset_sale");
 
+    /// <summary>Per-fund SharePoint library URL for Interim/Annual Reports.</summary>
+    public static string FundSharePointLibrary => InvestorServicing("fund_sharepoint_library");
+
+    /// <summary>Cached SharePoint document rows for fund drill-down Documents.</summary>
+    public static string FundDocument => InvestorServicing("fund_document");
+
     public const string ViewInvestorPortfolioLtdSchema = "investor_servicing";
     public const string ViewInvestorPortfolioLtdName = "vw_investor_portfolio_itd";
     public static string ViewInvestorPortfolioLtd =>

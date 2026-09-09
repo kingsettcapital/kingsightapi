@@ -61,6 +61,8 @@ namespace kingsightapi
             builder.Services.AddEntraAuthentication(configuration);
             builder.Services.Configure<FabricWarehouseOptions>(
                 configuration.GetSection(FabricWarehouseOptions.SectionName));
+            builder.Services.Configure<SharePointOptions>(
+                configuration.GetSection(SharePointOptions.SectionName));
             builder.Services.AddSingleton<FabricWarehouseTables>();
             builder.Services.AddHttpContextAccessor();
             builder.Services.AddScoped<ICurrentUserResolver, CurrentUserResolver>();
@@ -75,6 +77,9 @@ namespace kingsightapi
             builder.Services.AddSingleton<IInvestorAliasService, InvestorAliasService>();
             builder.Services.AddSingleton<ILoanAliasService, LoanAliasService>();
             builder.Services.AddSingleton<IFundPortalService, FundPortalService>();
+            builder.Services.AddSingleton<SharePointContextFactory>();
+            builder.Services.AddSingleton<IFundSharePointDocumentsStore, FundSharePointDocumentsStore>();
+            builder.Services.AddSingleton<IFundSharePointDocumentsService, FundSharePointDocumentsService>();
             builder.Services.AddSingleton<IPropertyPortalService, PropertyPortalService>();
             builder.Services.AddSingleton<IPortalFilterService, PortalFilterService>();
             builder.Services.AddSingleton<IGlobalSearchService, GlobalSearchService>();
