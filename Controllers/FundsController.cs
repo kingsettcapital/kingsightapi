@@ -870,6 +870,28 @@ public class FundsController : ControllerBase
         }
     }
 
+    // GET: api/funds/{fundKey}/asset-overview
+    [HttpGet("{fundKey:int}/asset-overview")]
+    public async Task<ActionResult<FundAssetOverviewDto?>> GetAssetOverview(int fundKey)
+    {
+        try
+        {
+            var result = await _service.GetFundAssetOverviewAsync(fundKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get asset overview for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving asset overview for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund asset overview.");
+        }
+    }
+
     // GET: api/funds/{fundKey}/documents
     [HttpGet("{fundKey:int}/documents")]
     public async Task<ActionResult<FundDocumentsResultDto>> GetDocuments(
