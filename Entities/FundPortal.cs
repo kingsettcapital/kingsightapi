@@ -513,4 +513,10 @@ public sealed class FundAssetOverviewDto
 
     [JsonPropertyName("vacant_sf")]
     public decimal VacantSf { get; init; }
+
+    [JsonPropertyName("occupancy_rate")]
+    public decimal OccupancyRate { get; init; }
+
+    [JsonPropertyName("vacancy_rate")]
+    public decimal VacancyRate { get; init; }
 }

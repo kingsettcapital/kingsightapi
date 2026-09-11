@@ -33,7 +33,11 @@ public sealed partial class FundPortalService
         sql.Append(" sum(isnull(metrics.gross_leasable_area_sqft, 0)) as gla_sf, ");
         sql.Append(" sum(isnull(metrics.occupied_area_sqft, 0)) as occupied_sf, ");
         sql.Append(" sum(isnull(metrics.committed_area_sqft, 0)) as committed_sf, ");
-        sql.Append(" sum(isnull(metrics.vacant_area_sqft, 0)) as vacant_sf ");
+        sql.Append(" sum(isnull(metrics.vacant_area_sqft, 0)) as vacant_sf, ");
+        sql.Append(" isnull(sum(isnull(metrics.committed_area_sqft, 0)) ");
+        sql.Append(" / nullif(sum(isnull(metrics.gross_leasable_area_sqft, 0)), 0), 0) * 100.0 as occupancy_rate, ");
+        sql.Append(" isnull(sum(isnull(metrics.vacant_area_sqft, 0)) ");
+        sql.Append(" / nullif(sum(isnull(metrics.gross_leasable_area_sqft, 0)), 0), 0) * 100.0 as vacancy_rate ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
         sql.Append(" inner join ( ");
         sql.Append(" select distinct property_key, consolidated_asset_key ");
@@ -90,6 +94,8 @@ public sealed partial class FundPortalService
             OccupiedSf = reader.GetDecimalOrDefault("occupied_sf"),
             CommittedSf = reader.GetDecimalOrDefault("committed_sf"),
             VacantSf = reader.GetDecimalOrDefault("vacant_sf"),
+            OccupancyRate = reader.GetDecimalOrDefault("occupancy_rate"),
+            VacancyRate = reader.GetDecimalOrDefault("vacancy_rate"),
         };
     }
 }
