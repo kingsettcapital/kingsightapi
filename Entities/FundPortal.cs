@@ -492,3 +492,31 @@ public sealed class FundFinancialMetricsDto
     [JsonPropertyName("property_held_count")]
     public int? PropertyHeldCount { get; init; }
 }
+
+/// <summary>Aggregated area metrics for fund Asset Overview (fund drill-down).</summary>
+public sealed class FundAssetOverviewDto
+{
+    [JsonPropertyName("fund_key")]
+    public int FundKey { get; init; }
+
+    [JsonPropertyName("fund")]
+    public string Fund { get; init; } = string.Empty;
+
+    [JsonPropertyName("gla_sf")]
+    public decimal GlaSf { get; init; }
+
+    [JsonPropertyName("occupied_sf")]
+    public decimal OccupiedSf { get; init; }
+
+    [JsonPropertyName("committed_sf")]
+    public decimal CommittedSf { get; init; }
+
+    [JsonPropertyName("vacant_sf")]
+    public decimal VacantSf { get; init; }
+
+    [JsonPropertyName("occupancy_rate")]
+    public decimal OccupancyRate { get; init; }
+
+    [JsonPropertyName("vacancy_rate")]
+    public decimal VacancyRate { get; init; }
+}

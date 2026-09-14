@@ -147,4 +147,6 @@ public interface IFundPortalService
         int fundKey,
         TimeGranularity view,
         FundPeriodFilter? period);
+
+    Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey);
 }
