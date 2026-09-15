@@ -323,7 +323,23 @@ public sealed class FundSharePointDocumentsStore : IFundSharePointDocumentsStore
         }
         catch (Exception ex)
         {
-            await transaction.RollbackAsync(cancellationToken);
+            try
+            {
+                // Fabric / SQL may already abort the transaction; never let rollback mask the root error
+                // or throw out to the caller (live SharePoint results should still be returned).
+                if (transaction.Connection != null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+            }
+            catch (Exception rollbackEx)
+            {
+                _logger.LogDebug(
+                    rollbackEx,
+                    "Rollback after document cache refresh failure for fund {FundKey}",
+                    fundKey);
+            }
+
             _logger.LogWarning(
                 ex,
                 "Failed to refresh document cache for fund {FundKey} in {Table}. Live SharePoint results still returned.",
