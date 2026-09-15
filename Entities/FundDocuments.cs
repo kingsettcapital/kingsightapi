@@ -48,6 +48,10 @@ public sealed class FundDocumentItemDto
 
     [JsonPropertyName("server_relative_url")]
     public string? ServerRelativeUrl { get; init; }
+
+    /// <summary>SharePoint "Board Book" column (Advisory Board Books library).</summary>
+    [JsonPropertyName("board_book")]
+    public string? BoardBook { get; init; }
 }
 
 public sealed class UpsertFundSharePointLibraryRequest

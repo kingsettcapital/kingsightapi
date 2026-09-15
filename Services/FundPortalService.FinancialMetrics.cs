@@ -63,12 +63,8 @@ public sealed partial class FundPortalService
         sql.Append(" f.fund_equity, ");
         sql.Append(" f.fund_noi, ");
         sql.Append(" f.fund_ffo, ");
-        sql.Append(" f.fund_ncf, ");
         sql.Append(" f.fund_capex, ");
         sql.Append(" f.fund_nav_amount, ");
-        sql.Append(" f.fund_ebitda, ");
-        sql.Append(" f.fund_revenue, ");
-        sql.Append(" f.fund_expense, ");
         sql.Append(" f.fund_gross_market_value, ");
         sql.Append(" f.fund_gav_amount, ");
         sql.Append(" f.fund_ltv, ");
@@ -118,12 +114,12 @@ public sealed partial class FundPortalService
             FundEquity = reader.GetNullableDecimal("fund_equity"),
             FundNoi = reader.GetNullableDecimal("fund_noi"),
             FundFfo = reader.GetNullableDecimal("fund_ffo"),
-            FundNcf = reader.GetNullableDecimal("fund_ncf"),
+            FundNcf = null,
             FundCapex = reader.GetNullableDecimal("fund_capex"),
             FundNavAmount = reader.GetNullableDecimal("fund_nav_amount"),
-            FundEbitda = reader.GetNullableDecimal("fund_ebitda"),
-            FundRevenue = reader.GetNullableDecimal("fund_revenue"),
-            FundExpense = reader.GetNullableDecimal("fund_expense"),
+            FundEbitda = null,
+            FundRevenue = null,
+            FundExpense = null,
             FundGrossMarketValue = reader.GetNullableDecimal("fund_gross_market_value"),
             FundGavAmount = reader.GetNullableDecimal("fund_gav_amount"),
             FundLtv = reader.GetNullableDecimal("fund_ltv"),
