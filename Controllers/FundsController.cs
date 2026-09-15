@@ -892,15 +892,16 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/documents
+    // GET: api/funds/{fundKey}/documents?category=interim|advisory
     [HttpGet("{fundKey:int}/documents")]
     public async Task<ActionResult<FundDocumentsResultDto>> GetDocuments(
         int fundKey,
+        [FromQuery] string? category,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = await _documentsService.GetFundDocumentsAsync(fundKey, cancellationToken);
+            var result = await _documentsService.GetFundDocumentsAsync(fundKey, category, cancellationToken);
             return Ok(result);
         }
         catch (KeyNotFoundException)
