@@ -204,8 +204,18 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            await _store.ReplaceCachedDocumentsAsync(fundKey, category, items, cancellationToken)
-                .ConfigureAwait(false);
+            try
+            {
+                await _store.ReplaceCachedDocumentsAsync(fundKey, category, items, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception cacheEx)
+            {
+                _logger.LogWarning(
+                    cacheEx,
+                    "Interim/Annual document cache refresh failed for fund {FundKey}; returning live SharePoint results.",
+                    fundKey);
+            }
 
             return new FundDocumentsResultDto
             {
@@ -298,8 +308,8 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
             await context.ExecuteQueryAsync().ConfigureAwait(false);
 
             var siteUri = new Uri(target.SiteUrl.TrimEnd('/') + "/");
-            var items = folder.Files
-                .Select(file => MapFile(file, siteUri))
+            var mapped = folder.Files.Select(file => MapFile(file, siteUri)).ToList();
+            var items = mapped
                 .Where(item => MatchesFundBoardBook(item, fundCode, fundName))
                 .OrderByDescending(item => item.Year ?? 0)
                 .ThenByDescending(item => item.Quarter ?? string.Empty, StringComparer.OrdinalIgnoreCase)
@@ -307,8 +317,26 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 .ThenBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            await _store.ReplaceCachedDocumentsAsync(fundKey, category, items, cancellationToken)
-                .ConfigureAwait(false);
+            _logger.LogInformation(
+                "Advisory Board Books for fund {FundKey} ({FundCode}): listed {ListedCount}, matched {MatchedCount}",
+                fundKey,
+                fundCode,
+                mapped.Count,
+                items.Count);
+
+            // Never let cache failures discard live SharePoint results.
+            try
+            {
+                await _store.ReplaceCachedDocumentsAsync(fundKey, category, items, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception cacheEx)
+            {
+                _logger.LogWarning(
+                    cacheEx,
+                    "Advisory Board Books cache refresh failed for fund {FundKey}; returning live SharePoint results.",
+                    fundKey);
+            }
 
             return new FundDocumentsResultDto
             {
@@ -618,4 +646,4 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
             Items = [],
         };
 }
-
+
