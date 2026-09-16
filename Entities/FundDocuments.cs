@@ -16,6 +16,18 @@ public sealed class FundDocumentsResultDto
     [JsonPropertyName("folder_path")]
     public string FolderPath { get; init; } = string.Empty;
 
+    /// <summary>sharepoint | cache | empty — helps diagnose env differences.</summary>
+    [JsonPropertyName("source")]
+    public string Source { get; init; } = "empty";
+
+    /// <summary>Files returned by SharePoint before fund filter (live list only).</summary>
+    [JsonPropertyName("listed_count")]
+    public int? ListedCount { get; init; }
+
+    /// <summary>Files kept after fund / Board Book filter (live list only).</summary>
+    [JsonPropertyName("matched_count")]
+    public int? MatchedCount { get; init; }
+
     [JsonPropertyName("items")]
     public IReadOnlyList<FundDocumentItemDto> Items { get; init; } = [];
 }
