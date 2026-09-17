@@ -223,6 +223,9 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 FundCode = fundCode,
                 Category = category,
                 FolderPath = folderPath,
+                Source = "sharepoint",
+                ListedCount = items.Count,
+                MatchedCount = items.Count,
                 Items = items,
             };
         }
@@ -274,16 +277,22 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 .ConfigureAwait(false);
         }
 
+        var folderPath = target.ListFolderServerRelativeUrl;
+
         if (!_options.Enabled || !_contextFactory.IsConfigured)
         {
             _logger.LogWarning(
-                "SharePoint disabled or incomplete cert config; using DB cache for Advisory Board Books fund {FundKey}",
-                fundKey);
+                "SharePoint disabled or incomplete cert config; using DB cache for Advisory Board Books fund {FundKey}. Enabled={Enabled}, CertPathSet={CertPathSet}, CertExists={CertExists}",
+                fundKey,
+                _options.Enabled,
+                !string.IsNullOrWhiteSpace(_options.CertificatePath),
+                !string.IsNullOrWhiteSpace(_options.CertificatePath)
+                    && System.IO.File.Exists(_options.CertificatePath));
             return await FallbackToCacheAsync(
                     fundKey,
                     fundCode,
                     category,
-                    target.ListFolderServerRelativeUrl,
+                    folderPath,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -294,21 +303,10 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 .CreateContextAsync(target.SiteUrl, cancellationToken)
                 .ConfigureAwait(false);
 
-            var folderPath = target.ListFolderServerRelativeUrl;
-            var folder = context.Web.GetFolderByServerRelativeUrl(folderPath);
-            context.Load(
-                folder.Files,
-                files => files.Include(
-                    f => f.Name,
-                    f => f.Length,
-                    f => f.TimeLastModified,
-                    f => f.ServerRelativeUrl,
-                    f => f.UniqueId,
-                    f => f.ListItemAllFields));
-            await context.ExecuteQueryAsync().ConfigureAwait(false);
-
             var siteUri = new Uri(target.SiteUrl.TrimEnd('/') + "/");
-            var mapped = folder.Files.Select(file => MapFile(file, siteUri)).ToList();
+            var mapped = await ListAdvisoryFilesAsync(context, target, fundCode, siteUri, cancellationToken)
+                .ConfigureAwait(false);
+
             var items = mapped
                 .Where(item => MatchesFundBoardBook(item, fundCode, fundName))
                 .OrderByDescending(item => item.Year ?? 0)
@@ -324,7 +322,6 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 mapped.Count,
                 items.Count);
 
-            // Never let cache failures discard live SharePoint results.
             try
             {
                 await _store.ReplaceCachedDocumentsAsync(fundKey, category, items, cancellationToken)
@@ -344,6 +341,9 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 FundCode = fundCode,
                 Category = category,
                 FolderPath = folderPath,
+                Source = "sharepoint",
+                ListedCount = mapped.Count,
+                MatchedCount = items.Count,
                 Items = items,
             };
         }
@@ -354,16 +354,99 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
                 "Failed to list Advisory Board Books for fund {FundKey} ({FundCode}) at '{Folder}'. Falling back to DB cache.",
                 fundKey,
                 fundCode,
-                target.ListFolderServerRelativeUrl);
+                folderPath);
 
             return await FallbackToCacheAsync(
                     fundKey,
                     fundCode,
                     category,
-                    target.ListFolderServerRelativeUrl,
+                    folderPath,
                     cancellationToken)
                 .ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Prefer a CamlQuery filtered by fund code (avoids loading AllFields for the whole library).
+    /// Fall back to folder file names only if CamlQuery fails.
+    /// </summary>
+    private async Task<List<FundDocumentItemDto>> ListAdvisoryFilesAsync(
+        ClientContext context,
+        SharePointLibraryTarget target,
+        string fundCode,
+        Uri siteUri,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var list = context.Web.GetList(target.LibraryServerRelativeUrl);
+            var query = new CamlQuery
+            {
+                ViewXml = BuildAdvisoryCaml(fundCode),
+            };
+            var listItems = list.GetItems(query);
+            context.Load(listItems);
+            await context.ExecuteQueryAsync().ConfigureAwait(false);
+
+            return listItems.Select(item => MapListItem(item, siteUri)).ToList();
+        }
+        catch (Exception camlEx)
+        {
+            _logger.LogWarning(
+                camlEx,
+                "Advisory Board Books CamlQuery failed for '{Library}'; falling back to folder file listing.",
+                target.LibraryServerRelativeUrl);
+        }
+
+        // Lightweight folder listing — no ListItemAllFields (that can fail on large libraries).
+        var folder = context.Web.GetFolderByServerRelativeUrl(target.ListFolderServerRelativeUrl);
+        context.Load(
+            folder.Files,
+            files => files.Include(
+                f => f.Name,
+                f => f.Length,
+                f => f.TimeLastModified,
+                f => f.ServerRelativeUrl,
+                f => f.UniqueId));
+        await context.ExecuteQueryAsync().ConfigureAwait(false);
+
+        return folder.Files.Select(file => MapFileLite(file, siteUri)).ToList();
+    }
+
+    private static string BuildAdvisoryCaml(string fundCode)
+    {
+        var safe = System.Security.SecurityElement.Escape(fundCode?.Trim() ?? string.Empty) ?? string.Empty;
+        // Filter server-side by Board Book choice and/or file name containing the fund code.
+        return $"""
+            <View Scope="RecursiveAll">
+              <Query>
+                <Where>
+                  <Or>
+                    <Eq>
+                      <FieldRef Name="Board_x0020_Book" />
+                      <Value Type="Text">{safe}</Value>
+                    </Eq>
+                    <Contains>
+                      <FieldRef Name="FileLeafRef" />
+                      <Value Type="Text">{safe}</Value>
+                    </Contains>
+                  </Or>
+                </Where>
+              </Query>
+              <ViewFields>
+                <FieldRef Name="FileLeafRef" />
+                <FieldRef Name="FileRef" />
+                <FieldRef Name="Modified" />
+                <FieldRef Name="Editor" />
+                <FieldRef Name="File_x0020_Size" />
+                <FieldRef Name="Year" />
+                <FieldRef Name="Quarter" />
+                <FieldRef Name="Board_x0020_Book" />
+                <FieldRef Name="BoardBook" />
+              </ViewFields>
+              <RowLimit>500</RowLimit>
+            </View>
+            """;
     }
 
     private async Task<FundDocumentsResultDto> FallbackToCacheAsync(
@@ -381,6 +464,9 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
             FundCode = fundCode,
             Category = category,
             FolderPath = folderPath,
+            Source = cached.Count > 0 ? "cache" : "empty",
+            ListedCount = null,
+            MatchedCount = cached.Count,
             Items = cached,
         };
     }
@@ -489,6 +575,107 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
             ServerRelativeUrl = file.ServerRelativeUrl,
             BoardBook = boardBook,
         };
+    }
+
+    /// <summary>Map without ListItemAllFields — year/quarter/board book inferred from file name.</summary>
+    private static FundDocumentItemDto MapFileLite(File file, Uri siteUri) =>
+        new()
+        {
+            Id = file.UniqueId.ToString("N"),
+            Name = file.Name,
+            Year = ParseYearFromName(file.Name),
+            Quarter = ParseQuarterFromName(file.Name),
+            ModifiedOn = file.TimeLastModified == default ? null : file.TimeLastModified.ToUniversalTime(),
+            ModifiedBy = null,
+            SizeBytes = file.Length > 0 ? file.Length : null,
+            WebUrl = BuildWebUrl(siteUri, file.ServerRelativeUrl),
+            ServerRelativeUrl = file.ServerRelativeUrl,
+            BoardBook = null,
+        };
+
+    private static FundDocumentItemDto MapListItem(ListItem item, Uri siteUri)
+    {
+        var name = ReadListItemString(item, "FileLeafRef") ?? string.Empty;
+        var serverRelative = ReadListItemString(item, "FileRef");
+        var boardBook = ReadListItemString(item, "Board_x0020_Book")
+            ?? ReadListItemString(item, "BoardBook");
+        var year = ReadListItemInt(item, "Year") ?? ParseYearFromName(name);
+        var quarter = ReadListItemString(item, "Quarter") ?? ParseQuarterFromName(name);
+        var modifiedOn = item.FieldValues.TryGetValue("Modified", out var modifiedRaw)
+            && modifiedRaw is DateTime modifiedDt
+            ? modifiedDt.ToUniversalTime()
+            : (DateTime?)null;
+        var modifiedBy = item.FieldValues.TryGetValue("Editor", out var editorRaw) && editorRaw is FieldUserValue user
+            ? user.LookupValue
+            : null;
+        long? sizeBytes = null;
+        if (item.FieldValues.TryGetValue("File_x0020_Size", out var sizeRaw) && sizeRaw != null
+            && long.TryParse(sizeRaw.ToString(), out var parsedSize))
+        {
+            sizeBytes = parsedSize;
+        }
+
+        return new FundDocumentItemDto
+        {
+            Id = item.Id.ToString(CultureInfo.InvariantCulture),
+            Name = name,
+            Year = year,
+            Quarter = quarter,
+            ModifiedOn = modifiedOn,
+            ModifiedBy = string.IsNullOrWhiteSpace(modifiedBy) ? null : modifiedBy.Trim(),
+            SizeBytes = sizeBytes,
+            WebUrl = BuildWebUrl(siteUri, serverRelative),
+            ServerRelativeUrl = serverRelative,
+            BoardBook = boardBook,
+        };
+    }
+
+    private static string? ReadListItemString(ListItem item, string fieldName)
+    {
+        try
+        {
+            if (!item.FieldValues.TryGetValue(fieldName, out var value) || value is null)
+            {
+                return null;
+            }
+
+            if (value is FieldLookupValue lookup)
+            {
+                return string.IsNullOrWhiteSpace(lookup.LookupValue) ? null : lookup.LookupValue.Trim();
+            }
+
+            var text = value.ToString()?.Trim();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? ReadListItemInt(ListItem item, string fieldName)
+    {
+        try
+        {
+            if (!item.FieldValues.TryGetValue(fieldName, out var value) || value is null)
+            {
+                return null;
+            }
+
+            return value switch
+            {
+                int i => i,
+                long l => (int)l,
+                double d => (int)d,
+                string s when int.TryParse(s, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+                    => parsed,
+                _ => null,
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ReadBoardBookField(ListItem fields)
@@ -643,6 +830,9 @@ public sealed class FundSharePointDocumentsService : IFundSharePointDocumentsSer
             FundCode = fundCode,
             Category = category,
             FolderPath = folderPath,
+            Source = "empty",
+            ListedCount = null,
+            MatchedCount = 0,
             Items = [],
         };
 }

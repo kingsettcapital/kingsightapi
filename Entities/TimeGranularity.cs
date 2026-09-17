@@ -11,6 +11,50 @@ public enum TimeGranularity
     Daily
 }
 
+/// <summary>
+/// Asset financial metrics ownership basis for
+/// <c>fn_asset_financial_ks</c> vs <c>fn_asset_financial_100pct</c>.
+/// API values: <c>ks</c>, <c>full</c> / <c>at100</c> / <c>100</c>.
+/// </summary>
+public enum AssetFinancialShareBasis
+{
+    Ks,
+    At100Pct
+}
+
+public static class AssetFinancialShareBases
+{
+    public static bool TryParseFromApi(string? value, out AssetFinancialShareBasis basis)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            basis = AssetFinancialShareBasis.Ks;
+            return true;
+        }
+
+        switch (value.Trim().ToLowerInvariant())
+        {
+            case "ks":
+            case "share":
+            case "at-share":
+            case "atshare":
+                basis = AssetFinancialShareBasis.Ks;
+                return true;
+            case "full":
+            case "100":
+            case "at100":
+            case "at-100":
+            case "100pct":
+            case "at100pct":
+                basis = AssetFinancialShareBasis.At100Pct;
+                return true;
+            default:
+                basis = default;
+                return false;
+        }
+    }
+}
+
 /// <summary>Shared constants and helpers for <see cref="TimeGranularity"/>.</summary>
 public static class TimeGranularities
 {

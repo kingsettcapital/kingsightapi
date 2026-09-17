@@ -49,6 +49,21 @@ internal static class WarehouseTables
     public static string FactAssetAcquisition => InvestorServicing("fact_asset_acquisition");
     public static string FactAssetSale => InvestorServicing("fact_asset_sale");
 
+    /// <summary>Fund financial metrics (<c>fn_fund_financial</c>) — ITD or quarter_year label.</summary>
+    public static string FnFundFinancial => InvestorServicing("fn_fund_financial");
+
+    /// <summary>Asset financial metrics at KS ownership share (<c>fn_asset_financial_ks</c>).</summary>
+    public static string FnAssetFinancialKs => InvestorServicing("fn_asset_financial_ks");
+
+    /// <summary>Asset financial metrics grossed up to 100% (<c>fn_asset_financial_100pct</c>).</summary>
+    public static string FnAssetFinancial100Pct => InvestorServicing("fn_asset_financial_100pct");
+
+    /// <summary>Asset acquisition event snapshot (<c>fn_asset_acquisition</c>).</summary>
+    public static string FnAssetAcquisition => InvestorServicing("fn_asset_acquisition");
+
+    /// <summary>Asset sale event snapshot (<c>fn_asset_sale</c>).</summary>
+    public static string FnAssetSale => InvestorServicing("fn_asset_sale");
+
     /// <summary>Per-fund SharePoint library URL for Interim/Annual Reports.</summary>
     public static string FundSharePointLibrary => InvestorServicing("fund_sharepoint_library");
 

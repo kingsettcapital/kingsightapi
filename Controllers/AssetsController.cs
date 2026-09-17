@@ -212,13 +212,32 @@ public class AssetsController : ControllerBase
         }
     }
 
-    // GET: api/assets/{propertyKey}/financial-metrics
+    // GET: api/assets/{propertyKey}/financial-metrics?period=ITD|Q2 2026&view=ltd|quarterly&dateKey=&shareBasis=ks|full
     [HttpGet("{propertyKey:long}/financial-metrics")]
-    public async Task<ActionResult<AssetFinancialMetricsDto?>> GetFinancialMetrics(long propertyKey)
+    public async Task<ActionResult<AssetFinancialMetricsDto?>> GetFinancialMetrics(
+        long propertyKey,
+        [FromQuery] string? period,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] string? shareBasis)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (!AssetFinancialShareBases.TryParseFromApi(shareBasis, out var basis))
+        {
+            return BadRequest("Query parameter 'shareBasis' must be ks or full.");
+        }
+
+        if (resolvedView == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
         try
         {
-            var result = await _service.GetAssetFinancialMetricsAsync(propertyKey);
+            var result = await _service.GetAssetFinancialMetricsAsync(
+                propertyKey, resolvedView, dateKey, period, basis);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -237,13 +256,26 @@ public class AssetsController : ControllerBase
         }
     }
 
-    // GET: api/assets/{propertyKey}/acquisition-sale
+    // GET: api/assets/{propertyKey}/acquisition-sale?period=ITD|Q2 2026&view=ltd|quarterly&dateKey=
     [HttpGet("{propertyKey:long}/acquisition-sale")]
-    public async Task<ActionResult<AssetAcquisitionSaleDto>> GetAcquisitionSale(long propertyKey)
+    public async Task<ActionResult<AssetAcquisitionSaleDto>> GetAcquisitionSale(
+        long propertyKey,
+        [FromQuery] string? period,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
         try
         {
-            var result = await _service.GetAssetAcquisitionSaleAsync(propertyKey);
+            var result = await _service.GetAssetAcquisitionSaleAsync(
+                propertyKey, resolvedView, dateKey, period);
             return Ok(result);
         }
         catch (OperationCanceledException)
