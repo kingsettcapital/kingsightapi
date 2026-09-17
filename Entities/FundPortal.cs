@@ -459,6 +459,9 @@ public sealed class FundFinancialMetricsDto
     [JsonPropertyName("fund_nav_amount")]
     public decimal? FundNavAmount { get; init; }
 
+    [JsonPropertyName("fund_net_income")]
+    public decimal? FundNetIncome { get; init; }
+
     [JsonPropertyName("fund_ebitda")]
     public decimal? FundEbitda { get; init; }
 

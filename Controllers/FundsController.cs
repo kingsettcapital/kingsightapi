@@ -828,12 +828,13 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/financial-metrics?view=ltd|quarterly&dateKey=
+    // GET: api/funds/{fundKey}/financial-metrics?view=ltd|quarterly&dateKey=&period=ITD|Q2 2026
     [HttpGet("{fundKey:int}/financial-metrics")]
     public async Task<ActionResult<FundFinancialMetricsDto?>> GetFinancialMetrics(
         int fundKey,
         [FromQuery] TimeGranularity? view,
-        [FromQuery] int? dateKey)
+        [FromQuery] int? dateKey,
+        [FromQuery] string? period)
     {
         if (!ModelState.IsValid)
         {
@@ -851,10 +852,18 @@ public class FundsController : ControllerBase
             return BadRequest("Financial metrics support view=ltd or view=quarterly only.");
         }
 
+        if (view == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
         try
         {
-            var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetFundFinancialMetricsAsync(fundKey, view.Value, period);
+            var periodFilter = BuildPeriodFilter(dateKey);
+            var result = await _service.GetFundFinancialMetricsAsync(
+                fundKey, view.Value, periodFilter, period);
             return Ok(result);
         }
         catch (OperationCanceledException)

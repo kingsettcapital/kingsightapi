@@ -343,8 +343,17 @@ public sealed class AssetFinancialMetricsDto
     [JsonPropertyName("as_of_date")]
     public DateTime? AsOfDate { get; init; }
 
+    [JsonPropertyName("quarter_year")]
+    public string? QuarterYear { get; init; }
+
     [JsonPropertyName("asset_ks_ownership_pct")]
     public decimal? AssetKsOwnershipPct { get; init; }
+
+    [JsonPropertyName("asset_jv_partner")]
+    public string AssetJvPartner { get; init; } = string.Empty;
+
+    [JsonPropertyName("asset_jv_pct")]
+    public decimal? AssetJvPct { get; init; }
 
     [JsonPropertyName("asset_cash_at_quarter_end")]
     public decimal? AssetCashAtQuarterEnd { get; init; }
@@ -360,6 +369,12 @@ public sealed class AssetFinancialMetricsDto
 
     [JsonPropertyName("asset_noi")]
     public decimal? AssetNoi { get; init; }
+
+    [JsonPropertyName("asset_prior_year_same_period")]
+    public decimal? AssetPriorYearSamePeriod { get; init; }
+
+    [JsonPropertyName("asset_prior_year_end_noi")]
+    public decimal? AssetPriorYearEndNoi { get; init; }
 
     [JsonPropertyName("asset_ffo")]
     public decimal? AssetFfo { get; init; }
@@ -387,6 +402,9 @@ public sealed class AssetFinancialMetricsDto
 
     [JsonPropertyName("asset_gav_amount")]
     public decimal? AssetGavAmount { get; init; }
+
+    [JsonPropertyName("asset_net_income")]
+    public decimal? AssetNetIncome { get; init; }
 
     [JsonPropertyName("asset_ltv")]
     public decimal? AssetLtv { get; init; }
