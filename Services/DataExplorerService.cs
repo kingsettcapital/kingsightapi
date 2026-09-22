@@ -24,7 +24,16 @@ public sealed partial class DataExplorerService : IDataExplorerService
     // Acronyms that should stay upper-cased in generated labels.
     private static readonly HashSet<string> Acronyms = new(StringComparer.OrdinalIgnoreCase)
     {
-        "irr", "ltd", "nav", "fmv", "noi", "ltv", "id", "pct", "ytd", "mtd", "qtd", "usd", "cad"
+        "irr", "ltd", "nav", "fmv", "noi", "ltv", "id", "pct", "ytd", "mtd", "qtd", "usd", "cad", "gla"
+    };
+
+    // SCD / audit columns — keep in the warehouse view but hide from Data Explorer.
+    private static readonly HashSet<string> HiddenColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "valid_from",
+        "valid_to",
+        "created_date",
+        "is_current"
     };
 
     public DataExplorerService(IConfiguration configuration, ILogger<DataExplorerService> logger)
@@ -247,6 +256,11 @@ public sealed partial class DataExplorerService : IDataExplorerService
         while (await reader.ReadAsync())
         {
             var name = reader.GetStringOrEmpty("column_name");
+            if (HiddenColumns.Contains(name))
+            {
+                continue;
+            }
+
             var dataType = reader.GetStringOrEmpty("data_type");
             columns.Add(new DataExplorerColumnDto
             {
@@ -516,6 +530,13 @@ public sealed partial class DataExplorerService : IDataExplorerService
         var words = spaced.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
         for (var i = 0; i < words.Length; i++)
         {
+            // Area columns: occupied_sf / gla_sf → "… (sq ft)"
+            if (words[i].Equals("sf", StringComparison.OrdinalIgnoreCase))
+            {
+                words[i] = "(sq ft)";
+                continue;
+            }
+
             words[i] = Acronyms.Contains(words[i])
                 ? words[i].ToUpperInvariant()
                 : char.ToUpperInvariant(words[i][0]) + words[i][1..].ToLowerInvariant();
