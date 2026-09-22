@@ -7,7 +7,8 @@ using Microsoft.Data.SqlClient;
 namespace kingsightapi.Services;
 
 /// <summary>
-/// Reads column metadata and data from <c>view_investor_portfolio_ltd</c> for the Data Explorer tool.
+/// Reads column metadata and data from Data Explorer warehouse views
+/// (<c>vw_investor_portfolio_itd</c> / <c>vw_investor_fund_asset</c>).
 /// Column selection is dynamic, so every requested column is validated against the live view schema
 /// before it is ever placed into SQL (identifiers are whitelisted; values stay parameterized).
 /// </summary>
@@ -289,9 +290,6 @@ public sealed partial class DataExplorerService : IDataExplorerService
             sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
             sql.Append(" and ");
             WarehouseSql.AppendCurrentFundFilter(sql, "b");
-            sql.Append($" inner join {WarehouseTables.DimInvestor} c on a.investor_key = c.investor_key ");
-            sql.Append(" and ");
-            WarehouseSql.AppendCurrentInvestorFilter(sql, "c");
             return sql.ToString();
         }
 

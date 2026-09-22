@@ -172,9 +172,6 @@ internal static class WarehouseSql
         sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
         sql.Append(" and ");
         AppendCurrentFundFilter(sql, "b");
-        sql.Append($" inner join {WarehouseTables.DimInvestor} c on a.investor_key = c.investor_key ");
-        sql.Append(" and ");
-        AppendCurrentInvestorFilter(sql, "c");
     }
 
     public static void AppendInvestorFundAssetScopeWhere(StringBuilder sql, string assetAlias = "a")
