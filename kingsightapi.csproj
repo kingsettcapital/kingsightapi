@@ -12,6 +12,15 @@
     <UseAppHost>false</UseAppHost>
   </PropertyGroup>
 
+  <!-- Stop local dotnet run before Debug build so kingsightapi.dll is not locked (MSB3027). -->
+  <Target Name="StopLocalKingsightApiBeforeBuild"
+          BeforeTargets="BeforeBuild"
+          Condition="'$(Configuration)' == 'Debug' AND '$(DesignTimeBuild)' != 'true' AND '$(KingsightSkipStopBeforeBuild)' != 'true'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Scripts\stop-kingsightapi.ps1&quot;"
+          IgnoreExitCode="true"
+          StandardOutputImportance="low" />
+  </Target>
+
   <ItemGroup>
     <InternalsVisibleTo Include="kingsightapi.Tests" />
   </ItemGroup>

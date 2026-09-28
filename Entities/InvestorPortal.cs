@@ -68,6 +68,10 @@ public sealed class InvestorListItemDto
     [JsonPropertyName("released_capital_amount")]
     public decimal? ReleasedCapitalAmount { get; init; }
 
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+
     /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
     [JsonPropertyName("total_invested")]
     public decimal TotalInvested => NetInvestedCapitalAmount;

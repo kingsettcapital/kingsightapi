@@ -80,6 +80,12 @@ internal static class WarehouseTables
     public static string ViewInvestorFundAsset =>
         $"[{_database}].[{ViewInvestorFundAssetSchema}].[{ViewInvestorFundAssetName}]";
 
+    /// <summary>Dashboard Active Funds snapshot (includes <c>as_of_date</c>).</summary>
+    public const string ViewActiveFundSummarySchema = "investor_servicing";
+    public const string ViewActiveFundSummaryName = "vw_active_fund_summary";
+    public static string ViewActiveFundSummary =>
+        $"[{_database}].[{ViewActiveFundSummarySchema}].[{ViewActiveFundSummaryName}]";
+
     // Templates still under dbo when present; keep qualified for Initial Catalog safety.
     public static string DataExplorerTemplate => Dbo("data_explorer_template");
     public static string DataExplorerTemplateColumn => Dbo("data_explorer_template_column");

@@ -116,9 +116,11 @@ public sealed class DashboardService : IDashboardService
                 calendarYear,
                 string.Join(", ", requested));
 
+            var asOfDate = await LoadActiveFundAsOfDateAsync(connection, cancellationToken);
+
             return new DashboardResponseDto
             {
-                LastUpdated = DateTime.UtcNow,
+                LastUpdated = asOfDate,
                 CalendarYear = calendarYear,
                 Widgets = widgets
             };
@@ -157,6 +159,29 @@ public sealed class DashboardService : IDashboardService
         public int? InvestorsAddedYtd { get; init; }
         public int? AssetsAddedYtd { get; init; }
         public int? FundsAddedYtd { get; init; }
+    }
+
+    /// <summary>Dashboard header as-of from <c>vw_active_fund_summary.as_of_date</c>.</summary>
+    private static async Task<DateTime?> LoadActiveFundAsOfDateAsync(
+        SqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var sql = $"""
+            select max(as_of_date) as as_of_date
+            from {WarehouseTables.ViewActiveFundSummary}
+            """;
+
+        await using var command = new SqlCommand(sql, connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return reader.GetNullableDateTimeIfPresent("as_of_date");
     }
 
     // KPI snapshot — portfolio totals, counts, and YTD return from warehouse facts.

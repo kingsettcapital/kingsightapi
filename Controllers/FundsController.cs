@@ -53,6 +53,31 @@ public class FundsController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving fund filter options.");
         }
     }
+
+    // GET: api/funds/active-summary?search=&fundType=&strategy=
+    /// <summary>Dashboard Active Funds from <c>vw_active_fund_summary</c> (includes as_of_date).</summary>
+    [HttpGet("active-summary")]
+    public async Task<ActionResult<ActiveFundsSummaryResultDto>> GetActiveSummary(
+        [FromQuery] string? search,
+        [FromQuery] string? fundType,
+        [FromQuery] string? strategy)
+    {
+        try
+        {
+            return Ok(await _service.GetActiveFundSummaryAsync(search, fundType, strategy));
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get active fund summary cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving active fund summary");
+            return StatusCode(500, "An error occurred while retrieving active funds.");
+        }
+    }
+
     // GET: api/funds?search=&view=ltd|quarterly&dateKey=&fundType=&strategy=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PortalListPageResult<FundListItemDto, FundListSummaryDto>>> GetAll(

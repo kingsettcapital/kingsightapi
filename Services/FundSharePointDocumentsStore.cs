@@ -30,6 +30,12 @@ public interface IFundSharePointDocumentsStore
 
 public sealed class FundSharePointDocumentsStore : IFundSharePointDocumentsStore
 {
+    /// <summary>
+    /// Serializes DML against <c>fund_document</c>. Fabric Warehouse table-level locks
+    /// cause error 24556 when concurrent writers hit the same table.
+    /// </summary>
+    private static readonly SemaphoreSlim DocumentWriteGate = new(1, 1);
+
     private readonly string _connectionString;
     private readonly string _libraryTable;
     private readonly string _documentTable;
@@ -252,6 +258,54 @@ public sealed class FundSharePointDocumentsStore : IFundSharePointDocumentsStore
         IReadOnlyList<FundDocumentItemDto> items,
         CancellationToken cancellationToken = default)
     {
+        // Fabric Warehouse uses snapshot isolation with table-level DML locks.
+        // Concurrent UPDATE/INSERT on fund_document raises 24556 write-write conflicts.
+        await DocumentWriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            const int maxAttempts = 3;
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    await ReplaceCachedDocumentsOnceAsync(fundKey, category, items, cancellationToken);
+                    return;
+                }
+                catch (SqlException ex) when (IsFabricWriteConflict(ex) && attempt < maxAttempts)
+                {
+                    var delayMs = 150 * attempt * attempt;
+                    _logger.LogWarning(
+                        ex,
+                        "Fabric write conflict refreshing document cache for fund {FundKey} (attempt {Attempt}/{Max}); retrying in {DelayMs}ms.",
+                        fundKey,
+                        attempt,
+                        maxAttempts,
+                        delayMs);
+                    await Task.Delay(delayMs, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Failed to refresh document cache for fund {FundKey} in {Table}. Live SharePoint results still returned.",
+                        fundKey,
+                        _documentTable);
+                    return;
+                }
+            }
+        }
+        finally
+        {
+            DocumentWriteGate.Release();
+        }
+    }
+
+    private async Task ReplaceCachedDocumentsOnceAsync(
+        int fundKey,
+        string category,
+        IReadOnlyList<FundDocumentItemDto> items,
+        CancellationToken cancellationToken)
+    {
         var now = DateTime.UtcNow;
         await using var connection = new SqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -274,59 +328,59 @@ public sealed class FundSharePointDocumentsStore : IFundSharePointDocumentsStore
                 await deactivate.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            long nextId = await GetNextDocumentIdAsync(connection, transaction, cancellationToken);
-
-            foreach (var item in items)
+            if (items.Count > 0)
             {
-                await using var insert = new SqlCommand(
-                    $"""
-                    insert into {_documentTable} (
-                        fund_document_id, fund_key, sharepoint_item_id, file_name, category,
-                        quarter, year, modified_on, modified_by, size_bytes,
-                        web_url, server_relative_url, synced_at, is_active
-                    )
-                    values (
-                        @fund_document_id, @fund_key, @sharepoint_item_id, @file_name, @category,
-                        @quarter, @year, @modified_on, @modified_by, @size_bytes,
-                        @web_url, @server_relative_url, @synced_at, 'Y'
-                    )
-                    """,
-                    connection,
-                    transaction);
+                long nextId = await GetNextDocumentIdAsync(connection, transaction, cancellationToken);
+                foreach (var item in items)
+                {
+                    await using var insert = new SqlCommand(
+                        $"""
+                        insert into {_documentTable} (
+                            fund_document_id, fund_key, sharepoint_item_id, file_name, category,
+                            quarter, year, modified_on, modified_by, size_bytes,
+                            web_url, server_relative_url, synced_at, is_active
+                        )
+                        values (
+                            @fund_document_id, @fund_key, @sharepoint_item_id, @file_name, @category,
+                            @quarter, @year, @modified_on, @modified_by, @size_bytes,
+                            @web_url, @server_relative_url, @synced_at, 'Y'
+                        )
+                        """,
+                        connection,
+                        transaction);
 
-                insert.Parameters.Add("@fund_document_id", SqlDbType.BigInt).Value = nextId++;
-                insert.Parameters.Add("@fund_key", SqlDbType.Int).Value = fundKey;
-                insert.Parameters.Add("@sharepoint_item_id", SqlDbType.VarChar, 64).Value =
-                    string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id;
-                insert.Parameters.Add("@file_name", SqlDbType.VarChar, 500).Value = item.Name;
-                insert.Parameters.Add("@category", SqlDbType.VarChar, 200).Value = category;
-                insert.Parameters.Add("@quarter", SqlDbType.VarChar, 10).Value =
-                    (object?)item.Quarter ?? DBNull.Value;
-                insert.Parameters.Add("@year", SqlDbType.Int).Value =
-                    (object?)item.Year ?? DBNull.Value;
-                insert.Parameters.Add("@modified_on", SqlDbType.DateTime2).Value =
-                    (object?)item.ModifiedOn ?? DBNull.Value;
-                insert.Parameters.Add("@modified_by", SqlDbType.VarChar, 200).Value =
-                    (object?)item.ModifiedBy ?? DBNull.Value;
-                insert.Parameters.Add("@size_bytes", SqlDbType.BigInt).Value =
-                    (object?)item.SizeBytes ?? DBNull.Value;
-                insert.Parameters.Add("@web_url", SqlDbType.VarChar, 1000).Value =
-                    (object?)item.WebUrl ?? DBNull.Value;
-                insert.Parameters.Add("@server_relative_url", SqlDbType.VarChar, 1000).Value =
-                    (object?)item.ServerRelativeUrl ?? DBNull.Value;
-                insert.Parameters.Add("@synced_at", SqlDbType.DateTime2).Value = now;
+                    insert.Parameters.Add("@fund_document_id", SqlDbType.BigInt).Value = nextId++;
+                    insert.Parameters.Add("@fund_key", SqlDbType.Int).Value = fundKey;
+                    insert.Parameters.Add("@sharepoint_item_id", SqlDbType.VarChar, 64).Value =
+                        string.IsNullOrWhiteSpace(item.Id) ? Guid.NewGuid().ToString("N") : item.Id;
+                    insert.Parameters.Add("@file_name", SqlDbType.VarChar, 500).Value = item.Name;
+                    insert.Parameters.Add("@category", SqlDbType.VarChar, 200).Value = category;
+                    insert.Parameters.Add("@quarter", SqlDbType.VarChar, 10).Value =
+                        (object?)item.Quarter ?? DBNull.Value;
+                    insert.Parameters.Add("@year", SqlDbType.Int).Value =
+                        (object?)item.Year ?? DBNull.Value;
+                    insert.Parameters.Add("@modified_on", SqlDbType.DateTime2).Value =
+                        (object?)item.ModifiedOn ?? DBNull.Value;
+                    insert.Parameters.Add("@modified_by", SqlDbType.VarChar, 200).Value =
+                        (object?)item.ModifiedBy ?? DBNull.Value;
+                    insert.Parameters.Add("@size_bytes", SqlDbType.BigInt).Value =
+                        (object?)item.SizeBytes ?? DBNull.Value;
+                    insert.Parameters.Add("@web_url", SqlDbType.VarChar, 1000).Value =
+                        (object?)item.WebUrl ?? DBNull.Value;
+                    insert.Parameters.Add("@server_relative_url", SqlDbType.VarChar, 1000).Value =
+                        (object?)item.ServerRelativeUrl ?? DBNull.Value;
+                    insert.Parameters.Add("@synced_at", SqlDbType.DateTime2).Value = now;
 
-                await insert.ExecuteNonQueryAsync(cancellationToken);
+                    await insert.ExecuteNonQueryAsync(cancellationToken);
+                }
             }
 
             await transaction.CommitAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch
         {
             try
             {
-                // Fabric / SQL may already abort the transaction; never let rollback mask the root error
-                // or throw out to the caller (live SharePoint results should still be returned).
                 if (transaction.Connection != null)
                 {
                     await transaction.RollbackAsync(cancellationToken);
@@ -340,13 +394,12 @@ public sealed class FundSharePointDocumentsStore : IFundSharePointDocumentsStore
                     fundKey);
             }
 
-            _logger.LogWarning(
-                ex,
-                "Failed to refresh document cache for fund {FundKey} in {Table}. Live SharePoint results still returned.",
-                fundKey,
-                _documentTable);
+            throw;
         }
     }
+
+    private static bool IsFabricWriteConflict(SqlException ex) =>
+        ex.Number is 24556 or 24706;
 
     private async Task<long> GetNextDocumentIdAsync(
         SqlConnection connection,

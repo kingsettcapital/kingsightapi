@@ -12,6 +12,19 @@ internal static class PortalPortfolioListSql
             ? WarehouseTables.FactInvestorPortfolioQuarterly
             : WarehouseTables.FactInvestorPortfolioLtd;
 
+    /// <summary>
+    /// ITD snapshot as-of from <c>date_key</c> (yyyyMMdd). Aggregated with <c>max</c> for grouped list queries.
+    /// </summary>
+    public static void AppendItdAsOfDateAggregate(StringBuilder sql, TimeGranularity view, string factAlias = "a")
+    {
+        if (view != TimeGranularity.Ltd)
+        {
+            return;
+        }
+
+        sql.Append($" max(try_convert(date, cast({factAlias}.date_key as varchar(8)))) as as_of_date, ");
+    }
+
     public static void AppendPortfolioMetricAggregates(StringBuilder sql, string factAlias = "a")
     {
         sql.Append($" sum(isnull({factAlias}.commitment_amount, 0)) as commitment_amount, ");
