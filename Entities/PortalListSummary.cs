@@ -41,6 +41,10 @@ public sealed class InvestorListSummaryDto
 
     [JsonPropertyName("released_capital")]
     public decimal ReleasedCapital { get; init; }
+
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
 }
 
 /// <summary>Investments list page KPI row (Figma summary cards).</summary>
@@ -69,6 +73,10 @@ public sealed class FundListSummaryDto
 
     [JsonPropertyName("released_capital")]
     public decimal ReleasedCapital { get; init; }
+
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
 }
 
 /// <summary>Assets list page KPI row (Figma summary cards).</summary>

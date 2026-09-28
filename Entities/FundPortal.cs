@@ -38,11 +38,51 @@ public sealed class FundListItemDto
     [JsonPropertyName("invested_percent")]
     public decimal? InvestedPercent { get; init; }
 
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+
     /// <summary>Legacy alias for <see cref="FundStrategyName"/>.</summary>
     public string Category => FundStrategyName;
 
     /// <summary>Legacy alias for <see cref="NetInvestedCapitalAmount"/>.</summary>
     public decimal CurrentValue => NetInvestedCapitalAmount;
+}
+
+/// <summary>Dashboard Active Funds row from <c>vw_active_fund_summary</c>.</summary>
+public sealed class ActiveFundSummaryDto
+{
+    public int FundKey { get; init; }
+    public string FundName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_type_name")]
+    public string FundTypeName { get; init; } = string.Empty;
+
+    [JsonPropertyName("fund_strategy_name")]
+    public string FundStrategyName { get; init; } = string.Empty;
+
+    public int Investors { get; init; }
+    public int Assets { get; init; }
+
+    [JsonPropertyName("net_invested_capital_amount")]
+    public decimal NetInvestedCapitalAmount { get; init; }
+
+    /// <summary>EUM alias for SPA mapping.</summary>
+    public decimal CurrentValue => NetInvestedCapitalAmount;
+
+    public string Status { get; init; } = "Active";
+
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+}
+
+/// <summary>Dashboard Active Funds payload (rows + shared as-of date).</summary>
+public sealed class ActiveFundsSummaryResultDto
+{
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
+
+    public IReadOnlyList<ActiveFundSummaryDto> Items { get; init; } = [];
 }
 
 /// <summary>Flat fund profile header for GET /api/Funds/{fundKey}.</summary>

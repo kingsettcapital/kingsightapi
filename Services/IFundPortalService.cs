@@ -14,6 +14,12 @@ public interface IFundPortalService
         string? sortDir,
         int page,
         int pageSize);
+
+    /// <summary>Dashboard Active Funds from <c>vw_active_fund_summary</c>.</summary>
+    Task<ActiveFundsSummaryResultDto> GetActiveFundSummaryAsync(
+        string? search = null,
+        string? fundType = null,
+        string? strategy = null);
     Task<FundProfileDto?> GetFundByKeyAsync(int fundKey);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
     Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize);

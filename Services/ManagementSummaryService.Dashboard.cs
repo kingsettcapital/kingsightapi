@@ -140,17 +140,22 @@ namespace kingsightapi.Services
             CancellationToken cancellationToken = default)
         {
             var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
+            // % of Fundings denominator ignores Funding Status (except excludes Unfunded) —
+            // load the all-status and Unfunded universes in parallel with the main queries.
+            var queryWithoutFundingStatus = WithoutFundingStatusFilter(query);
 
             // Keep Fabric round-trips minimal: only queries that cannot be derived from alias rows.
             // LTV risk / top 5 / sponsor / exposure breakdown are computed in-memory from alias data.
             var kpisTask = LoadDashboardKpisAndBreakdownAsync(query, fundingStatus, cancellationToken);
             var aliasTask = LoadDashboardAliasRowsAsync(query, fundingStatus, cancellationToken);
+            var fundingsUniverseTask = LoadDashboardAliasRowsAsync(
+                queryWithoutFundingStatus, null, cancellationToken);
+            var unfundedUniverseTask = LoadDashboardAliasRowsAsync(
+                queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatus, cancellationToken);
             var investorTask = LoadDashboardInvestorSummaryAsync(query, fundingStatus, cancellationToken);
             var exposureAnalysisTask = LoadDashboardExposureAnalysisAsync(query, fundingStatus, cancellationToken);
-            var riskDistributionTask = LoadDashboardLtvRiskDistributionAsync(
-                query, fundingStatus, cancellationToken);
             var top5Task = LoadDashboardTop5ExposuresAsync(
                 query, fundingStatus, cancellationToken);
             var exposureBreakdownTask = LoadDashboardExposureBreakdownAsync(
@@ -161,19 +166,22 @@ namespace kingsightapi.Services
             await Task.WhenAll(
                 kpisTask,
                 aliasTask,
+                fundingsUniverseTask,
+                unfundedUniverseTask,
                 watchlistTask,
                 filterOptionsTask,
                 investorTask,
                 exposureAnalysisTask,
-                riskDistributionTask,
                 top5Task,
                 exposureBreakdownTask,
                 sponsorSummaryTask);
 
             var kpisAndBreakdown = await kpisTask;
+            // Investor→alias membership should not depend on the selected funding status,
+            // so % of Fundings / other filters stay aligned across status selections.
             var investorAliasNames = await LoadLoanAliasNamesForInvestorsAsync(
                 query.AsOfDate,
-                fundingStatus,
+                null,
                 query.InvestorAliases,
                 cancellationToken);
             var aliasRows = ApplyDashboardFilters(await aliasTask, query, investorAliasNames);
@@ -197,6 +205,10 @@ namespace kingsightapi.Services
             // Always align header balance / LTV / outstanding interest with the alias table
             // on screen (SQL KPI query can disagree or return zeros while alias rows have amounts).
             var aliasMetrics = BuildMetricsFromAliasRows(aliasRows);
+            var percentOfFundings = ComputePercentOfFundings(
+                aliasRows,
+                ApplyDashboardFilters(await fundingsUniverseTask, queryWithoutFundingStatus, investorAliasNames),
+                ApplyDashboardFilters(await unfundedUniverseTask, queryWithoutFundingStatus, investorAliasNames));
             kpis = new ManagementSummaryKpisDto
             {
                 NumberOfLoans = HasPostSqlDashboardFilters(query)
@@ -204,9 +216,7 @@ namespace kingsightapi.Services
                     : kpisAndBreakdown.Kpis.NumberOfLoans,
                 TotalOutstandingBalance = aliasMetrics.Kpis.TotalOutstandingBalance,
                 AverageLtv = aliasMetrics.Kpis.AverageLtv ?? kpisAndBreakdown.Kpis.AverageLtv,
-                PercentOfFundings = HasPostSqlDashboardFilters(query)
-                    ? aliasMetrics.Kpis.PercentOfFundings
-                    : kpisAndBreakdown.Kpis.PercentOfFundings,
+                PercentOfFundings = percentOfFundings,
                 AverageLtvTrendLabel = kpisAndBreakdown.Kpis.AverageLtvTrendLabel,
                 MaxLtv = aliasMetrics.Kpis.MaxLtv ?? kpisAndBreakdown.Kpis.MaxLtv
             };
@@ -229,7 +239,7 @@ namespace kingsightapi.Services
                     aliasRows.Sum(row => row.Principal),
                     aliasRows.Sum(row => row.TotalExposure)),
                 exposureAnalysisRows,
-                await riskDistributionTask,
+                BuildLtvRiskDistributionFromAliasRows(aliasRows),
                 await top5Task,
                 await sponsorSummaryTask);
 
@@ -453,20 +463,11 @@ namespace kingsightapi.Services
             return selected.Count == 1 ? selected[0] : null;
         }
 
-        private static string? ResolveTvfRiskLevel(IReadOnlyList<string>? riskLevels)
-        {
-            if (riskLevels is null or { Count: 0 }
-                || riskLevels.Any(risk => risk.Equals("ALL", StringComparison.OrdinalIgnoreCase)))
-            {
-                return null;
-            }
-
-            var selected = riskLevels
-                .Where(risk => !string.IsNullOrWhiteSpace(risk))
-                .Select(risk => risk.Trim().ToUpperInvariant())
-                .ToList();
-            return selected.Count == 1 ? selected[0] : null;
-        }
+        /// <summary>
+        /// Do not push risk into warehouse TVFs — their risk bands are outdated.
+        /// Risk is derived from LTV in-process and applied via <see cref="ApplyDashboardFilters"/>.
+        /// </summary>
+        private static string? ResolveTvfRiskLevel(IReadOnlyList<string>? riskLevels) => null;
 
         private async Task<(
             ManagementSummaryKpisDto Kpis,
@@ -609,6 +610,40 @@ namespace kingsightapi.Services
             };
         }
 
+        /// <summary>
+        /// Exposure + loan counts by LTV risk band, aligned with Detailed Loan Summary risk labels.
+        /// </summary>
+        private static IReadOnlyList<ChartSliceDto> BuildLtvRiskDistributionFromAliasRows(
+            IReadOnlyList<LoanAliasSummaryRowDto> aliasRows)
+        {
+            var totalExposure = aliasRows.Sum(row => row.TotalExposure);
+            var bandOrder = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["HIGH"] = 0,
+                ["ELEVATED"] = 1,
+                ["MODERATE"] = 2,
+                ["LOW"] = 3,
+            };
+
+            return aliasRows
+                .GroupBy(row => row.Risk, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var exposure = group.Sum(row => row.TotalExposure);
+                    return new ChartSliceDto
+                    {
+                        Label = group.Key.ToUpperInvariant(),
+                        Value = exposure,
+                        Count = group.Count(),
+                        SharePercent = totalExposure > 0
+                            ? Math.Round(exposure / totalExposure * 100m, 1)
+                            : null
+                    };
+                })
+                .OrderBy(slice => bandOrder.TryGetValue(slice.Label, out var order) ? order : 99)
+                .ToList();
+        }
+
         private static IReadOnlyList<ChartSliceDto> FilterInvestorSummary(
             IReadOnlyList<ChartSliceDto> slices,
             ManagementSummaryDashboardQuery query)
@@ -716,7 +751,8 @@ namespace kingsightapi.Services
                     Other = GetNullableDecimal(reader, "other_cost") ?? 0m,
                     TotalExposure = GetNullableDecimal(reader, "total_exposure") ?? 0m,
                     Ltv = ltv.HasValue ? Math.Round(ltv.Value, 2) : null,
-                    Risk = NormalizeRiskLevel(GetNullableString(reader, "risk_level"))
+                    // Derive from LTV — warehouse TVF risk_level uses outdated bands (e.g. 60%).
+                    Risk = MapDashboardRiskBand(ltv.HasValue ? Math.Round(ltv.Value, 2) : null)
                 });
             }
 
@@ -1720,9 +1756,14 @@ namespace kingsightapi.Services
                 string? fundingStatus,
                 CancellationToken cancellationToken)
         {
+            // Default / maturity / interest-off / days-in-default stay on the TVF.
+            // Date of Advance: earliest actual funding post across alias loans —
+            // Initial Draw with non-zero actual principal, else first Draw with
+            // actual principal (placeholder Initial Draw rows use schedule Accrual
+            // Post Date, e.g. LN5275-C 10/01/2021 vs actual advance 04/28/2023).
             var sql = $"""
                 select
-                    k.date_of_advance,
+                    adv.date_of_advance,
                     k.default_date,
                     k.maturity_date,
                     k.interest_off_date,
@@ -1737,6 +1778,29 @@ namespace kingsightapi.Services
                     @investor_alias,
                     @risk,
                     @funding_status) k
+                outer apply (
+                    select min(per_loan.advance_dt) as date_of_advance
+                    from (
+                        select
+                            coalesce(
+                                min(case
+                                        when s.history_status = 'Initial Draw'
+                                         and isnull(s.actual_principal_amount, 0) <> 0
+                                        then s.accrual_post_date
+                                    end),
+                                min(case
+                                        when s.history_status = 'Draw'
+                                         and isnull(s.actual_principal_amount, 0) <> 0
+                                        then s.accrual_post_date
+                                    end)
+                            ) as advance_dt
+                        from {_vwLoanAttributes} v
+                        inner join {_tblFactAmortizationSchedule} s
+                            on s.loan_code = v.loan_code
+                        where v.loan_alias_name = @loan_alias_name
+                        group by v.loan_code
+                    ) per_loan
+                ) adv
                 where k.loan_alias_name = @loan_alias_name
                 """;
 
@@ -2085,6 +2149,9 @@ namespace kingsightapi.Services
             return units;
         }
 
+        /// <summary>
+        /// LTV risk bands: Low &lt; 50%, Moderate 50–&lt;75%, Elevated 75–100%, High &gt; 100%.
+        /// </summary>
         private static string MapDashboardRiskBand(decimal? ltv)
         {
             if (!ltv.HasValue)
@@ -2094,10 +2161,10 @@ namespace kingsightapi.Services
 
             return ltv.Value switch
             {
-                < 50m => "LOW",
-                <= 75m => "MODERATE",
-                <= 100m => "ELEVATED",
-                _ => "HIGH"
+                > 100m => "HIGH",
+                >= 75m => "ELEVATED",
+                >= 50m => "MODERATE",
+                _ => "LOW"
             };
         }
 
@@ -2795,6 +2862,46 @@ namespace kingsightapi.Services
 
             return (kpis, outstanding, breakdown);
         }
+
+        /// <summary>
+        /// % of Fundings =
+        ///   SUM(Principal | all active filters, as-of snapshot)
+        ///   / SUM(Principal | Funding Status &lt;&gt; Unfunded, all other filters, as-of snapshot).
+        /// As-of snapshot is enforced by the warehouse TVFs via @as_of_date (Accrual Posted Date).
+        /// </summary>
+        private static decimal? ComputePercentOfFundings(
+            IReadOnlyList<LoanAliasSummaryRowDto> filteredAliasRows,
+            IReadOnlyList<LoanAliasSummaryRowDto> allStatusRowsWithOtherFilters,
+            IReadOnlyList<LoanAliasSummaryRowDto> unfundedRowsWithOtherFilters)
+        {
+            var numerator = filteredAliasRows.Sum(row => row.Principal);
+            var denominator =
+                allStatusRowsWithOtherFilters.Sum(row => row.Principal)
+                - unfundedRowsWithOtherFilters.Sum(row => row.Principal);
+
+            if (denominator <= 0m)
+            {
+                return null;
+            }
+
+            return Math.Round(numerator / denominator * 100m, 2);
+        }
+
+        private static ManagementSummaryDashboardQuery WithoutFundingStatusFilter(
+            ManagementSummaryDashboardQuery query) =>
+            new()
+            {
+                AsOfDate = query.AsOfDate,
+                DefaultDateFrom = query.DefaultDateFrom,
+                DefaultDateTo = query.DefaultDateTo,
+                MaturityDateFrom = query.MaturityDateFrom,
+                MaturityDateTo = query.MaturityDateTo,
+                Sponsor = query.Sponsor,
+                RiskLevels = query.RiskLevels,
+                Statuses = null,
+                InvestorAliases = query.InvestorAliases,
+                LoanAliasIds = query.LoanAliasIds,
+            };
 
         private static List<LoanAliasSummaryRowDto> ApplyDashboardFilters(
             List<LoanAliasSummaryRowDto> rows,
@@ -3572,21 +3679,7 @@ namespace kingsightapi.Services
             return ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null;
         }
 
-        private static string MapRiskBand(decimal? ltv)
-        {
-            if (!ltv.HasValue)
-            {
-                return "LOW";
-            }
-
-            return ltv.Value switch
-            {
-                > 100m => "HIGH",
-                > 75m => "ELEVATED",
-                > 60m => "MODERATE",
-                _ => "LOW"
-            };
-        }
+        private static string MapRiskBand(decimal? ltv) => MapDashboardRiskBand(ltv);
 
         private static string? FormatWatchlistCell(SqlDataReader reader, string name)
         {

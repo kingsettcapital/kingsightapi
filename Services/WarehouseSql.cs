@@ -257,6 +257,26 @@ internal static class WarehouseSql
         AppendCurrentFundFilter(sql, fundAlias);
     }
 
+    /// <summary>Join <c>dim_property.fund</c> to <c>dim_fund.yardi_fund_code</c> (consolidated asset holdings).</summary>
+    public static void AppendPropertyYardiFundCodeJoin(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" inner join {WarehouseTables.DimFund} {fundAlias} on isnull({propertyAlias}.fund, '') = isnull({fundAlias}.yardi_fund_code, '') ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, fundAlias);
+    }
+
+    /// <summary>Match <c>dim_property.fund</c> to an outer fund row's <c>yardi_fund_code</c>.</summary>
+    public static void AppendPropertyBelongsToFundByYardiCodeFilter(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" and isnull({propertyAlias}.fund, '') = isnull({fundAlias}.yardi_fund_code, '') ");
+    }
+
     /// <summary>Limit to funds where the investor has ITD portfolio exposure.</summary>
     public static void AppendInvestorFundKeyScopeFilter(StringBuilder sql, string fundAlias = "f")
     {
@@ -283,6 +303,12 @@ internal static class WarehouseSql
     public static void AppendPropertyFundLevel000Filter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append($" and isnull({propertyAlias}.fund_level, '') in ('000 Property', '000 - Property') ");
+    }
+
+    /// <summary>Consolidated asset rows (<c>fund_level = '500 - Consolidated Asset'</c>).</summary>
+    public static void AppendPropertyFundLevel500ConsolidatedFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and isnull({propertyAlias}.fund_level, '') = '500 - Consolidated Asset' ");
     }
 
     /// <summary>Fund asset counts — only active properties.</summary>

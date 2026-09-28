@@ -150,6 +150,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         pageSql.Append(" isnull(b.contact_last_name, '') as contact_last_name, ");
         AppendInvestorListIdentityColumns(pageSql);
         pageSql.Append(" count(distinct a.fund_key) as fund_count, ");
+        PortalPortfolioListSql.AppendItdAsOfDateAggregate(pageSql, view);
         PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
         AppendInvestorListingFrom(pageSql, portfolioTable, view, period);
         pageSql.Append(" group by b.investor_key, b.investor_name, b.investor_type_name, ");
@@ -191,7 +192,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
                 NetDistributed = summary.NetDistributed,
                 Reserved = summary.Reserved,
                 Unfunded = summary.Unfunded,
-                ReleasedCapital = summary.ReleasedCapital
+                ReleasedCapital = summary.ReleasedCapital,
+                AsOfDate = summary.AsOfDate,
             },
             Items = items,
             Page = normalizedPage,
@@ -211,6 +213,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
     {
         var summarySql = new StringBuilder();
         summarySql.Append(" select ");
+        PortalPortfolioListSql.AppendItdAsOfDateAggregate(summarySql, view);
         summarySql.Append(" count(distinct b.investor_key) as investor_count, ");
         PortalPortfolioListSql.AppendPortfolioSummaryMetricSums(summarySql);
         AppendInvestorListingFrom(summarySql, portfolioTable, view, period);
@@ -231,7 +234,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
             Reserved = reader.GetDecimalOrDefault("reserved"),
             Unfunded = reader.GetDecimalOrDefault("unfunded"),
-            ReleasedCapital = reader.GetDecimalOrDefault("released_capital")
+            ReleasedCapital = reader.GetDecimalOrDefault("released_capital"),
+            AsOfDate = reader.GetNullableDateTimeIfPresent("as_of_date"),
         };
     }
 
@@ -303,7 +307,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
             NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
             ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
             UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
-            ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount")
+            ReleasedCapitalAmount = reader.GetNullableDecimal("released_capital_amount"),
+            AsOfDate = reader.GetNullableDateTimeIfPresent("as_of_date"),
         };
     }
 
