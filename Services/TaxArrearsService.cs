@@ -11,117 +11,66 @@ namespace kingsightapi.Services
         TaxArrearsLookupsDto GetLookups();
 
         Task<IReadOnlyList<TaxArrearsRowDto>> GetAsync(
-            IReadOnlyList<int> loanAliasIds,
+            IReadOnlyList<int>? loanAliasIds,
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default);
 
         Task<TaxArrearsRowDto> CreateAsync(
             TaxArrearsCreateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
 
         Task<bool> UpdateAsync(
             TaxArrearsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
     public sealed class TaxArrearsService : ITaxArrearsService
     {
-        private const string ListSqlBase = """
-            select ta.tax_arrear_key,
-                   l.loan_key,
-                   l.loan_code,
-                   l.loan_desc,
-                   loan_alias_name = isnull(m.loan_alias_name, ''),
-                   ta.tax_memo_date,
-                   ta.tax_arrears,
-                   ta.tax_year,
-                   ta.notes,
-                   ta.user_updated_by,
-                   ta.user_updated_date
-            from mort.tax_arrears ta
-            inner join mort.dim_loan l
-                on ta.loan_key = l.loan_key
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
-
-        private const string NextTaxArrearKeySql = """
-            select isnull(max(tax_arrear_key), 0) + 1
-            from mort.tax_arrears
-            """;
-
-        private const string InsertSql = """
-            insert into mort.tax_arrears (
-                tax_arrear_key,
-                loan_key,
-                tax_memo_date,
-                tax_arrears,
-                tax_year,
-                notes,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @tax_arrear_key,
-                @loan_key,
-                @tax_memo_date,
-                @tax_arrears,
-                @tax_year,
-                @notes,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string SelectByKeySql = """
-            select ta.tax_arrear_key,
-                   l.loan_key,
-                   l.loan_code,
-                   l.loan_desc,
-                   loan_alias_name = isnull(m.loan_alias_name, ''),
-                   ta.tax_memo_date,
-                   ta.tax_arrears,
-                   ta.tax_year,
-                   ta.notes,
-                   ta.user_updated_by,
-                   ta.user_updated_date
-            from mort.tax_arrears ta
-            inner join mort.dim_loan l
-                on ta.loan_key = l.loan_key
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where ta.tax_arrear_key = @tax_arrear_key
-            """;
-
-        private const string UpdateSql = """
-            update mort.tax_arrears
-            set tax_memo_date = @tax_memo_date,
-                tax_arrears = @tax_arrears,
-                tax_year = @tax_year,
-                notes = @notes,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where tax_arrear_key = @tax_arrear_key
-            """;
-
-        private const string LoanEligibleSql = """
-            select 1
-            from mort.dim_loan
-            where loan_key = @loan_key
-              and is_current = 1
-              and (is_leaf = 1 or is_leaf is null)
-            """;
+        private readonly string _nextTaxArrearKeySql;
+        private readonly string _loanEligibleByCodeSql;
 
         private readonly string _connectionString;
+        private readonly SubjectiveInputSql _sql;
+        private readonly string _tblDimLoan;
+        private readonly string _tblLoanAliasMaster;
+        private readonly string _tblLoanAliasRelationship;
+        private readonly string _tblDimStatus;
+        private readonly string _tblTaxArrears;
         private readonly ILogger<TaxArrearsService> _logger;
+
         private string? _loanStatusKeyColumn;
         private bool? _tableAvailable;
+        private bool _schemaProbed;
+        private bool _hasTaxArrearKeyColumn;
+        private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
 
-        public TaxArrearsService(IConfiguration configuration, ILogger<TaxArrearsService> logger)
+        public TaxArrearsService(
+            IConfiguration configuration,
+            ILogger<TaxArrearsService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _sql = new SubjectiveInputSql(tables);
+            _tblDimLoan = _sql.SharedDimLoan;
+            _tblLoanAliasMaster = _sql.LoanAliasMaster;
+            _tblLoanAliasRelationship = _sql.LoanAliasRelationship;
+            _tblDimStatus = _sql.DimStatus;
+            _tblTaxArrears = _sql.LoanTaxDetails;
+
+            _loanEligibleByCodeSql = $"""
+                select r.loan_code
+                from {_tblLoanAliasRelationship} r
+                where r.loan_code = @loan_code
+                """;
+
+            _nextTaxArrearKeySql = $"""
+                select isnull(max(tax_arrear_key), 0) + 1
+                from {_tblTaxArrears}
+                """;
         }
 
         public TaxArrearsLookupsDto GetLookups()
@@ -137,21 +86,17 @@ namespace kingsightapi.Services
         }
 
         public async Task<IReadOnlyList<TaxArrearsRowDto>> GetAsync(
-            IReadOnlyList<int> loanAliasIds,
+            IReadOnlyList<int>? loanAliasIds,
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default)
         {
-            await EnsureTableAvailableAsync(cancellationToken);
+            await EnsureSchemaAsync(cancellationToken);
 
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
             if (statusFilter.HasFilter)
             {
-                loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
-                if (string.IsNullOrEmpty(loanStatusKeyColumn))
-                {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
-                }
+                loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync(cancellationToken);
             }
 
             var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
@@ -160,64 +105,109 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
 
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, loanAliasIds);
-            LoanStatusFilterParser.AddParameters(command, statusFilter);
-
-            var rows = new List<TaxArrearsRowDto>();
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            while (await reader.ReadAsync(cancellationToken))
+            if (loanAliasIds is { Count: > 0 })
             {
-                rows.Add(MapRow(reader));
+                AddLoanAliasParameters(command, loanAliasIds);
             }
 
-            _logger.LogInformation(
-                "Retrieved {Count} tax arrears rows for {AliasCount} loan alias filter(s).",
-                rows.Count,
-                loanAliasIds.Count);
+            LoanStatusFilterParser.AddParameters(command, statusFilter);
 
-            return rows;
+            try
+            {
+                return await ReadRowsAsync(command, loanAliasIds, cancellationToken);
+            }
+            catch (SqlException ex) when (statusFilter.HasFilter)
+            {
+                _logger.LogError(
+                    ex,
+                    "Tax arrears query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
+            }
         }
 
         public async Task<TaxArrearsRowDto> CreateAsync(
             TaxArrearsCreateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
             ValidateCreateRequest(request);
-            await EnsureTableAvailableAsync(cancellationToken);
+            await EnsureSchemaAsync(cancellationToken);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            if (!await IsLoanEligibleAsync(connection, request.LoanKey, cancellationToken))
+            var loanCode = await ResolveLoanCodeAsync(connection, request, cancellationToken);
+            if (string.IsNullOrWhiteSpace(loanCode))
             {
-                throw new InvalidOperationException(
-                    $"Loan {request.LoanKey} is not eligible (must be current and leaf; is_leaf may be unset until ETL).");
+                throw new InvalidOperationException("Loan code could not be resolved for the new tax arrears record.");
             }
 
-            var taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
-
-            await using (var insertCommand = new SqlCommand(InsertSql, connection))
+            if (!await IsLoanEligibleByCodeAsync(connection, loanCode, cancellationToken))
             {
-                AddTaxArrearParameters(insertCommand, taxArrearKey, request);
+                throw new InvalidOperationException(
+                    $"Loan {loanCode} is not assigned in loan_alias_relationship.");
+            }
+
+            if (await ExistsLoanMemoDateAndYearAsync(
+                    connection,
+                    loanCode,
+                    request.TaxMemoDate,
+                    request.TaxYear,
+                    cancellationToken))
+            {
+                var dateLabel = request.TaxMemoDate!.Value.ToString("yyyy-MM-dd");
+                var yearLabel = string.IsNullOrWhiteSpace(request.TaxYear) ? "(none)" : request.TaxYear.Trim();
+                throw new InvalidOperationException(
+                    $"Tax arrears for loan {loanCode}, tax memo date {dateLabel}, and tax year {yearLabel} already exists. " +
+                    "Each loan can have only one row per tax memo date and tax year combination.");
+            }
+
+            long taxArrearKey = 0;
+            if (_hasTaxArrearKeyColumn)
+            {
+                taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
+            }
+
+            await using (var insertCommand = new SqlCommand(BuildInsertSql(), connection))
+            {
+                if (_hasTaxArrearKeyColumn)
+                {
+                    insertCommand.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
+                }
+
+                AddTaxArrearParameters(insertCommand, loanCode, request);
+                _auditColumns.AddUpdateParameters(insertCommand, auditDisplayName, DateTime.UtcNow);
                 await insertCommand.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            var row = await ReadByKeyAsync(connection, taxArrearKey, cancellationToken);
+            var row = _hasTaxArrearKeyColumn && taxArrearKey > 0
+                ? await ReadByKeyAsync(connection, taxArrearKey, cancellationToken)
+                : await ReadByLoanMemoDateAndYearAsync(
+                    connection,
+                    loanCode,
+                    request.TaxMemoDate,
+                    request.TaxYear,
+                    cancellationToken);
+
             if (row is null)
             {
                 throw new InvalidOperationException("Tax arrears record was created but could not be read back.");
             }
 
-            _logger.LogInformation("Created tax arrears record {TaxArrearKey} for loan {LoanKey}.", taxArrearKey, request.LoanKey);
+            _logger.LogInformation(
+                "Created tax arrears record for loan {LoanCode} (key={TaxArrearKey}).",
+                loanCode,
+                taxArrearKey);
             return row;
         }
 
         public async Task<bool> UpdateAsync(
             TaxArrearsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            await EnsureTableAvailableAsync(cancellationToken);
+            await EnsureSchemaAsync(cancellationToken);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -227,19 +217,18 @@ namespace kingsightapi.Services
             {
                 ValidateUpdateItem(item);
 
-                await using var command = new SqlCommand(UpdateSql, connection);
-                command.Parameters.AddWithValue("@tax_arrear_key", item.TaxArrearKey);
-                command.Parameters.AddWithValue(
-                    "@tax_memo_date",
-                    item.TaxMemoDate.HasValue ? item.TaxMemoDate.Value.Date : DBNull.Value);
-                command.Parameters.AddWithValue(
-                    "@tax_arrears",
-                    item.TaxArrears.HasValue ? item.TaxArrears.Value : DBNull.Value);
-                command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(item.TaxYear)));
-                command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(item.Notes)));
-                command.Parameters.AddWithValue("@user_updated_by", item.UserUpdatedBy);
+                if (string.IsNullOrWhiteSpace(item.LoanCode))
+                {
+                    continue;
+                }
 
-                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+                // Natural key is (loan_code, tax_memo_date, tax_year).
+                var rowsChanged = await UpdateByNaturalKeyAsync(
+                    item,
+                    auditDisplayName,
+                    connection,
+                    cancellationToken);
+                affectedRows += rowsChanged;
             }
 
             if (affectedRows > 0)
@@ -252,25 +241,401 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private static string BuildListSql(
-            IReadOnlyList<int> loanAliasIds,
+        /// <summary>
+        /// Updates by natural key (loan_code + tax_memo_date + tax_year). If legacy duplicate rows
+        /// share that key, they are collapsed to a single row before applying the change.
+        /// </summary>
+        private async Task<int> UpdateByNaturalKeyAsync(
+            TaxArrearsUpdateItem item,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            var loanCode = item.LoanCode!.Trim();
+            var originalMemoDate = item.OriginalTaxMemoDate?.Date ?? item.TaxMemoDate?.Date;
+            var targetMemoDate = item.TaxMemoDate?.Date;
+            var originalYear = NormalizeOptional(item.OriginalTaxYear ?? item.TaxYear);
+            var targetYear = NormalizeOptional(item.TaxYear);
+            var keyChanging =
+                originalMemoDate != targetMemoDate
+                || !string.Equals(originalYear, targetYear, StringComparison.OrdinalIgnoreCase);
+
+            if (keyChanging
+                && await ExistsLoanMemoDateAndYearAsync(
+                    connection,
+                    loanCode,
+                    item.TaxMemoDate,
+                    item.TaxYear,
+                    cancellationToken))
+            {
+                var dateLabel = targetMemoDate?.ToString("yyyy-MM-dd") ?? "(none)";
+                var yearLabel = targetYear ?? "(none)";
+                throw new InvalidOperationException(
+                    $"Tax arrears for loan {loanCode}, tax memo date {dateLabel}, and tax year {yearLabel} already exists. " +
+                    "Each loan can have only one row per tax memo date and tax year combination.");
+            }
+
+            var matchCount = await CountByNaturalKeyAsync(
+                connection,
+                loanCode,
+                originalMemoDate,
+                originalYear,
+                cancellationToken);
+
+            if (matchCount == 0)
+            {
+                throw new InvalidOperationException(
+                    $"No tax arrears row found for loan {loanCode}, tax memo date {originalMemoDate?.ToString("yyyy-MM-dd") ?? "(none)"}, and tax year {originalYear ?? "(none)"}.");
+            }
+
+            if (matchCount > 1)
+            {
+                _logger.LogWarning(
+                    "Collapsing {Count} duplicate tax arrears rows for loan {LoanCode} memo date {TaxMemoDate} year {TaxYear} into one.",
+                    matchCount,
+                    loanCode,
+                    originalMemoDate,
+                    originalYear);
+                await DeleteByNaturalKeyAsync(
+                    connection,
+                    loanCode,
+                    originalMemoDate,
+                    originalYear,
+                    cancellationToken);
+
+                await InsertUpdatedRowAsync(connection, loanCode, item, auditDisplayName, cancellationToken);
+                return 1;
+            }
+
+            return await ExecuteUpdateAsync(
+                BuildUpdateByLoanCodeSql(),
+                item,
+                auditDisplayName,
+                connection,
+                cancellationToken);
+        }
+
+        private async Task<int> ExecuteUpdateAsync(
+            string sql,
+            TaxArrearsUpdateItem item,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(sql, connection);
+            // tax_arrear_key is optional legacy support only; natural key is loan_code + tax_memo_date + tax_year.
+            if (item.TaxArrearKey > 0 && sql.Contains("@tax_arrear_key", StringComparison.Ordinal))
+            {
+                command.Parameters.AddWithValue("@tax_arrear_key", item.TaxArrearKey);
+            }
+
+            command.Parameters.AddWithValue("@loan_code", item.LoanCode?.Trim() ?? string.Empty);
+            command.Parameters.AddWithValue(
+                "@original_tax_memo_date",
+                item.OriginalTaxMemoDate.HasValue
+                    ? item.OriginalTaxMemoDate.Value.Date
+                    : item.TaxMemoDate.HasValue
+                        ? item.TaxMemoDate.Value.Date
+                        : DBNull.Value);
+            command.Parameters.AddWithValue(
+                "@original_tax_year",
+                ToDbValue(NormalizeOptional(item.OriginalTaxYear ?? item.TaxYear)));
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                item.TaxMemoDate.HasValue ? item.TaxMemoDate.Value.Date : DBNull.Value);
+            command.Parameters.AddWithValue(
+                "@tax_arrears",
+                item.TaxArrears.HasValue ? item.TaxArrears.Value : DBNull.Value);
+            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(item.TaxYear)));
+            command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(item.Notes)));
+            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task InsertUpdatedRowAsync(
+            SqlConnection connection,
+            string loanCode,
+            TaxArrearsUpdateItem item,
+            string auditDisplayName,
+            CancellationToken cancellationToken)
+        {
+            var createRequest = new TaxArrearsCreateRequest
+            {
+                LoanCode = loanCode,
+                TaxMemoDate = item.TaxMemoDate,
+                TaxArrears = item.TaxArrears,
+                TaxYear = item.TaxYear,
+                Notes = item.Notes,
+                UserUpdatedBy = auditDisplayName,
+            };
+
+            long taxArrearKey = 0;
+            if (_hasTaxArrearKeyColumn)
+            {
+                taxArrearKey = await GetNextTaxArrearKeyAsync(connection, cancellationToken);
+            }
+
+            await using var insertCommand = new SqlCommand(BuildInsertSql(), connection);
+            if (_hasTaxArrearKeyColumn)
+            {
+                insertCommand.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
+            }
+
+            AddTaxArrearParameters(insertCommand, loanCode, createRequest);
+            _auditColumns.AddUpdateParameters(insertCommand, auditDisplayName, DateTime.UtcNow);
+            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static string NaturalKeyWhereClause(string tableAlias = "")
+        {
+            var prefix = string.IsNullOrEmpty(tableAlias) ? string.Empty : $"{tableAlias}.";
+            return $"""
+                (
+                      (@tax_memo_date is null and {prefix}tax_memo_date is null)
+                   or cast({prefix}tax_memo_date as date) = cast(@tax_memo_date as date)
+                )
+                and isnull(cast({prefix}tax_year as varchar(20)), '') = isnull(cast(@tax_year as varchar(20)), '')
+                """;
+        }
+
+        private async Task<int> CountByNaturalKeyAsync(
+            SqlConnection connection,
+            string loanCode,
+            DateTime? taxMemoDate,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select count(1)
+                from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and {NaturalKeyWhereClause()}
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            AddNaturalKeyParameters(command, loanCode, taxMemoDate, taxYear);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is int count ? count : Convert.ToInt32(result);
+        }
+
+        private async Task DeleteByNaturalKeyAsync(
+            SqlConnection connection,
+            string loanCode,
+            DateTime? taxMemoDate,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                delete from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and {NaturalKeyWhereClause()}
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            AddNaturalKeyParameters(command, loanCode, taxMemoDate, taxYear);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private async Task<bool> ExistsLoanMemoDateAndYearAsync(
+            SqlConnection connection,
+            string loanCode,
+            DateTime? taxMemoDate,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select top (1) 1
+                from {_tblTaxArrears}
+                where loan_code = @loan_code
+                  and {NaturalKeyWhereClause()}
+                """;
+            await using var command = new SqlCommand(sql, connection);
+            AddNaturalKeyParameters(command, loanCode, taxMemoDate, taxYear);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null;
+        }
+
+        private static void AddNaturalKeyParameters(
+            SqlCommand command,
+            string loanCode,
+            DateTime? taxMemoDate,
+            string? taxYear)
+        {
+            command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
+            command.Parameters.AddWithValue(
+                "@tax_memo_date",
+                taxMemoDate.HasValue ? taxMemoDate.Value.Date : DBNull.Value);
+            command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(taxYear)));
+        }
+
+        private async Task<IReadOnlyList<TaxArrearsRowDto>> ReadRowsAsync(
+            SqlCommand command,
+            IReadOnlyList<int>? loanAliasIds,
+            CancellationToken cancellationToken)
+        {
+            var rows = new List<TaxArrearsRowDto>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(MapRow(reader));
+            }
+
+            _logger.LogInformation(
+                "Retrieved {Count} tax arrears rows (aliasFilter={AliasCount}).",
+                rows.Count,
+                loanAliasIds?.Count ?? 0);
+
+            return rows;
+        }
+
+        private string BuildListSql(
+            IReadOnlyList<int>? loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn)
         {
-            var sql = new StringBuilder(ListSqlBase);
+            var needsStatusJoin = statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn);
+            var keySelect = _hasTaxArrearKeyColumn
+                ? "a.tax_arrear_key"
+                : "tax_arrear_key = cast(0 as bigint)";
 
-            sql.Append(" and l.loan_alias_key in (");
-            sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
-            sql.Append(')');
+            var sql = new StringBuilder(
+                $"""
+                 select {keySelect},
+                        loan_key = isnull(l.loan_key, 0),
+                        a.loan_code,
+                        b.loan_description,
+                        b.loan_alias_name,
+                        a.tax_memo_date,
+                        a.tax_year,
+                        a.tax_arrears,
+                        a.tax_notes,
+                        user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression("a")},
+                        user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression("a")}
+                 from {_tblTaxArrears} a
+                 cross apply (
+                     select top (1)
+                            r.loan_code,
+                            r.loan_description,
+                            r.loan_alias_name
+                     from {_tblLoanAliasRelationship} r
+                     where r.loan_code = a.loan_code
+                     order by r.loan_alias_name
+                 ) b
+                 left join {_tblDimLoan} l
+                     on b.loan_code = l.loan_code
+                 """);
 
-            if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
+            if (loanAliasIds is { Count: > 0 })
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                sql.AppendLine(
+                    $"""
+                     inner join {_tblLoanAliasMaster} m
+                         on b.loan_alias_name = m.loan_alias_name
+                     """);
+            }
+
+            if (loanAliasIds is { Count: > 0 })
+            {
+                sql.Append(" where m.loan_alias_id in (");
+                sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
+                sql.Append(')');
+
+                if (needsStatusJoin)
+                {
+                    LoanStatusFilterParser.AppendExistsSqlCondition(
+                        sql,
+                        "b",
+                        _tblDimLoan,
+                        loanStatusKeyColumn!,
+                        statusFilter,
+                        _tblDimStatus,
+                        null,
+                        _sql.DimLoanCurrentIndicatorColumn);
+                }
+            }
+            else if (needsStatusJoin)
+            {
+                sql.AppendLine(" where 1 = 1");
+                LoanStatusFilterParser.AppendExistsSqlCondition(
+                    sql,
+                    "b",
+                    _tblDimLoan,
+                    loanStatusKeyColumn!,
+                    statusFilter,
+                    _tblDimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code, ta.tax_year, ta.tax_memo_date, ta.tax_arrear_key");
+            if (_hasTaxArrearKeyColumn)
+            {
+                sql.Append(" order by b.loan_alias_name, a.loan_code, a.tax_year, a.tax_memo_date, a.tax_arrear_key");
+            }
+            else
+            {
+                sql.Append(" order by b.loan_alias_name, a.loan_code, a.tax_year, a.tax_memo_date");
+            }
+
             return sql.ToString();
+        }
+
+        private string BuildInsertSql()
+        {
+            var columns = new List<string> { "loan_code", "tax_memo_date", "tax_arrears", "tax_year", "tax_notes" };
+            var values = new List<string> { "@loan_code", "@tax_memo_date", "@tax_arrears", "@tax_year", "@notes" };
+
+            if (_hasTaxArrearKeyColumn)
+            {
+                columns.Insert(0, "tax_arrear_key");
+                values.Insert(0, "@tax_arrear_key");
+            }
+
+            var auditInsert = _auditColumns.BuildInsertColumnList();
+            columns.AddRange(auditInsert.Columns);
+            values.AddRange(auditInsert.Values);
+
+            return $"""
+                insert into {_tblTaxArrears} ({string.Join(", ", columns)})
+                values ({string.Join(", ", values)})
+                """;
+        }
+
+        private string BuildUpdateByLoanCodeSql() =>
+            $"""
+                update {_tblTaxArrears}
+                set tax_memo_date = @tax_memo_date,
+                    tax_arrears = @tax_arrears,
+                    tax_year = @tax_year,
+                    tax_notes = @notes{_auditColumns.BuildUpdateSetClause()}
+                where loan_code = @loan_code
+                  and (
+                        (@original_tax_memo_date is null and tax_memo_date is null)
+                     or cast(tax_memo_date as date) = cast(@original_tax_memo_date as date)
+                  )
+                  and isnull(cast(tax_year as varchar(20)), '') = isnull(cast(@original_tax_year as varchar(20)), '')
+                """;
+
+        private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
+        {
+            if (_schemaProbed)
+            {
+                return;
+            }
+
+            await EnsureTableAvailableAsync(cancellationToken);
+
+            _hasTaxArrearKeyColumn = await ColumnExistsAsync("tax_arrear_key", cancellationToken);
+            _logger.LogInformation(
+                "Tax arrears schema probe complete. table={Table}, hasTaxArrearKey={HasKey}",
+                _tblTaxArrears,
+                _hasTaxArrearKeyColumn);
+            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeAsync(
+                _connectionString,
+                _tblTaxArrears,
+                cancellationToken);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
+            _schemaProbed = true;
         }
 
         private async Task EnsureTableAvailableAsync(CancellationToken cancellationToken)
@@ -280,7 +645,7 @@ namespace kingsightapi.Services
                 return;
             }
 
-            const string probeSql = "select top 0 tax_arrear_key from mort.tax_arrears";
+            var probeSql = $"select top 0 loan_code from {_tblTaxArrears}";
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -294,63 +659,175 @@ namespace kingsightapi.Services
             catch (SqlException ex) when (ex.Number is 208 or 3701)
             {
                 throw new InvalidOperationException(
-                    "mort.tax_arrears does not exist. Run Scripts/Create_mort_tax_arrears.sql.");
+                    "subjective_input.loan_tax_details does not exist. Verify wh_gold1 subjective_input schema.");
             }
         }
 
-        private async Task<string> GetLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
+        private async Task<bool> ColumnExistsAsync(string columnName, CancellationToken cancellationToken)
+        {
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"select top (0) [{columnName}] from {_tblTaxArrears}",
+                    connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                return true;
+            }
+            catch (SqlException)
+            {
+                return false;
+            }
+        }
+
+        private async Task<string?> TryResolveLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
         {
             if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
             {
                 return _loanStatusKeyColumn;
             }
 
-            _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
-                _connectionString,
-                cancellationToken);
-
-            return _loanStatusKeyColumn;
+            try
+            {
+                _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+                    _connectionString,
+                    _tblDimLoan,
+                    cancellationToken);
+                return _loanStatusKeyColumn;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Tax arrears status filter skipped; shared.dim_loan status column unavailable.");
+                return null;
+            }
         }
 
-        private static async Task<bool> IsLoanEligibleAsync(
+        private async Task<string?> ResolveLoanCodeAsync(
+            SqlConnection connection,
+            TaxArrearsCreateRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (!string.IsNullOrWhiteSpace(request.LoanCode))
+            {
+                return request.LoanCode.Trim();
+            }
+
+            if (request.LoanKey > 0)
+            {
+                return await GetLoanCodeByKeyAsync(connection, request.LoanKey, cancellationToken);
+            }
+
+            return null;
+        }
+
+        private async Task<string?> GetLoanCodeByKeyAsync(
             SqlConnection connection,
             long loanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(LoanEligibleSql, connection);
+            var sql =
+                $"select loan_code from {_tblDimLoan} l where l.loan_key = @loan_key";
+            await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result);
+        }
+
+        private async Task<bool> IsLoanEligibleByCodeAsync(
+            SqlConnection connection,
+            string loanCode,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(_loanEligibleByCodeSql, connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode.Trim());
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
         }
 
-        private static async Task<long> GetNextTaxArrearKeyAsync(
+        private async Task<long> GetNextTaxArrearKeyAsync(
             SqlConnection connection,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(NextTaxArrearKeySql, connection);
+            await using var command = new SqlCommand(_nextTaxArrearKeySql, connection);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt64(result);
         }
 
-        private static async Task<TaxArrearsRowDto?> ReadByKeyAsync(
+        private async Task<TaxArrearsRowDto?> ReadByKeyAsync(
             SqlConnection connection,
             long taxArrearKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(SelectByKeySql, connection);
+            var sql = BuildSelectSql("where a.tax_arrear_key = @tax_arrear_key");
+            await using var command = new SqlCommand(sql, connection);
             command.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
 
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             return await reader.ReadAsync(cancellationToken) ? MapRow(reader) : null;
         }
 
+        private async Task<TaxArrearsRowDto?> ReadByLoanMemoDateAndYearAsync(
+            SqlConnection connection,
+            string loanCode,
+            DateTime? taxMemoDate,
+            string? taxYear,
+            CancellationToken cancellationToken)
+        {
+            var sql = BuildSelectSql(
+                $"""
+                where a.loan_code = @loan_code
+                  and {NaturalKeyWhereClause("a")}
+                """);
+            await using var command = new SqlCommand(sql, connection);
+            AddNaturalKeyParameters(command, loanCode, taxMemoDate, taxYear);
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            return await reader.ReadAsync(cancellationToken) ? MapRow(reader) : null;
+        }
+
+        private string BuildSelectSql(string whereClause)
+        {
+            var keySelect = _hasTaxArrearKeyColumn
+                ? "a.tax_arrear_key"
+                : "tax_arrear_key = cast(0 as bigint)";
+
+            return $"""
+                select top (1) {keySelect},
+                       loan_key = isnull(l.loan_key, 0),
+                       a.loan_code,
+                       b.loan_description,
+                       b.loan_alias_name,
+                       a.tax_memo_date,
+                       a.tax_year,
+                       a.tax_arrears,
+                       a.tax_notes,
+                       user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression("a")},
+                       user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression("a")}
+                from {_tblTaxArrears} a
+                cross apply (
+                    select top (1)
+                           r.loan_code,
+                           r.loan_description,
+                           r.loan_alias_name
+                    from {_tblLoanAliasRelationship} r
+                    where r.loan_code = a.loan_code
+                    order by r.loan_alias_name
+                ) b
+                left join {_tblDimLoan} l
+                    on b.loan_code = l.loan_code
+                {whereClause}
+                """;
+        }
+
         private static void AddTaxArrearParameters(
             SqlCommand command,
-            long taxArrearKey,
+            string loanCode,
             TaxArrearsCreateRequest request)
         {
-            command.Parameters.AddWithValue("@tax_arrear_key", taxArrearKey);
-            command.Parameters.AddWithValue("@loan_key", request.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loanCode);
             command.Parameters.AddWithValue(
                 "@tax_memo_date",
                 request.TaxMemoDate.HasValue ? request.TaxMemoDate.Value.Date : DBNull.Value);
@@ -359,7 +836,6 @@ namespace kingsightapi.Services
                 request.TaxArrears.HasValue ? request.TaxArrears.Value : DBNull.Value);
             command.Parameters.AddWithValue("@tax_year", ToDbValue(NormalizeOptional(request.TaxYear)));
             command.Parameters.AddWithValue("@notes", ToDbValue(NormalizeOptional(request.Notes)));
-            command.Parameters.AddWithValue("@user_updated_by", request.UserUpdatedBy);
         }
 
         private static void AddLoanAliasParameters(SqlCommand command, IReadOnlyList<int> loanAliasIds)
@@ -372,14 +848,19 @@ namespace kingsightapi.Services
 
         private static void ValidateCreateRequest(TaxArrearsCreateRequest request)
         {
-            if (request.LoanKey <= 0)
+            if (request.LoanKey <= 0 && string.IsNullOrWhiteSpace(request.LoanCode))
             {
-                throw new InvalidOperationException("Loan key is required.");
+                throw new InvalidOperationException("Loan key or loan code is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.UserUpdatedBy))
+            if (!request.TaxMemoDate.HasValue)
             {
-                throw new InvalidOperationException("User updated by is required.");
+                throw new InvalidOperationException("Tax memo date is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(request.TaxYear))
+            {
+                throw new InvalidOperationException("Tax year is required.");
             }
 
             if (request.Notes is { Length: > 500 })
@@ -390,14 +871,19 @@ namespace kingsightapi.Services
 
         private static void ValidateUpdateItem(TaxArrearsUpdateItem item)
         {
-            if (item.TaxArrearKey <= 0)
+            if (string.IsNullOrWhiteSpace(item.LoanCode))
             {
-                throw new InvalidOperationException("Tax arrear key is required.");
+                throw new InvalidOperationException("Loan code is required.");
             }
 
-            if (string.IsNullOrWhiteSpace(item.UserUpdatedBy))
+            if (!item.OriginalTaxMemoDate.HasValue && !item.TaxMemoDate.HasValue)
             {
-                throw new InvalidOperationException("User updated by is required.");
+                throw new InvalidOperationException("Tax memo date is required.");
+            }
+
+            if (string.IsNullOrWhiteSpace(item.OriginalTaxYear) && string.IsNullOrWhiteSpace(item.TaxYear))
+            {
+                throw new InvalidOperationException("Tax year is required.");
             }
 
             if (item.Notes is { Length: > 500 })
@@ -406,21 +892,31 @@ namespace kingsightapi.Services
             }
         }
 
-        private static TaxArrearsRowDto MapRow(SqlDataReader reader) =>
-            new()
+        private static TaxArrearsRowDto MapRow(SqlDataReader reader)
+        {
+            DateTime? updatedDate = null;
+            if (reader.TryGetOrdinal("user_updated_date", out var dateOrd) && !reader.IsDBNull(dateOrd))
+            {
+                updatedDate = DateTime.SpecifyKind(reader.GetDateTime(dateOrd), DateTimeKind.Utc);
+            }
+
+            return new TaxArrearsRowDto
             {
                 TaxArrearKey = GetInt64(reader, "tax_arrear_key"),
                 LoanKey = GetInt64(reader, "loan_key"),
                 LoanId = GetString(reader, "loan_code"),
-                Description = GetString(reader, "loan_desc"),
+                Description = GetString(reader, "loan_description"),
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 TaxMemoDate = GetNullableDate(reader, "tax_memo_date"),
                 TaxArrears = GetNullableDecimal(reader, "tax_arrears"),
                 TaxYear = GetNullableString(reader, "tax_year"),
-                Notes = GetNullableString(reader, "notes"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                Notes = GetNullableString(reader, "tax_notes"),
+                UserUpdatedBy = reader.TryGetOrdinal("user_updated_by", out var byOrd) && !reader.IsDBNull(byOrd)
+                    ? reader.GetString(byOrd)
+                    : null,
+                UserUpdatedDate = updatedDate
             };
+        }
 
         private static object ToDbValue(string? value) =>
             string.IsNullOrEmpty(value) ? DBNull.Value : value;
@@ -467,12 +963,6 @@ namespace kingsightapi.Services
             return reader.GetFieldType(ordinal) == typeof(DateTime)
                 ? reader.GetDateTime(ordinal).Date
                 : Convert.ToDateTime(reader.GetValue(ordinal)).Date;
-        }
-
-        private static DateTime? GetNullableDateTime(SqlDataReader reader, string name)
-        {
-            var ordinal = reader.GetOrdinal(name);
-            return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
         }
     }
 }

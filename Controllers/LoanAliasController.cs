@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,13 +11,19 @@ namespace kingsightapi.Controllers
     public class LoanAliasController : ControllerBase
     {
         private readonly ILoanAliasService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly IUserService _userService;
         private readonly ILogger<LoanAliasController> _logger;
 
         public LoanAliasController(
             ILoanAliasService service,
+            ICurrentUserResolver currentUserResolver,
+            IUserService userService,
             ILogger<LoanAliasController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
+            _userService = userService;
             _logger = logger;
         }
 
@@ -64,7 +71,9 @@ namespace kingsightapi.Controllers
 
         // POST: api/LoanAlias
         [HttpPost]
-        public async Task<ActionResult<LoanAliasDto>> Save([FromBody] LoanAliasSaveRequest request)
+        public async Task<ActionResult<LoanAliasDto>> Save(
+            [FromBody] LoanAliasSaveRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
@@ -76,9 +85,26 @@ namespace kingsightapi.Controllers
                 return BadRequest("Loan alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.CreatedBy,
+                "createdBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var newId = await _service.SaveAsync(request);
+                var newId = await _service.SaveAsync(request, auditDisplayName!);
                 var created = await _service.GetByIdAsync(newId);
                 return CreatedAtAction(nameof(GetById), new { loanAliasId = newId }, created);
             }
@@ -96,7 +122,10 @@ namespace kingsightapi.Controllers
 
         // PUT: api/LoanAlias/{loanAliasId}
         [HttpPut("{loanAliasId:long}")]
-        public async Task<IActionResult> Update(long loanAliasId, [FromBody] LoanAliasUpdateRequest request)
+        public async Task<ActionResult<LoanAliasDto>> Update(
+            long loanAliasId,
+            [FromBody] LoanAliasUpdateRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null)
             {
@@ -108,10 +137,33 @@ namespace kingsightapi.Controllers
                 return BadRequest("Loan alias name is required.");
             }
 
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                request.UpdatedBy,
+                "updatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
+            }
+
             try
             {
-                var updated = await _service.UpdateAsync(loanAliasId, request);
-                return updated ? NoContent() : NotFound();
+                var updated = await _service.UpdateAsync(loanAliasId, request, auditDisplayName!);
+                if (!updated)
+                {
+                    return NotFound();
+                }
+
+                var result = await _service.GetByIdAsync(loanAliasId);
+                return Ok(result);
             }
             catch (OperationCanceledException)
             {
@@ -127,8 +179,16 @@ namespace kingsightapi.Controllers
 
         // DELETE: api/LoanAlias/{loanAliasId}
         [HttpDelete("{loanAliasId:long}")]
-        public async Task<IActionResult> Delete(long loanAliasId)
+        public async Task<IActionResult> Delete(long loanAliasId, CancellationToken cancellationToken)
         {
+            var superUserError = await _currentUserResolver.RequireMortgageSuperUserAsync(
+                _userService,
+                cancellationToken);
+            if (superUserError is not null)
+            {
+                return superUserError;
+            }
+
             try
             {
                 var deleted = await _service.DeleteAsync(loanAliasId);

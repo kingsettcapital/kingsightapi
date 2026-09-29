@@ -12,10 +12,10 @@ namespace kingsightapi.Services
             DefaultSubjectiveAnalyticsTokens.ExitPlanOptions,
             StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Known SPA typos mapped to mockup values before validate/save.</summary>
         private static readonly Dictionary<string, string> ExitPlanAliases = new(StringComparer.OrdinalIgnoreCase)
         {
-            ["Siting"] = "Selling"
+            ["Timing"] = "Sitting",
+            ["Siting"] = "Sitting"
         };
 
         public static string? CanonicalizeDefaultStatus(string? value)
@@ -44,14 +44,9 @@ namespace kingsightapi.Services
 
         public static string? ValidateUpdateItem(DefaultSubjectiveAnalyticsUpdateItem item)
         {
-            if (item.LoanKey <= 0)
+            if (item.LoanKey <= 0 && string.IsNullOrWhiteSpace(item.LoanCode))
             {
-                return "Loan key is required.";
-            }
-
-            if (string.IsNullOrWhiteSpace(item.UserUpdatedBy))
-            {
-                return "User updated by is required.";
+                return "Loan key or loan code is required.";
             }
 
             var defaultStatus = CanonicalizeDefaultStatus(item.ResolvedDefaultStatus);

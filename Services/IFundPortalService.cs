@@ -14,9 +14,15 @@ public interface IFundPortalService
         string? sortDir,
         int page,
         int pageSize);
-    Task<FundDetailDto?> GetFundByKeyAsync(int fundKey);
+
+    /// <summary>Dashboard Active Funds from <c>vw_active_fund_summary</c>.</summary>
+    Task<ActiveFundsSummaryResultDto> GetActiveFundSummaryAsync(
+        string? search = null,
+        string? fundType = null,
+        string? strategy = null);
+    Task<FundProfileDto?> GetFundByKeyAsync(int fundKey);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
-    Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize);
+    Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize);
     Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
         int fundKey,
         TimeGranularity view,
@@ -60,6 +66,7 @@ public interface IFundPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? investorName,
         string? sortBy,
         string? sortDir,
         int page,
@@ -71,6 +78,7 @@ public interface IFundPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? investorName,
         string? sortBy,
         string? sortDir,
         int page,
@@ -82,8 +90,70 @@ public interface IFundPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? investorName,
         string? sortBy,
         string? sortDir,
         int page,
         int pageSize);
+
+    /// <summary>Capital obligations — commitment, unfunded, reserved, released (LTD or quarterly portfolio facts).</summary>
+    Task<PagedResult<FundInvestorObligationDto>> GetFundCapitalObligationsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? investorName,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetFundCapitalActivitiesFiltersAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetFundDistributionsFiltersAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetFundIrrFiltersAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetFundObligationsFiltersAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    /// <summary>Net assets table (quarterly only; unpivoted IRR horizon rows).</summary>
+    Task<PagedResult<FundInvestorNetAssetsDto>> GetFundNetAssetsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? investorName,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetFundNetAssetsFiltersAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    /// <summary>
+    /// Fund financial metrics from ITD or quarterly fact tables
+    /// (<c>fact_fund_financial_itd</c> / <c>fact_fund_financial_quarterly</c>).
+    /// </summary>
+    Task<FundFinancialMetricsDto?> GetFundFinancialMetricsAsync(
+        int fundKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? periodLabel = null);
+
+    Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey);
 }

@@ -43,10 +43,12 @@ public class AssetsController : ControllerBase
         }
     }
 
-    // GET: api/assets?search=&assetType=&investmentType=&geography=&status=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
+    // GET: api/assets?search=&view=ltd|quarterly&dateKey=&assetType=&investmentType=&geography=&status=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PortalListPageResult<PropertyListItemDto, AssetListSummaryDto>>> GetAll(
         [FromQuery] string? search,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
         [FromQuery] string? assetType,
         [FromQuery] string? investmentType,
         [FromQuery] string? geography,
@@ -57,10 +59,28 @@ public class AssetsController : ControllerBase
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly && dateKey is null)
+        {
+            return BadRequest(
+                "Query parameter 'dateKey' is required when view is quarterly (yyyyMMdd from period dropdown).");
+        }
+
         try
         {
             var result = await _service.GetPropertiesAsync(
-                search, assetType, investmentType, geography, status, sortBy, sortDir, page, pageSize, fundCode);
+                search,
+                assetType,
+                investmentType,
+                geography,
+                status,
+                sortBy,
+                sortDir,
+                page,
+                pageSize,
+                fundCode,
+                resolvedView,
+                dateKey);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -81,7 +101,7 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}
     [HttpGet("{propertyKey:long}")]
-    public async Task<ActionResult<PropertyDetailDto>> GetByKey(long propertyKey)
+    public async Task<ActionResult<PropertyProfileDto>> GetByKey(long propertyKey)
     {
         try
         {
@@ -97,6 +117,180 @@ public class AssetsController : ControllerBase
         {
             ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving asset {PropertyKey}", propertyKey);
             return StatusCode(500, "An error occurred while retrieving the asset.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/leasing-summary
+    [HttpGet("{propertyKey:long}/leasing-summary")]
+    public async Task<ActionResult<AssetLeasingSummaryDto>> GetLeasingSummary(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyLeasingSummaryAsync(propertyKey);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get leasing summary for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving leasing summary for asset {PropertyKey}", propertyKey);
+            return StatusCode(500, "An error occurred while retrieving the asset leasing summary.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/fund-holdings
+    [HttpGet("{propertyKey:long}/fund-holdings")]
+    public async Task<ActionResult<IReadOnlyList<PropertyFundHoldingDto>>> GetFundHoldings(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyFundHoldingsAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get fund holdings for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving fund holdings for asset {PropertyKey}", propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset fund holdings.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/property-details
+    [HttpGet("{propertyKey:long}/property-details")]
+    public async Task<ActionResult<IReadOnlyList<AssetPropertyDetailRowDto>>> GetPropertyDetails(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetPropertyDetailsAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get property details for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving property details for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset property details.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/asset-type-summary
+    [HttpGet("{propertyKey:long}/asset-type-summary")]
+    public async Task<ActionResult<IReadOnlyList<AssetTypeSummaryRowDto>>> GetAssetTypeSummary(long propertyKey)
+    {
+        try
+        {
+            var result = await _service.GetAssetTypeSummaryAsync(propertyKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get asset type summary for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving asset type summary for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving the asset type summary.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/financial-metrics?period=ITD|Q2 2026&view=ltd|quarterly&dateKey=&shareBasis=ks|full
+    [HttpGet("{propertyKey:long}/financial-metrics")]
+    public async Task<ActionResult<AssetFinancialMetricsDto?>> GetFinancialMetrics(
+        long propertyKey,
+        [FromQuery] string? period,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] string? shareBasis)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (!AssetFinancialShareBases.TryParseFromApi(shareBasis, out var basis))
+        {
+            return BadRequest("Query parameter 'shareBasis' must be ks or full.");
+        }
+
+        if (resolvedView == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
+        try
+        {
+            var result = await _service.GetAssetFinancialMetricsAsync(
+                propertyKey, resolvedView, dateKey, period, basis);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get financial metrics for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving financial metrics for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset financial metrics.");
+        }
+    }
+
+    // GET: api/assets/{propertyKey}/acquisition-sale?period=ITD|Q2 2026&view=ltd|quarterly&dateKey=
+    [HttpGet("{propertyKey:long}/acquisition-sale")]
+    public async Task<ActionResult<AssetAcquisitionSaleDto>> GetAcquisitionSale(
+        long propertyKey,
+        [FromQuery] string? period,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey)
+    {
+        var resolvedView = view ?? TimeGranularity.Ltd;
+        if (resolvedView == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
+        try
+        {
+            var result = await _service.GetAssetAcquisitionSaleAsync(
+                propertyKey, resolvedView, dateKey, period);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get acquisition/sale for asset {PropertyKey} cancelled", propertyKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger,
+                ex,
+                "Error retrieving acquisition/sale for asset {PropertyKey}",
+                propertyKey);
+            return StatusCode(500, "An error occurred while retrieving asset acquisition and sale data.");
         }
     }
 

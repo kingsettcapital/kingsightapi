@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
@@ -15,147 +16,112 @@ namespace kingsightapi.Services
 
         Task<bool> UpdateAsync(
             LtvValidationBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
 
         Task<bool> ConfirmAsync(
             LtvValidationConfirmRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default);
+
+        Task<bool> UnlockAsync(
+            LtvValidationUnlockRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default);
+
+        Task<LtvValidationColumnDatesDto> GetColumnDatesAsync(
+            CancellationToken cancellationToken = default);
+
+        Task<LtvReviewStatusDto> GetLtvReviewStatusAsync(
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyDictionary<string, bool>> GetLtvConfirmFlagsByLoanCodesAsync(
+            IReadOnlyList<string> loanCodes,
+            CancellationToken cancellationToken = default);
+
+        Task<IReadOnlyDictionary<string, bool>> GetLtvConfirmFlagsByLoanAliasNamesAsync(
+            IReadOnlyList<string> loanAliasNames,
             CancellationToken cancellationToken = default);
     }
 
     public sealed class LtvValidationService : ILtvValidationService
     {
-        private static readonly string[] ParentLoanKeyColumnCandidates =
-            ["parent_loan_key", "loan_parent_key", "parent_key"];
+        /// <summary>
+        /// Fabric round-trips are expensive; confirm many loan_codes per statement.
+        /// </summary>
+        private const int ConfirmLoanCodeBatchSize = 200;
 
-        private static readonly string[] ExposureColumnCandidates =
-            ["exposure", "loan_exposure", "outstanding_balance", "collateral"];
-
-        private static readonly string[] DimLoanLtvColumnCandidates =
-            ["ai_ltv", "loan_ltv", "ltv", "ltv_percent"];
-
-        private const string ListSqlFrom = """
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            left join mort.dim_investor inv
-                on l.investor_key = inv.investor_key
-               and inv.is_current = 1
-            left join mort.investor_alias_master iam
-                on inv.investor_alias_key = iam.investor_alias_id
-            left join mort.ltv_validation lv
-                on l.loan_key = lv.loan_key
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
-
-        private const string UpsertOverrideSql = """
-            update mort.ltv_validation
-            set ltv = @ltv,
-                is_user_overridden = 1,
-                is_ai_confirmed = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-            """;
-
-        private const string InsertOverrideSql = """
-            insert into mort.ltv_validation (
-                loan_key,
-                ai_ltv,
-                ltv,
-                ai_commentary,
-                is_ai_confirmed,
-                is_user_overridden,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @loan_key,
-                null,
-                @ltv,
-                null,
-                0,
-                1,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string ConfirmAiLtvSql = """
-            update mort.ltv_validation
-            set ltv = ai_ltv,
-                is_ai_confirmed = 1,
-                is_user_overridden = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-              and ai_ltv is not null
-            """;
-
-        private const string ConfirmPendingLtvSql = """
-            update mort.ltv_validation
-            set ai_ltv = coalesce(ai_ltv, ltv),
-                ltv = coalesce(ltv, ai_ltv),
-                is_ai_confirmed = 1,
-                is_user_overridden = 0,
-                user_updated_by = @user_updated_by,
-                user_updated_date = sysutcdatetime()
-            where loan_key = @loan_key
-              and ltv is not null
-              and (is_user_overridden is null or is_user_overridden = 0)
-            """;
-
-        private const string InsertConfirmedSql = """
-            insert into mort.ltv_validation (
-                loan_key,
-                ai_ltv,
-                ltv,
-                ai_commentary,
-                is_ai_confirmed,
-                is_user_overridden,
-                user_updated_by,
-                user_updated_date)
-            values (
-                @loan_key,
-                @ai_ltv,
-                @ai_ltv,
-                null,
-                1,
-                0,
-                @user_updated_by,
-                sysutcdatetime())
-            """;
-
-        private const string ReadValidationStateSql = """
-            select ai_ltv,
-                   ltv,
-                   is_user_overridden
-            from mort.ltv_validation
-            where loan_key = @loan_key
-            """;
-
-        private const string LoanEligibleSql = """
-            select 1
-            from mort.dim_loan
-            where loan_key = @loan_key
-              and is_current = 1
-              and (is_leaf = 1 or is_leaf is null)
-            """;
+        private readonly string _loanAliasRelationship;
+        private readonly string _loanAliasRelationshipHistory;
+        private readonly string _fileUploadHistoryTable;
+        private readonly string _loanAliasMaster;
+        private readonly string _tblSharedDimLoan;
+        private readonly string _tblDimStatus;
+        private readonly string _tblYardiCollateralValue;
+        private readonly string _tblYardiCollateralXref;
+        private readonly string _tblYardiCollateral;
+        private readonly string _tblYardiLookupValues;
+        private readonly string _investorJoinSql;
+        private readonly SubjectiveInputSql _subjectiveInputSql;
+        private readonly string _loanEligibleSql;
+        private readonly string _loanEligibleByKeySql;
+        private readonly string _resolveLoanKeyByCodeSql;
 
         private readonly string _connectionString;
+        private readonly INotificationService _notificationService;
         private readonly ILogger<LtvValidationService> _logger;
-        private string? _loanStatusKeyColumn;
-        private string? _parentLoanKeyColumn;
-        private bool? _parentLoanKeyColumnResolved;
-        private string? _exposureColumn;
-        private bool? _exposureColumnResolved;
-        private string? _dimLoanLtvColumn;
-        private bool? _dimLoanLtvColumnResolved;
-        private bool? _ltvTableAvailable;
+        private readonly SemaphoreSlim _schemaLock = new(1, 1);
 
-        public LtvValidationService(IConfiguration configuration, ILogger<LtvValidationService> logger)
+        private string? _loanStatusKeyColumn;
+        private string? _loanStatusDescriptionColumn;
+        private bool _loanStatusColumnsResolved;
+        private LtvValidationSchema? _schema;
+
+        public LtvValidationService(
+            IConfiguration configuration,
+            ILogger<LtvValidationService> logger,
+            FabricWarehouseTables tables,
+            INotificationService notificationService)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _notificationService = notificationService;
             _logger = logger;
+
+            var subjective = new SubjectiveInputSql(tables);
+            _subjectiveInputSql = subjective;
+            _tblSharedDimLoan = subjective.SharedDimLoan;
+            _tblDimStatus = subjective.DimStatus;
+            _loanAliasRelationship = subjective.LoanAliasRelationship;
+            _loanAliasRelationshipHistory = tables.SubjectiveInput("loan_alias_relationship_history");
+            _fileUploadHistoryTable = tables.SubjectiveInput("file_upload_history");
+            _loanAliasMaster = subjective.LoanAliasMaster;
+            _tblYardiCollateralValue = tables.Yardi("Collateral_Value");
+            _tblYardiCollateralXref = tables.Yardi("collateral_xref");
+            _tblYardiCollateral = tables.Yardi("collateral");
+            _tblYardiLookupValues = tables.Yardi("Lookup_Values");
+            _investorJoinSql = subjective.InvestorAliasRelationshipJoinOnInvestorCode("l", "d");
+
+            _loanEligibleSql = $"""
+                select 1
+                from {_loanAliasRelationship} a
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
+                """;
+
+            _loanEligibleByKeySql = $"""
+                select 1
+                from {_loanAliasRelationship} a
+                inner join {_tblSharedDimLoan} c
+                    on c.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
+                """;
+
+            _resolveLoanKeyByCodeSql = $"""
+                select top (1) ck.loan_key
+                from {_tblSharedDimLoan} ck
+                where {SubjectiveInputSql.EqualsLoanCodeParam("ck", "loan_code", "@loan_code")}
+                order by ck.loan_key desc
+                """;
         }
 
         public async Task<IReadOnlyList<LtvValidationRowDto>> GetAsync(
@@ -163,29 +129,46 @@ namespace kingsightapi.Services
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default)
         {
-            await EnsureLtvTableAvailableAsync(cancellationToken);
-            var parentLoanKeyColumn = await GetParentLoanKeyColumnAsync(cancellationToken);
-            var exposureColumn = await GetExposureColumnAsync(cancellationToken);
-            var dimLoanLtvColumn = await GetDimLoanLtvColumnAsync(cancellationToken);
-
+            var schema = await GetSchemaAsync(cancellationToken);
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
+            string? loanStatusDescriptionColumn = null;
             if (statusFilter.HasFilter)
             {
-                loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
+                (loanStatusKeyColumn, loanStatusDescriptionColumn) =
+                    await TryResolveLoanStatusColumnsAsync(cancellationToken);
+
                 if (string.IsNullOrEmpty(loanStatusKeyColumn))
                 {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
+                    throw new InvalidOperationException(
+                        "Status filter cannot be applied: shared.dim_loan has no funding_status_code "
+                        + "(or equivalent) column.");
                 }
             }
 
-            var sql = BuildListSql(
+            return await ExecuteListQueryAsync(
+                schema,
                 loanAliasIds,
                 statusFilter,
                 loanStatusKeyColumn,
-                parentLoanKeyColumn,
-                exposureColumn,
-                dimLoanLtvColumn);
+                loanStatusDescriptionColumn,
+                cancellationToken);
+        }
+
+        private async Task<IReadOnlyList<LtvValidationRowDto>> ExecuteListQueryAsync(
+            LtvValidationSchema schema,
+            IReadOnlyList<int> loanAliasIds,
+            LoanStatusFilter statusFilter,
+            string? loanStatusKeyColumn,
+            string? loanStatusDescriptionColumn,
+            CancellationToken cancellationToken)
+        {
+            var sql = BuildListSql(
+                schema,
+                loanAliasIds,
+                statusFilter,
+                loanStatusKeyColumn,
+                loanStatusDescriptionColumn);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -194,12 +177,40 @@ namespace kingsightapi.Services
             AddLoanAliasParameters(command, loanAliasIds);
             LoanStatusFilterParser.AddParameters(command, statusFilter);
 
+            try
+            {
+                return await ReadListRowsAsync(command, loanAliasIds, cancellationToken);
+            }
+            catch (SqlException ex) when (statusFilter.HasFilter)
+            {
+                _logger.LogError(
+                    ex,
+                    "LTV validation query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
+            }
+        }
+
+        private async Task<IReadOnlyList<LtvValidationRowDto>> ReadListRowsAsync(
+            SqlCommand command,
+            IReadOnlyList<int> loanAliasIds,
+            CancellationToken cancellationToken)
+        {
             var rows = new List<LtvValidationRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
 
             while (await reader.ReadAsync(cancellationToken))
             {
-                rows.Add(MapRow(reader));
+                var row = MapRow(reader);
+                if (row.LoanKey <= 0 && !string.IsNullOrWhiteSpace(row.LoanCode))
+                {
+                    _logger.LogWarning(
+                        "LTV validation: no shared.dim_loan match for loan_code={LoanCode}, alias={LoanAliasName}",
+                        row.LoanCode,
+                        row.LoanAliasName);
+                }
+
+                rows.Add(row);
             }
 
             _logger.LogInformation(
@@ -212,9 +223,19 @@ namespace kingsightapi.Services
 
         public async Task<bool> UpdateAsync(
             LtvValidationBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            await EnsureLtvTableAvailableAsync(cancellationToken);
+            var schema = await GetSchemaAsync(cancellationToken);
+            if (schema.Optional.LtvColumn is null)
+            {
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql.");
+            }
+
+            var updateByLoanCodeSql = BuildUpdateByLoanCodeSql(schema);
+            var auditUtc = DateTime.UtcNow;
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -223,42 +244,34 @@ namespace kingsightapi.Services
             foreach (var loan in request.Loans)
             {
                 ValidateLtv(loan.Ltv);
-                if (loan.LoanKey <= 0)
+                var loanCode = await ResolveLoanCodeAsync(connection, loan, cancellationToken);
+                if (string.IsNullOrWhiteSpace(loanCode))
                 {
-                    throw new InvalidOperationException("Loan key is required.");
+                    throw new InvalidOperationException("Loan code is required.");
                 }
 
-                if (string.IsNullOrWhiteSpace(loan.UserUpdatedBy))
-                {
-                    throw new InvalidOperationException("User updated by is required.");
-                }
-
-                if (!await IsLoanEligibleAsync(connection, loan.LoanKey, cancellationToken))
+                if (!await IsLoanEligibleByCodeAsync(connection, loanCode, cancellationToken))
                 {
                     throw new InvalidOperationException(
-                        $"Loan {loan.LoanKey} is not eligible (must be current and leaf).");
+                        $"Loan {loanCode} is not eligible for LTV validation.");
                 }
 
-                await using var updateCommand = new SqlCommand(UpsertOverrideSql, connection);
-                updateCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
-                updateCommand.Parameters.AddWithValue(
+                if (await IsLoanConfirmedAsync(connection, schema, loanCode, cancellationToken))
+                {
+                    throw new InvalidOperationException(
+                        $"Loan {loanCode} LTV is locked. Unlock LTV before making changes.");
+                }
+
+                await using var command = new SqlCommand(updateByLoanCodeSql, connection);
+                command.Parameters.AddWithValue("@loan_code", loanCode);
+                command.Parameters.AddWithValue(
                     "@ltv",
                     loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                updateCommand.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                command.Parameters.AddWithValue("@update_reason", ToDbString(loan.UpdateReason));
+                command.Parameters.AddWithValue("@update_comment", ToDbString(loan.UpdateComment));
+                schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
 
-                var updated = await updateCommand.ExecuteNonQueryAsync(cancellationToken);
-                if (updated == 0)
-                {
-                    await using var insertCommand = new SqlCommand(InsertOverrideSql, connection);
-                    insertCommand.Parameters.AddWithValue("@loan_key", loan.LoanKey);
-                    insertCommand.Parameters.AddWithValue(
-                        "@ltv",
-                        loan.Ltv.HasValue ? loan.Ltv.Value : DBNull.Value);
-                    insertCommand.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
-                    updated = await insertCommand.ExecuteNonQueryAsync(cancellationToken);
-                }
-
-                affectedRows += updated;
+                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
             }
 
             if (affectedRows > 0)
@@ -273,366 +286,834 @@ namespace kingsightapi.Services
 
         public async Task<bool> ConfirmAsync(
             LtvValidationConfirmRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            if (request.LoanKeys.Count == 0)
+            var schema = await GetSchemaAsync(cancellationToken);
+            if (schema.Optional.LtvColumn is null)
             {
-                throw new InvalidOperationException("At least one loan key is required.");
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql.");
             }
 
-            if (string.IsNullOrWhiteSpace(request.UserUpdatedBy))
+            if (schema.Optional.IsConfirmedColumn is null)
             {
-                throw new InvalidOperationException("User updated by is required.");
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no is_confirmed column. "
+                    + "Confirm LTV must set is_confirmed = 'Y'. "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql and restart the API.");
             }
-
-            await EnsureLtvTableAvailableAsync(cancellationToken);
-            var dimLoanLtvColumn = await GetDimLoanLtvColumnAsync(cancellationToken);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
+            var loanCodes = await ResolveConfirmLoanCodesAsync(connection, request, cancellationToken);
+            if (loanCodes.Length == 0)
+            {
+                throw new InvalidOperationException("At least one loan code is required to confirm LTV.");
+            }
+
+            _logger.LogInformation(
+                "Confirming LTV review for {LoanCodeCount} loan code(s) in batches of {BatchSize} (is_confirmed = 'Y').",
+                loanCodes.Length,
+                ConfirmLoanCodeBatchSize);
+
+            var auditUtc = DateTime.UtcNow;
             var affectedRows = 0;
-            foreach (var loanKey in request.LoanKeys)
+            var batchCount = 0;
+
+            foreach (var batch in loanCodes.Chunk(ConfirmLoanCodeBatchSize))
             {
-                if (loanKey <= 0)
+                batchCount++;
+                var confirmSql = BuildConfirmByLoanCodesSql(schema, batch.Length);
+                await using var command = new SqlCommand(confirmSql, connection);
+                for (var i = 0; i < batch.Length; i++)
                 {
-                    throw new InvalidOperationException("Loan key is required.");
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
                 }
 
-                if (!await IsLoanEligibleAsync(connection, loanKey, cancellationToken))
-                {
-                    throw new InvalidOperationException(
-                        $"Loan {loanKey} is not eligible (must be current and leaf).");
-                }
+                schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
+                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
 
-                affectedRows += await ConfirmLoanAsync(
+            if (affectedRows == 0)
+            {
+                // Fabric Warehouse often reports 0 rows affected even when UPDATE succeeded.
+                var confirmedAfterUpdate = await CountConfirmedLoansAsync(
                     connection,
-                    loanKey,
-                    request.UserUpdatedBy,
-                    dimLoanLtvColumn,
+                    schema,
+                    loanCodes,
                     cancellationToken);
-            }
-
-            if (affectedRows > 0)
-            {
-                _logger.LogInformation("Confirmed AI LTV for {AffectedRows} loan row(s).", affectedRows);
-                return true;
-            }
-
-            return false;
-        }
-
-        private async Task<int> ConfirmLoanAsync(
-            SqlConnection connection,
-            long loanKey,
-            string userUpdatedBy,
-            string? dimLoanLtvColumn,
-            CancellationToken cancellationToken)
-        {
-            var state = await ReadValidationStateAsync(connection, loanKey, cancellationToken);
-            if (state is not null)
-            {
-                if (state.AiLtv.HasValue)
+                if (confirmedAfterUpdate <= 0)
                 {
-                    return await ExecuteConfirmCommandAsync(
-                        connection,
-                        ConfirmAiLtvSql,
-                        loanKey,
-                        userUpdatedBy,
-                        cancellationToken);
+                    _logger.LogWarning("No loan_alias_relationship rows matched Confirm LTV (is_confirmed).");
+                    return false;
                 }
 
-                if (state.Ltv.HasValue && state.IsUserOverridden != true)
-                {
-                    return await ExecuteConfirmCommandAsync(
-                        connection,
-                        ConfirmPendingLtvSql,
-                        loanKey,
-                        userUpdatedBy,
-                        cancellationToken);
-                }
-
-                if (state.Ltv.HasValue && state.IsUserOverridden == true)
-                {
-                    throw new InvalidOperationException(
-                        $"Loan {loanKey} has a manual LTV override. Use Save Changes instead of Confirm AI LTV.");
-                }
+                _logger.LogWarning(
+                    "Confirm LTV ExecuteNonQuery returned 0, but {ConfirmedCount} loan(s) are confirmed; continuing with notification.",
+                    confirmedAfterUpdate);
             }
 
-            var dimLoanLtv = await ReadDimLoanLtvAsync(
-                connection,
-                loanKey,
-                dimLoanLtvColumn,
-                cancellationToken);
-
-            if (dimLoanLtv.HasValue)
-            {
-                await using var insertCommand = new SqlCommand(InsertConfirmedSql, connection);
-                insertCommand.Parameters.AddWithValue("@loan_key", loanKey);
-                insertCommand.Parameters.AddWithValue("@ai_ltv", dimLoanLtv.Value);
-                insertCommand.Parameters.AddWithValue("@user_updated_by", userUpdatedBy);
-                return await insertCommand.ExecuteNonQueryAsync(cancellationToken);
-            }
-
-            throw new InvalidOperationException(
-                $"Loan {loanKey} has no AI LTV to confirm. Import AI data into mort.ltv_validation or dim_loan first.");
+            var asOfDate = await ResolveCurrentLtvAsOfDateTimeAsync(schema, cancellationToken);
+            await _notificationService.CreateLtvReviewedAsync(auditDisplayName, asOfDate, cancellationToken);
+            _logger.LogInformation(
+                "Confirmed LTV review for {AffectedRows} loan row(s) via is_confirmed = 'Y' ({BatchCount} batch(es)); As Of={AsOf}.",
+                affectedRows,
+                batchCount,
+                asOfDate?.ToString("yyyy-MM-dd") ?? "(none)");
+            return true;
         }
 
-        private static async Task<int> ExecuteConfirmCommandAsync(
-            SqlConnection connection,
-            string sql,
-            long loanKey,
-            string userUpdatedBy,
-            CancellationToken cancellationToken)
+        public async Task<bool> UnlockAsync(
+            LtvValidationUnlockRequest request,
+            string auditDisplayName,
+            CancellationToken cancellationToken = default)
         {
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-            command.Parameters.AddWithValue("@user_updated_by", userUpdatedBy);
-            return await command.ExecuteNonQueryAsync(cancellationToken);
-        }
-
-        private static async Task<ValidationState?> ReadValidationStateAsync(
-            SqlConnection connection,
-            long loanKey,
-            CancellationToken cancellationToken)
-        {
-            await using var command = new SqlCommand(ReadValidationStateSql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            if (!await reader.ReadAsync(cancellationToken))
+            var schema = await GetSchemaAsync(cancellationToken);
+            if (schema.Optional.IsConfirmedColumn is null)
             {
-                return null;
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no is_confirmed column. "
+                    + "Unlock LTV must set is_confirmed = 'N'. "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql and restart the API.");
             }
 
-            return new ValidationState
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var confirmRequest = new LtvValidationConfirmRequest
             {
-                AiLtv = GetNullableDecimal(reader, "ai_ltv"),
-                Ltv = GetNullableDecimal(reader, "ltv"),
-                IsUserOverridden = GetNullableBoolean(reader, "is_user_overridden")
+                LoanKeys = request.LoanKeys,
+                LoanCodes = request.LoanCodes,
+                UserUpdatedBy = request.UserUpdatedBy,
+            };
+            var loanCodes = await ResolveConfirmLoanCodesAsync(connection, confirmRequest, cancellationToken);
+            if (loanCodes.Length == 0)
+            {
+                throw new InvalidOperationException("At least one loan code is required to unlock LTV.");
+            }
+
+            _logger.LogInformation(
+                "Unlocking LTV review for {LoanCodeCount} loan code(s) in batches of {BatchSize} (is_confirmed = 'N').",
+                loanCodes.Length,
+                ConfirmLoanCodeBatchSize);
+
+            var auditUtc = DateTime.UtcNow;
+            var affectedRows = 0;
+            var batchCount = 0;
+
+            foreach (var batch in loanCodes.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                batchCount++;
+                var unlockSql = BuildUnlockByLoanCodesSql(schema, batch.Length);
+                await using var command = new SqlCommand(unlockSql, connection);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
+                }
+
+                schema.Audit.AddUpdateParameters(command, auditDisplayName, auditUtc);
+                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+
+            if (affectedRows == 0)
+            {
+                var unlockedAfterUpdate = await CountUnconfirmedLoansAsync(
+                    connection,
+                    schema,
+                    loanCodes,
+                    cancellationToken);
+                if (unlockedAfterUpdate <= 0)
+                {
+                    _logger.LogWarning("No loan_alias_relationship rows matched Unlock LTV (is_confirmed).");
+                    return false;
+                }
+
+                _logger.LogWarning(
+                    "Unlock LTV ExecuteNonQuery returned 0, but {UnlockedCount} loan(s) are unlocked; continuing.",
+                    unlockedAfterUpdate);
+            }
+
+            _logger.LogInformation(
+                "Unlocked LTV review for {AffectedRows} loan row(s) via is_confirmed = 'N' ({BatchCount} batch(es)).",
+                affectedRows,
+                batchCount);
+            return true;
+        }
+
+        public async Task<LtvValidationColumnDatesDto> GetColumnDatesAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var schema = await GetSchemaAsync(cancellationToken);
+            var currentAsOf = await GetCurrentLtvAsOfDateAsync(schema, cancellationToken);
+            var priorConfirmed = await GetPriorLtvAsOfDateAsync(schema, cancellationToken);
+            var reviewStatus = await GetLtvReviewStatusCoreAsync(schema, cancellationToken);
+
+            return new LtvValidationColumnDatesDto
+            {
+                CurrentLtvAsOfDate = currentAsOf,
+                PriorLtvConfirmedDate = priorConfirmed,
+                IsCurrentLtvConfirmed = reviewStatus.IsLtvConfirmed,
             };
         }
 
-        private static async Task<decimal?> ReadDimLoanLtvAsync(
-            SqlConnection connection,
-            long loanKey,
-            string? dimLoanLtvColumn,
+        public async Task<LtvReviewStatusDto> GetLtvReviewStatusAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var schema = await GetSchemaAsync(cancellationToken);
+            return await GetLtvReviewStatusCoreAsync(schema, cancellationToken);
+        }
+
+        public async Task<IReadOnlyDictionary<string, bool>> GetLtvConfirmFlagsByLoanCodesAsync(
+            IReadOnlyList<string> loanCodes,
+            CancellationToken cancellationToken = default)
+        {
+            var schema = await GetSchemaAsync(cancellationToken);
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var normalizedCodes = loanCodes
+                .Select(code => code?.Trim())
+                .Where(code => !string.IsNullOrWhiteSpace(code))
+                .Select(code => code!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (normalizedCodes.Length == 0)
+            {
+                return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var flags = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            foreach (var batch in normalizedCodes.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var inList = string.Join(", ", Enumerable.Range(0, batch.Length).Select(i => $"@loan_code_{i}"));
+                await using var command = new SqlCommand(
+                    $"""
+                    select a.loan_code, a.[{isConfirmedColumn}] as is_confirmed
+                    from {_loanAliasRelationship} a
+                    where a.loan_code in ({inList})
+                    """,
+                    connection);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
+                }
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var loanCode = GetString(reader, "loan_code");
+                    flags[loanCode] = IsConfirmedFlag(GetNullableString(reader, "is_confirmed"));
+                }
+            }
+
+            return flags;
+        }
+
+        public async Task<IReadOnlyDictionary<string, bool>> GetLtvConfirmFlagsByLoanAliasNamesAsync(
+            IReadOnlyList<string> loanAliasNames,
+            CancellationToken cancellationToken = default)
+        {
+            var schema = await GetSchemaAsync(cancellationToken);
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var normalizedNames = loanAliasNames
+                .Select(name => name?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (normalizedNames.Length == 0)
+            {
+                return new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            var flags = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            foreach (var batch in normalizedNames.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var inList = string.Join(", ", Enumerable.Range(0, batch.Length).Select(i => $"@loan_alias_name_{i}"));
+                await using var command = new SqlCommand(
+                    $"""
+                    select
+                        a.loan_alias_name,
+                        case
+                            when sum(case when isnull(a.[{isConfirmedColumn}], 'N') <> 'Y' then 1 else 0 end) = 0
+                                then 1
+                            else 0
+                        end as is_ltv_confirmed
+                    from {_loanAliasRelationship} a
+                    where a.loan_alias_name in ({inList})
+                    group by a.loan_alias_name
+                    """,
+                    connection);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_alias_name_{i}", batch[i]);
+                }
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var aliasName = GetString(reader, "loan_alias_name");
+                    var confirmed = reader.IsDBNull(reader.GetOrdinal("is_ltv_confirmed"))
+                        ? false
+                        : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("is_ltv_confirmed"))) == 1;
+                    flags[aliasName] = confirmed;
+                }
+            }
+
+            return flags;
+        }
+
+        private async Task<LtvReviewStatusDto> GetLtvReviewStatusCoreAsync(
+            LtvValidationSchema schema,
             CancellationToken cancellationToken)
         {
-            if (string.IsNullOrEmpty(dimLoanLtvColumn))
+            var currentAsOf = await GetCurrentLtvAsOfDateAsync(schema, cancellationToken);
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            var fileUploadIdColumn = schema.Optional.FileUploadIdColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn) || string.IsNullOrWhiteSpace(fileUploadIdColumn))
             {
-                return null;
+                return new LtvReviewStatusDto
+                {
+                    LtvAsOfDate = currentAsOf,
+                    IsLtvConfirmed = false,
+                };
             }
 
-            var sql = $"select [{dimLoanLtvColumn}] from mort.dim_loan where loan_key = @loan_key and is_current = 1";
-            await using var command = new SqlCommand(sql, connection);
-            command.Parameters.AddWithValue("@loan_key", loanKey);
-
-            var result = await command.ExecuteScalarAsync(cancellationToken);
-            if (result is null or DBNull)
+            try
             {
-                return null;
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    with latest_upload as (
+                        select top (1) b.file_id
+                        from {_loanAliasRelationship} a
+                        inner join {_fileUploadHistoryTable} b
+                            on a.[{fileUploadIdColumn}] = b.file_id
+                        order by b.uploaded_date desc
+                    ),
+                    current_batch as (
+                        select a.[{isConfirmedColumn}] as is_confirmed
+                        from {_loanAliasRelationship} a
+                        inner join latest_upload lu
+                            on a.[{fileUploadIdColumn}] = lu.file_id
+                    )
+                    select
+                        case
+                            when not exists (select 1 from current_batch) then 0
+                            when exists (
+                                select 1
+                                from current_batch cb
+                                where isnull(cb.is_confirmed, 'N') <> 'Y'
+                            ) then 0
+                            else 1
+                        end as is_ltv_confirmed
+                    """,
+                    connection);
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                var isConfirmed = value is int intFlag
+                    ? intFlag == 1
+                    : Convert.ToInt32(value ?? 0) == 1;
+
+                return new LtvReviewStatusDto
+                {
+                    LtvAsOfDate = currentAsOf,
+                    IsLtvConfirmed = isConfirmed,
+                };
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve current LTV confirm status.");
+                return new LtvReviewStatusDto
+                {
+                    LtvAsOfDate = currentAsOf,
+                    IsLtvConfirmed = false,
+                };
+            }
+        }
+
+        private async Task<string[]> ResolveConfirmLoanCodesAsync(
+            SqlConnection connection,
+            LtvValidationConfirmRequest request,
+            CancellationToken cancellationToken)
+        {
+            var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var code in request.LoanCodes)
+            {
+                var trimmed = code?.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                {
+                    codes.Add(trimmed);
+                }
             }
 
-            var value = Convert.ToDecimal(result);
-            ValidateLtv(value);
-            return value;
+            var unresolvedKeys = request.LoanKeys.Where(key => key > 0).Distinct().ToArray();
+            // SPA always sends loanCodes; skip key→code lookups when codes are already present.
+            if (codes.Count > 0 || unresolvedKeys.Length == 0)
+            {
+                return codes.ToArray();
+            }
+            foreach (var keyBatch in unresolvedKeys.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var sql = new StringBuilder($"select loan_code from {_tblSharedDimLoan} where loan_key in (");
+                sql.Append(string.Join(", ", keyBatch.Select((_, i) => $"@loan_key_{i}")));
+                sql.Append(')');
+
+                await using var command = new SqlCommand(sql.ToString(), connection);
+                for (var i = 0; i < keyBatch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_key_{i}", keyBatch[i]);
+                }
+
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var loanCode = reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0))?.Trim();
+                    if (!string.IsNullOrWhiteSpace(loanCode))
+                    {
+                        codes.Add(loanCode);
+                    }
+                }
+            }
+
+            return codes.ToArray();
+        }
+
+        private string BuildConfirmByLoanCodesSql(LtvValidationSchema schema, int loanCodeCount)
+        {
+            if (loanCodeCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(loanCodeCount));
+            }
+
+            var setClause = BuildConfirmSetClause(schema);
+            if (string.IsNullOrWhiteSpace(setClause))
+            {
+                throw new InvalidOperationException(
+                    "Lock LTV has nothing to update (is_confirmed / audit columns missing).");
+            }
+
+            var inList = string.Join(", ", Enumerable.Range(0, loanCodeCount).Select(i => $"@loan_code_{i}"));
+
+            // One statement per batch instead of one UPDATE per loan_code.
+            return $"""
+                update a
+                set {setClause}
+                from {_loanAliasRelationship} a
+                where a.loan_code in ({inList})
+                """;
+        }
+
+        private string BuildUnlockByLoanCodesSql(LtvValidationSchema schema, int loanCodeCount)
+        {
+            if (loanCodeCount <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(loanCodeCount));
+            }
+
+            var setClause = BuildUnlockSetClause(schema);
+            if (string.IsNullOrWhiteSpace(setClause))
+            {
+                throw new InvalidOperationException(
+                    "Unlock LTV has nothing to update (is_confirmed / audit columns missing).");
+            }
+
+            var inList = string.Join(", ", Enumerable.Range(0, loanCodeCount).Select(i => $"@loan_code_{i}"));
+
+            return $"""
+                update a
+                set {setClause}
+                from {_loanAliasRelationship} a
+                where a.loan_code in ({inList})
+                  and isnull(a.[{schema.Optional.IsConfirmedColumn}], 'N') = 'Y'
+                """;
+        }
+
+        private string BuildConfirmSetClause(LtvValidationSchema schema)
+        {
+            var confirmedSet = schema.Optional.BuildConfirmUpdateSetClause("a");
+            var auditSet = schema.Audit.BuildUpdateSetClause(); // leading ", col = @param" when present
+
+            if (string.IsNullOrWhiteSpace(confirmedSet) && string.IsNullOrWhiteSpace(auditSet))
+            {
+                return string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(confirmedSet))
+            {
+                return auditSet.TrimStart(',', ' ');
+            }
+
+            return string.IsNullOrWhiteSpace(auditSet)
+                ? confirmedSet
+                : confirmedSet + auditSet;
+        }
+
+        private string BuildUnlockSetClause(LtvValidationSchema schema)
+        {
+            var unlockSet = schema.Optional.BuildUnlockUpdateSetClause("a");
+            var auditSet = schema.Audit.BuildUpdateSetClause();
+
+            if (string.IsNullOrWhiteSpace(unlockSet) && string.IsNullOrWhiteSpace(auditSet))
+            {
+                return string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(unlockSet))
+            {
+                return auditSet.TrimStart(',', ' ');
+            }
+
+            return string.IsNullOrWhiteSpace(auditSet)
+                ? unlockSet
+                : unlockSet + auditSet;
+        }
+
+        private async Task<LtvValidationSchema> GetSchemaAsync(CancellationToken cancellationToken)
+        {
+            if (_schema is not null)
+            {
+                return _schema;
+            }
+
+            await _schemaLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (_schema is not null)
+                {
+                    return _schema;
+                }
+
+                var optional = await LtvValidationOptionalColumns.ProbeAsync(
+                    _connectionString,
+                    _loanAliasRelationship,
+                    cancellationToken);
+                var audit = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
+                    _connectionString,
+                    _loanAliasRelationship,
+                    SubjectiveInputAuditScreen.Ltv,
+                    cancellationToken);
+                var qrSlideLink = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationship,
+                    ["qr_slide_link"],
+                    cancellationToken);
+                var historyIsConfirmed = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["is_confirmed", "ltv_is_confirmed", "is_ltv_confirmed"],
+                    cancellationToken);
+                var historyFileUploadId = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["file_upload_id"],
+                    cancellationToken);
+                var historySnapshotDate = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _loanAliasRelationshipHistory,
+                    ["snapshot_date"],
+                    cancellationToken);
+
+                _schema = new LtvValidationSchema(
+                    optional,
+                    audit,
+                    qrSlideLink,
+                    historyIsConfirmed,
+                    historyFileUploadId,
+                    historySnapshotDate);
+                await _subjectiveInputSql.EnsureDimLoanCurrentIndicatorAsync(
+                    _connectionString,
+                    cancellationToken);
+                _logger.LogInformation(
+                    "LTV validation schema: currentLtv={Ltv}, priorLtv={Prior}, updateReason={Reason}, aiComments={Ai}, qrSlide={Qr}, isConfirmed={Confirmed}, auditBy={AuditBy}, auditDtm={AuditDtm}.",
+                    optional.LtvColumn ?? "(none)",
+                    optional.PriorLtvColumn ?? "(none)",
+                    optional.UpdateReason ?? "(none)",
+                    optional.AiComments ?? "(none)",
+                    qrSlideLink ?? "(none)",
+                    optional.IsConfirmedColumn ?? "(none)",
+                    audit.UpdatedByColumn ?? "(none)",
+                    audit.UpdatedDtmColumn ?? "(none)");
+                if (optional.LtvColumn is null)
+                {
+                    _logger.LogWarning(
+                        "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
+                        + "LTV screen will load with null LTV values; run Scripts/Alter_loan_alias_relationship_ltv_validation.sql for saves and confirm.");
+                }
+                if (optional.IsConfirmedColumn is null)
+                {
+                    _logger.LogWarning(
+                        "loan_alias_relationship has no is_confirmed column. "
+                        + "Confirm LTV will not set the report confirmed flag until the column exists.");
+                }
+
+                return _schema;
+            }
+            finally
+            {
+                _schemaLock.Release();
+            }
         }
 
         private string BuildListSql(
+            LtvValidationSchema schema,
             IReadOnlyList<int> loanAliasIds,
             LoanStatusFilter statusFilter,
             string? loanStatusKeyColumn,
-            string? parentLoanKeyColumn,
-            string? exposureColumn,
-            string? dimLoanLtvColumn)
+            string? loanStatusDescriptionColumn)
         {
-            var parentLoanIdSelect = string.IsNullOrEmpty(parentLoanKeyColumn)
-                ? "parent_loan_id = isnull(l.dummy_loan_link, '')"
-                : "parent_loan_id = isnull(parent.loan_code, isnull(l.dummy_loan_link, ''))";
-
-            var exposureSelect = string.IsNullOrEmpty(exposureColumn)
-                ? "cast(null as decimal(18, 2)) as exposure"
-                : $"l.{exposureColumn} as exposure";
-
-            var sql = new StringBuilder();
-            sql.AppendLine("select l.loan_key,");
-            sql.AppendLine($"       {parentLoanIdSelect},");
-            sql.AppendLine("""
-                       child_loan_id = l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                       investor_alias_name = isnull(iam.investor_alias_name, ''),
-                       m.security_value,
+            // List shape: relationship + master + dim_loan + investor_alias + Yardi RE collateral.
+            // security_value = coalesce(nullif(master.security_value, 0), yardi_collateral) — same rule as Loan Security Value.
+            // Status filter uses current dim_loan.funding_status_code / funding_status_description.
+            var sql = new StringBuilder($"""
+                with latest_collateral_value as (
+                    select collateral_id, valuation_date, collateral_amount
+                    from (
+                        select collateral_id, valuation_date, collateral_amount,
+                               row_number() over (partition by collateral_id order by valuation_date desc) as rn
+                        from {_tblYardiCollateralValue}
+                    ) t
+                    where rn = 1
+                ),
+                dataset as (
+                    select e.loan_alias_name,
+                           e.loan_code,
+                           col.collateral_name,
+                           cv.collateral_amount,
+                           row_number() over (
+                               partition by e.loan_alias_name, col.collateral_name
+                               order by e.loan_alias_name, col.collateral_name
+                           ) as rn
+                    from {_loanAliasRelationship} e
+                    inner join {_tblSharedDimLoan} f
+                        on {SubjectiveInputSql.EqualsVarchar("e", "loan_code", "f", "loan_code")}
+                    inner join {_loanAliasMaster} g
+                        on e.loan_alias_name = g.loan_alias_name
+                    left join (
+                        select distinct collateral_id, loan_id
+                        from {_tblYardiCollateralXref}
+                    ) xref on xref.loan_id = f.loan_id
+                    left join {_tblYardiCollateral} col
+                        on xref.collateral_id = col.collateral_id
+                    inner join {_tblYardiLookupValues} lv
+                        on col.collateral_type = lv.lookup_sk
+                       and lv.lookup_value = 'Real Estate'
+                    left join latest_collateral_value cv
+                        on col.collateral_id = cv.collateral_id
+                ),
+                dataset2 as (
+                    select loan_alias_name,
+                           sum(collateral_amount) as collateral
+                    from dataset
+                    where rn = 1
+                    group by loan_alias_name
+                )
+                select {SubjectiveInputSql.LoanKeySelect("a", "l")},
+                       parent_loan_code = isnull(l.parent_loan_code, ''),
+                       loan_code = a.loan_code,
+                       loan_name = isnull(a.loan_description, ''),
+                       loan_alias_name = isnull(a.loan_alias_name, ''),
+                       investor_alias_name = isnull(d.investor_alias_name, ''),
+                       security_value = coalesce(nullif(b.security_value, 0), e.collateral),
+                       a.exposure,
+                       a.ranking,
+                       {schema.Optional.BuildLtvSelectExpression("a")},
+                       {schema.Optional.BuildPriorLtvSelectExpression("a")},
+                       {schema.QrSlideLinkSelect},
+                       user_updated_by = {schema.Audit.BuildSelectUpdatedByExpression("a")},
+                       user_updated_date = {schema.Audit.BuildSelectUpdatedDtmExpression("a")}
+                       {schema.Optional.BuildOptionalSelectFragment("a")}
+                from {_loanAliasRelationship} a
+                left join {_loanAliasMaster} b
+                    on a.loan_alias_name = b.loan_alias_name
+                {_subjectiveInputSql.SharedDimLoanOuterApplyOnLoanCode("a", "l")}
+                {_investorJoinSql}
+                left join dataset2 e
+                    on a.loan_alias_name = e.loan_alias_name
                 """);
-            sql.AppendLine($"       {exposureSelect},");
-            var ltvSelect = string.IsNullOrEmpty(dimLoanLtvColumn)
-                ? "ltv = coalesce(lv.ltv, lv.ai_ltv)"
-                : $"ltv = coalesce(lv.ltv, lv.ai_ltv, l.{dimLoanLtvColumn})";
 
-            sql.AppendLine("       l.loan_ranking as ranking,");
-            sql.AppendLine($"       {ltvSelect},");
-            sql.AppendLine("""
-                       lv.ai_commentary,
-                       user_updated_by = coalesce(lv.user_updated_by, l.user_updated_by),
-                       user_updated_date = coalesce(lv.user_updated_date, l.user_updated_date)
-                """);
-
-            if (!string.IsNullOrEmpty(parentLoanKeyColumn))
-            {
-                sql.AppendLine("""
-                    from mort.dim_loan l
-                    left join mort.dim_loan parent
-                """);
-                sql.AppendLine($"       on l.{parentLoanKeyColumn} = parent.loan_key");
-                sql.AppendLine("""
-                          and parent.is_current = 1
-                    left join mort.loan_alias_master m
-                        on l.loan_alias_key = m.loan_alias_id
-                    left join mort.dim_investor inv
-                        on l.investor_key = inv.investor_key
-                       and inv.is_current = 1
-                    left join mort.investor_alias_master iam
-                        on inv.investor_alias_key = iam.investor_alias_id
-                    left join mort.ltv_validation lv
-                        on l.loan_key = lv.loan_key
-                    where l.is_current = 1
-                      and (l.is_leaf = 1 or l.is_leaf is null)
-                    """);
-            }
-            else
-            {
-                sql.Append(ListSqlFrom);
-            }
-
-            sql.Append(" and l.loan_alias_key in (");
-            sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
-            sql.Append(')');
+            sql.AppendLine();
+            sql.Append(" where 1 = 1");
+            AppendLoanAliasFilter(sql, loanAliasIds);
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                LoanStatusFilterParser.AppendExistsSqlCondition(
+                    sql,
+                    "a",
+                    _subjectiveInputSql.SharedDimLoan,
+                    loanStatusKeyColumn,
+                    statusFilter,
+                    _tblDimStatus,
+                    loanStatusDescriptionColumn,
+                    _subjectiveInputSql.DimLoanCurrentIndicatorColumn);
             }
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code");
+            sql.Append(" order by isnull(a.loan_alias_name, ''), a.loan_code");
             return sql.ToString();
         }
 
-        private async Task EnsureLtvTableAvailableAsync(CancellationToken cancellationToken)
+        private static void AppendLoanAliasFilter(StringBuilder sql, IReadOnlyList<int> loanAliasIds)
         {
-            if (_ltvTableAvailable == true)
+            if (loanAliasIds.Count == 0)
             {
                 return;
             }
 
-            const string probeSql = "select top 0 loan_key from mort.ltv_validation";
+            if (loanAliasIds.Count == 1)
+            {
+                sql.Append(" and b.loan_alias_id = @loan_alias_id_0");
+                return;
+            }
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            sql.Append(" and b.loan_alias_id in (");
+            sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
+            sql.Append(')');
+        }
+
+        private string BuildUpdateByLoanCodeSql(LtvValidationSchema schema)
+        {
+            var ltvSet = schema.Optional.BuildLtvUpdateSetClause("a");
+            if (string.IsNullOrWhiteSpace(ltvSet))
+            {
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql.");
+            }
+
+            var auditSet = schema.Audit.BuildUpdateSetClause();
+            var optionalSet = schema.Optional.BuildOptionalUpdateSetClause("a");
+
+            return $"""
+                update a
+                set {ltvSet}{optionalSet}{auditSet}
+                from {_loanAliasRelationship} a
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
+                """;
+        }
+
+        private string BuildUpdateSql(LtvValidationSchema schema)
+        {
+            var ltvSet = schema.Optional.BuildLtvUpdateSetClause("a");
+            if (string.IsNullOrWhiteSpace(ltvSet))
+            {
+                throw new InvalidOperationException(
+                    "loan_alias_relationship has no LTV column (current_loan_to_value / loan_to_value / ltv). "
+                    + "Run Scripts/Alter_loan_alias_relationship_ltv_validation.sql.");
+            }
+
+            var auditSet = schema.Audit.BuildUpdateSetClause();
+            var optionalSet = schema.Optional.BuildOptionalUpdateSetClause("a");
+
+            return $"""
+                update a
+                set {ltvSet}{optionalSet}{auditSet}
+                from {_loanAliasRelationship} a
+                inner join {_tblSharedDimLoan} c
+                    on c.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsLoanCode("a", "loan_code", "c", "loan_code")}
+                """;
+        }
+
+        private async Task<(string? KeyColumn, string? DescriptionColumn)> TryResolveLoanStatusColumnsAsync(
+            CancellationToken cancellationToken)
+        {
+            if (_loanStatusColumnsResolved)
+            {
+                return (_loanStatusKeyColumn, _loanStatusDescriptionColumn);
+            }
 
             try
             {
-                await using var command = new SqlCommand(probeSql, connection);
-                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                _ltvTableAvailable = true;
-            }
-            catch (SqlException ex) when (ex.Number is 208 or 3701)
-            {
-                throw new InvalidOperationException(
-                    "mort.ltv_validation does not exist. Run Scripts/Create_mort_ltv_validation.sql.");
-            }
-        }
+                _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+                    _connectionString,
+                    _tblSharedDimLoan,
+                    cancellationToken);
 
-        private async Task<string?> GetParentLoanKeyColumnAsync(CancellationToken cancellationToken)
-        {
-            if (_parentLoanKeyColumnResolved == true)
-            {
-                return _parentLoanKeyColumn;
-            }
+                _loanStatusDescriptionColumn = await DimLoanColumnProbe.FindFirstAsync(
+                    _connectionString,
+                    _tblSharedDimLoan,
+                    ["funding_status_description", "funding_status_desc", "loan_status_description"],
+                    cancellationToken);
 
-            _parentLoanKeyColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                ParentLoanKeyColumnCandidates,
-                cancellationToken);
-
-            _parentLoanKeyColumnResolved = true;
-            if (!string.IsNullOrEmpty(_parentLoanKeyColumn))
-            {
                 _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation parent loan join.",
-                    _parentLoanKeyColumn);
+                    "Using shared.dim_loan.{Column} (desc={Desc}) for LTV validation status filter.",
+                    _loanStatusKeyColumn,
+                    _loanStatusDescriptionColumn ?? "(none)");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "LTV validation status filter skipped; shared.dim_loan has no status column. "
+                    + "Rows are loaded from subjective_input without dim_loan status filtering.");
+                _loanStatusKeyColumn = null;
+                _loanStatusDescriptionColumn = null;
             }
 
-            return _parentLoanKeyColumn;
+            _loanStatusColumnsResolved = true;
+            return (_loanStatusKeyColumn, _loanStatusDescriptionColumn);
         }
 
-        private async Task<string?> GetExposureColumnAsync(CancellationToken cancellationToken)
+        private async Task<bool> IsLoanEligibleByCodeAsync(
+            SqlConnection connection,
+            string loanCode,
+            CancellationToken cancellationToken)
         {
-            if (_exposureColumnResolved == true)
-            {
-                return _exposureColumn;
-            }
-
-            _exposureColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                ExposureColumnCandidates,
-                cancellationToken);
-
-            _exposureColumnResolved = true;
-            if (!string.IsNullOrEmpty(_exposureColumn))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation exposure.",
-                    _exposureColumn);
-            }
-
-            return _exposureColumn;
+            await using var command = new SqlCommand(_loanEligibleSql, connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is not null;
         }
 
-        private async Task<string?> GetDimLoanLtvColumnAsync(CancellationToken cancellationToken)
+        private async Task<string?> ResolveLoanCodeAsync(
+            SqlConnection connection,
+            LtvValidationUpdateItem loan,
+            CancellationToken cancellationToken)
         {
-            if (_dimLoanLtvColumnResolved == true)
+            if (!string.IsNullOrWhiteSpace(loan.LoanCode))
             {
-                return _dimLoanLtvColumn;
+                return loan.LoanCode.Trim();
             }
 
-            _dimLoanLtvColumn = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                DimLoanLtvColumnCandidates,
-                cancellationToken);
-
-            _dimLoanLtvColumnResolved = true;
-            if (!string.IsNullOrEmpty(_dimLoanLtvColumn))
+            if (loan.LoanKey <= 0)
             {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for LTV validation fallback LTV.",
-                    _dimLoanLtvColumn);
+                return null;
             }
 
-            return _dimLoanLtvColumn;
+            var sql = $"select loan_code from {_tblSharedDimLoan} where loan_key = @loan_key";
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            var result = await command.ExecuteScalarAsync(cancellationToken);
+            return result is null or DBNull ? null : Convert.ToString(result)?.Trim();
         }
 
-        private async Task<string> GetLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
-        {
-            if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
-            {
-                return _loanStatusKeyColumn;
-            }
-
-            _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
-                _connectionString,
-                cancellationToken);
-
-            return _loanStatusKeyColumn;
-        }
-
-        private static async Task<bool> IsLoanEligibleAsync(
+        private async Task<bool> IsLoanEligibleAsync(
             SqlConnection connection,
             long loanKey,
             CancellationToken cancellationToken)
         {
-            await using var command = new SqlCommand(LoanEligibleSql, connection);
+            await using var command = new SqlCommand(_loanEligibleByKeySql, connection);
             command.Parameters.AddWithValue("@loan_key", loanKey);
             var result = await command.ExecuteScalarAsync(cancellationToken);
             return result is not null;
@@ -648,29 +1129,104 @@ namespace kingsightapi.Services
 
         private static void ValidateLtv(decimal? ltv)
         {
-            if (ltv is < 0 or > 100)
+            // Current and Prior LTV are percent points and may exceed 100 (underwater / high-risk).
+            if (ltv is < 0 or > 999)
             {
-                throw new InvalidOperationException("LTV must be between 0 and 100.");
+                throw new InvalidOperationException("LTV must be between 0 and 999.");
             }
         }
+
+        private static object ToDbString(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? DBNull.Value : value.Trim();
 
         private static LtvValidationRowDto MapRow(SqlDataReader reader) =>
             new()
             {
                 LoanKey = GetInt64(reader, "loan_key"),
-                ParentLoanId = GetString(reader, "parent_loan_id"),
-                ChildLoanId = GetString(reader, "child_loan_id"),
-                Description = GetString(reader, "loan_desc"),
+                ParentLoanCode = GetNullableString(reader, "parent_loan_code"),
+                LoanCode = GetString(reader, "loan_code"),
+                LoanName = GetString(reader, "loan_name"),
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 InvestorAliasName = GetString(reader, "investor_alias_name"),
                 SecurityValue = GetNullableDecimal(reader, "security_value"),
                 Exposure = GetNullableDecimal(reader, "exposure"),
                 Ranking = GetNullableInt32(reader, "ranking"),
                 Ltv = GetNullableDecimal(reader, "ltv"),
-                AiCommentary = GetNullableString(reader, "ai_commentary"),
+                PriorLtv = GetNullableDecimal(reader, "prior_ltv"),
+                UpdateReason = GetNullableString(reader, "update_reason"),
+                UpdateComment = GetNullableString(reader, "update_comment"),
+                AiComments = GetNullableString(reader, "ai_comments"),
+                AiConfidenceScore = GetNullableDecimal(reader, "ai_confidence_score")
+                    ?? ParseNullableDecimal(GetNullableString(reader, "ai_comments")),
+                QrSlideLink = GetNullableString(reader, "qr_slide_link"),
                 UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date"),
+                IsConfirmed = IsConfirmedFlag(GetNullableString(reader, "is_confirmed"))
             };
+
+        private static bool IsConfirmedFlag(string? value) =>
+            string.Equals(value?.Trim(), "Y", StringComparison.OrdinalIgnoreCase);
+
+        private async Task<bool> IsLoanConfirmedAsync(
+            SqlConnection connection,
+            LtvValidationSchema schema,
+            string loanCode,
+            CancellationToken cancellationToken)
+        {
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                return false;
+            }
+
+            await using var command = new SqlCommand(
+                $"""
+                select top (1) a.[{isConfirmedColumn}] as is_confirmed
+                from {_loanAliasRelationship} a
+                where {SubjectiveInputSql.EqualsLoanCodeParam("a", "loan_code", "@loan_code")}
+                """,
+                connection);
+            command.Parameters.AddWithValue("@loan_code", loanCode);
+
+            var value = await command.ExecuteScalarAsync(cancellationToken);
+            return IsConfirmedFlag(value is null or DBNull ? null : Convert.ToString(value));
+        }
+
+        private async Task<int> CountUnconfirmedLoansAsync(
+            SqlConnection connection,
+            LtvValidationSchema schema,
+            IReadOnlyList<string> loanCodes,
+            CancellationToken cancellationToken)
+        {
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn) || loanCodes.Count == 0)
+            {
+                return 0;
+            }
+
+            var total = 0;
+            foreach (var batch in loanCodes.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var inList = string.Join(", ", Enumerable.Range(0, batch.Length).Select(i => $"@loan_code_{i}"));
+                await using var command = new SqlCommand(
+                    $"""
+                    select count(1)
+                    from {_loanAliasRelationship} a
+                    where a.loan_code in ({inList})
+                      and isnull(a.[{isConfirmedColumn}], 'N') <> 'Y'
+                    """,
+                    connection);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
+                }
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                total += value is int count ? count : Convert.ToInt32(value ?? 0);
+            }
+
+            return total;
+        }
 
         private static long GetInt64(SqlDataReader reader, string name) =>
             reader.IsDBNull(reader.GetOrdinal(name))
@@ -697,6 +1253,16 @@ namespace kingsightapi.Services
             return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
         }
 
+        private static decimal? ParseNullableDecimal(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return decimal.TryParse(value, out var parsed) ? parsed : null;
+        }
+
         private static decimal? GetNullableDecimal(SqlDataReader reader, string name)
         {
             var ordinal = reader.GetOrdinal(name);
@@ -717,25 +1283,238 @@ namespace kingsightapi.Services
         private static DateTime? GetNullableDateTime(SqlDataReader reader, string name)
         {
             var ordinal = reader.GetOrdinal(name);
-            return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
+            return reader.IsDBNull(ordinal)
+                ? null
+                : DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
         }
 
-        private static bool? GetNullableBoolean(SqlDataReader reader, string name)
+        /// <summary>
+        /// Current LTV header: latest file_upload_history.as_of_date for loan_alias_relationship,
+        /// ordered by file_upload_history.uploaded_date desc.
+        /// </summary>
+        private async Task<string?> GetCurrentLtvAsOfDateAsync(
+            LtvValidationSchema schema,
+            CancellationToken cancellationToken)
         {
-            var ordinal = reader.GetOrdinal(name);
-            if (reader.IsDBNull(ordinal))
+            var fileUploadIdColumn = schema.Optional.FileUploadIdColumn;
+            if (string.IsNullOrWhiteSpace(fileUploadIdColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship has no file_upload_id column; Current LTV As Of header will be blank.");
+                return null;
+            }
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    with temp as (
+                        select b.as_of_date,
+                               row_number() over (order by b.uploaded_date desc) as rn
+                        from {_loanAliasRelationship} a
+                        inner join {_fileUploadHistoryTable} b
+                            on a.[{fileUploadIdColumn}] = b.file_id
+                    )
+                    select as_of_date
+                    from temp
+                    where rn = 1
+                    """,
+                    connection);
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                return FormatAsOfDateScalar(value);
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 3701)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "file_upload_history / loan_alias_relationship join unavailable; Current LTV As Of header will be blank.");
+                return null;
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve Current LTV As Of date.");
+                return null;
+            }
+        }
+
+        private async Task<DateTime?> ResolveCurrentLtvAsOfDateTimeAsync(
+            LtvValidationSchema schema,
+            CancellationToken cancellationToken)
+        {
+            var asOf = await GetCurrentLtvAsOfDateAsync(schema, cancellationToken);
+            if (string.IsNullOrWhiteSpace(asOf))
             {
                 return null;
             }
 
-            return Convert.ToBoolean(reader.GetValue(ordinal));
+            return DateTime.TryParse(
+                asOf,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsed)
+                ? parsed.Date
+                : null;
         }
 
-        private sealed class ValidationState
+        private async Task<int> CountConfirmedLoansAsync(
+            SqlConnection connection,
+            LtvValidationSchema schema,
+            IReadOnlyList<string> loanCodes,
+            CancellationToken cancellationToken)
         {
-            public decimal? AiLtv { get; init; }
-            public decimal? Ltv { get; init; }
-            public bool? IsUserOverridden { get; init; }
+            var isConfirmedColumn = schema.Optional.IsConfirmedColumn;
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn) || loanCodes.Count == 0)
+            {
+                return 0;
+            }
+
+            var total = 0;
+            foreach (var batch in loanCodes.Chunk(ConfirmLoanCodeBatchSize))
+            {
+                var inList = string.Join(", ", Enumerable.Range(0, batch.Length).Select(i => $"@loan_code_{i}"));
+                await using var command = new SqlCommand(
+                    $"""
+                    select count(1)
+                    from {_loanAliasRelationship} a
+                    where a.loan_code in ({inList})
+                      and a.[{isConfirmedColumn}] = 'Y'
+                    """,
+                    connection);
+                for (var i = 0; i < batch.Length; i++)
+                {
+                    command.Parameters.AddWithValue($"@loan_code_{i}", batch[i]);
+                }
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                total += value is int count ? count : Convert.ToInt32(value ?? 0);
+            }
+
+            return total;
+        }
+
+        /// <summary>
+        /// Prior LTV header: latest file_upload_history.as_of_date for loan_alias_relationship_history
+        /// where is_confirmed = 'Y', ordered by snapshot_date desc.
+        /// </summary>
+        private async Task<string?> GetPriorLtvAsOfDateAsync(
+            LtvValidationSchema schema,
+            CancellationToken cancellationToken)
+        {
+            var isConfirmedColumn = schema.HistoryIsConfirmedColumn;
+            var fileUploadIdColumn = schema.HistoryFileUploadIdColumn;
+            var snapshotDateColumn = schema.HistorySnapshotDateColumn;
+
+            if (string.IsNullOrWhiteSpace(isConfirmedColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no is_confirmed column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(fileUploadIdColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no file_upload_id column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(snapshotDateColumn))
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship_history has no snapshot_date column; Prior LTV As Of header will be blank.");
+                return null;
+            }
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"""
+                    with temp as (
+                        select b.as_of_date,
+                               row_number() over (order by a.[{snapshotDateColumn}] desc) as rn
+                        from {_loanAliasRelationshipHistory} a
+                        inner join {_fileUploadHistoryTable} b
+                            on a.[{fileUploadIdColumn}] = b.file_id
+                        where a.[{isConfirmedColumn}] = 'Y'
+                    )
+                    select as_of_date
+                    from temp
+                    where rn = 1
+                    """,
+                    connection);
+
+                var value = await command.ExecuteScalarAsync(cancellationToken);
+                return FormatAsOfDateScalar(value);
+            }
+            catch (SqlException ex) when (ex.Number is 208 or 3701)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "file_upload_history / loan_alias_relationship_history join unavailable; Prior LTV As Of header will be blank.");
+                return null;
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not resolve Prior LTV As Of date.");
+                return null;
+            }
+        }
+
+        private static string? FormatAsOfDateScalar(object? value)
+        {
+            if (value is null or DBNull)
+            {
+                return null;
+            }
+
+            if (value is DateTime asOf)
+            {
+                return asOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            if (DateTime.TryParse(
+                    Convert.ToString(value),
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var parsed))
+            {
+                return parsed.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            }
+
+            return Convert.ToString(value)?.Trim();
+        }
+
+        private sealed class LtvValidationSchema
+        {
+            public LtvValidationSchema(
+                LtvValidationOptionalColumns optional,
+                SubjectiveInputRelationshipAuditColumns audit,
+                string? qrSlideLinkColumn,
+                string? historyIsConfirmedColumn,
+                string? historyFileUploadIdColumn,
+                string? historySnapshotDateColumn)
+            {
+                Optional = optional;
+                Audit = audit;
+                QrSlideLinkSelect = qrSlideLinkColumn is null
+                    ? "cast(null as varchar(500)) as qr_slide_link"
+                    : $"a.[{qrSlideLinkColumn}] as qr_slide_link";
+                HistoryIsConfirmedColumn = historyIsConfirmedColumn;
+                HistoryFileUploadIdColumn = historyFileUploadIdColumn;
+                HistorySnapshotDateColumn = historySnapshotDateColumn;
+            }
+
+            public LtvValidationOptionalColumns Optional { get; }
+            public SubjectiveInputRelationshipAuditColumns Audit { get; }
+            public string QrSlideLinkSelect { get; }
+            public string? HistoryIsConfirmedColumn { get; }
+            public string? HistoryFileUploadIdColumn { get; }
+            public string? HistorySnapshotDateColumn { get; }
         }
     }
 }

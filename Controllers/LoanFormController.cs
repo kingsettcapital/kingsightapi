@@ -135,7 +135,7 @@ public class LoanFormController : ControllerBase
     }
 
     [HttpPost("tax-arrears")]
-    public async Task<ActionResult<TaxArrearsDto>> PostTaxArrears([FromBody] TaxArrearsCreateRequest request)
+    public async Task<ActionResult<TaxArrearsDto>> PostTaxArrears([FromBody] LoanFormTaxArrearsCreateRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.LoanAlias))
         {
@@ -183,7 +183,7 @@ public class LoanFormController : ControllerBase
     }
 
     [HttpPost("ltv-validation/confirm")]
-    public async Task<ActionResult<LoanFormBatchUpsertResult>> PostLtvValidationConfirm([FromBody] LtvValidationConfirmRequest request)
+    public async Task<ActionResult<LoanFormBatchUpsertResult>> PostLtvValidationConfirm([FromBody] LoanFormLtvValidationConfirmRequest request)
     {
         return await PutBatch(
             request.LoanKeys.Count,

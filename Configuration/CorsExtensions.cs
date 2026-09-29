@@ -10,7 +10,10 @@ public static class CorsExtensions
         IWebHostEnvironment environment)
     {
         var corsOrigins = configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-            ?? ["http://localhost:4200", "https://localhost:4200", "https://kingsightdev.kingsettcapital.com"];
+            ?? ["http://localhost:4200", 
+                "https://localhost:4200", 
+                "https://kingsightdev.kingsettcapital.com",
+                "https://kingsightuat.kingsettcapital.com"];
 
         services.AddCors(options =>
         {

@@ -19,6 +19,16 @@ internal static class SqlReaderExtensions
         return reader.IsDBNull(ordinal) ? null : reader.GetString(ordinal);
     }
 
+    public static long? GetNullableInt64(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt64(reader.GetValue(ordinal));
+    }
+
     public static int GetInt32OrDefault(this SqlDataReader reader, string column)
     {
         var ordinal = reader.GetOrdinal(column);
@@ -48,6 +58,16 @@ internal static class SqlReaderExtensions
 
         var value = Convert.ToDecimal(reader.GetValue(ordinal));
         return ShouldRoundColumn(column) ? RoundDecimal(value) : value;
+    }
+
+    public static int? GetNullableInt32(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        return Convert.ToInt32(reader.GetValue(ordinal));
     }
 
     public static DateTime? GetNullableDateTime(this SqlDataReader reader, string column)
@@ -95,6 +115,17 @@ internal static class SqlReaderExtensions
         return DateTime.TryParseExact(text, "yyyyMMdd", null, System.Globalization.DateTimeStyles.None, out var parsed)
             ? parsed
             : null;
+    }
+
+    public static string? GetNullableTrimmedString(this SqlDataReader reader, string column)
+    {
+        if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+        {
+            return null;
+        }
+
+        var value = reader.GetString(ordinal).Trim();
+        return string.IsNullOrEmpty(value) ? null : value;
     }
 
     public static string? GetNullableStringIfPresent(this SqlDataReader reader, string column)

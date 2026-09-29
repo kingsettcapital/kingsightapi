@@ -247,7 +247,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
             or FundMetricSource.UnfundedCommitments)
         {
             sql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} q ");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on {WarehouseSql.QuarterYearEquals("d.quarter_year", "q.quarter_year")} ");
             sql.Append(" where q.investor_key = @investorKey ");
             sql.Append(" group by d.quarter_year, d.calendar_year ");
         }
@@ -459,7 +459,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" commitment_amount = sum(p.commitment_amount), ");
         pageSql.Append(" Description = 'Total Commitment as of Date' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
@@ -570,6 +570,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var row = MapCommitmentRow(reader);
                 return new FundGranularRowDto
                 {
+                    FundKey = row.FundKey,
                     FundCode = row.FundCode,
                     Period = row.Period,
                     Date = reader.GetNullableDateTime("full_date"),
@@ -628,7 +629,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(p.unfunded_amount), ");
         pageSql.Append(" Description = 'Total Unfunded Commitment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
@@ -648,6 +649,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
             pageSql,
             static reader => new FundGranularRowDto
             {
+                FundKey = reader.GetInt32OrDefault("fund_key"),
                 FundCode = reader.GetStringOrEmpty("fund_code"),
                 Period = reader.GetStringOrEmpty("Period"),
                 Amount = reader.GetDecimalOrDefault("amount"),
@@ -701,6 +703,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var periodLabel = reader.GetStringOrEmpty("Period");
                 return new FundGranularRowDto
                 {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
                     FundCode = reader.GetStringOrEmpty("fund_code"),
                     Period = periodLabel,
                     Amount = reader.GetDecimalOrDefault("amount"),
@@ -757,6 +760,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var postedDateKey = reader.GetInt32OrDefault("posted_date_key");
                 return new FundGranularRowDto
                 {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
                     FundCode = reader.GetStringOrEmpty("fund_code"),
                     Date = reader.GetNullableDateTime("full_date"),
                     PostedDateKey = postedDateKey == 0 ? null : postedDateKey,
@@ -784,7 +788,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(n.nav), ");
         pageSql.Append(" Description = 'Total NAV' ");
         pageSql.Append($" from {WarehouseTables.FactFundNav} n ");
@@ -805,6 +809,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
             pageSql,
             static reader => new FundGranularRowDto
             {
+                FundKey = reader.GetInt32OrDefault("fund_key"),
                 FundCode = reader.GetStringOrEmpty("fund_code"),
                 Period = reader.GetStringOrEmpty("Period"),
                 Amount = reader.GetDecimalOrDefault("amount"),
@@ -862,6 +867,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var periodLabel = reader.GetStringOrEmpty("Period");
                 return new FundGranularRowDto
                 {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
                     FundCode = reader.GetStringOrEmpty("fund_code"),
                     Period = periodLabel,
                     Amount = reader.GetDecimalOrDefault("amount"),
@@ -914,6 +920,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var dateKey = reader.GetInt32OrDefault("date_key");
                 return new FundGranularRowDto
                 {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
                     FundCode = reader.GetStringOrEmpty("fund_code"),
                     Date = reader.GetNullableDateTime("nav_date"),
                     PostedDateKey = dateKey == 0 ? null : dateKey,
@@ -956,9 +963,15 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         WarehouseSql.AppendCurrentFundFilter(sql, "df");
     }
 
+    private static void AppendFundKeyAndCodeColumnSelect(StringBuilder sql, string fundAlias = "df")
+    {
+        sql.Append($" min({fundAlias}.fund_key) as fund_key, ");
+        sql.Append($" isnull({fundAlias}.fund_code, '') as fund_code, ");
+    }
+
     private static void AppendFundCodeColumnSelect(StringBuilder sql, string fundAlias = "df")
     {
-        sql.Append($" isnull({fundAlias}.fund_code, '') as fund_code, ");
+        AppendFundKeyAndCodeColumnSelect(sql, fundAlias);
     }
 
     private static string BuildDistributionPeriodDescription(FundGranularRowDto row)
@@ -993,7 +1006,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)), ");
         pageSql.Append(" Description = 'Total Investment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
@@ -1108,6 +1121,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
                 var row = MapInvestmentRow(reader);
                 return new FundGranularRowDto
                 {
+                    FundKey = row.FundKey,
                     FundCode = row.FundCode,
                     Period = row.Period,
                     Date = reader.GetNullableDateTime("full_date"),
@@ -1147,7 +1161,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         pageSql.Append(" select ");
         AppendFundCodeColumnSelect(pageSql);
         pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
-        pageSql.Append(" Period = 'LTD', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: false);
         AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
@@ -1378,13 +1392,14 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Commitment";
         }
 
         return new FundGranularRowDto
         {
+            FundKey = reader.GetInt32OrDefault("fund_key"),
             FundCode = reader.GetStringOrEmpty("fund_code"),
             Period = period,
             CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
@@ -1401,13 +1416,14 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Investment";
         }
 
         return new FundGranularRowDto
         {
+            FundKey = reader.GetInt32OrDefault("fund_key"),
             FundCode = reader.GetStringOrEmpty("fund_code"),
             Period = period,
             InvestedAmount = reader.GetDecimalOrDefault("invested_amount"),
@@ -1427,6 +1443,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
 
         return new FundGranularRowDto
         {
+            FundKey = reader.GetInt32OrDefault("fund_key"),
             FundCode = reader.GetStringOrEmpty("fund_code"),
             TransactionType = transactionType,
             Period = period,
@@ -1441,6 +1458,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
         var postedDateKey = reader.GetInt32OrDefaultIfPresent("posted_date_key");
         return new FundGranularRowDto
         {
+            FundKey = row.FundKey,
             FundCode = row.FundCode,
             TransactionType = row.TransactionType,
             Period = row.Period,
@@ -1476,6 +1494,7 @@ private static PagedResult<FundPeriodDto> CreateLtdAllPeriodsPage(int page, int 
 
                 return new FundDistributionGroupDto
                 {
+                    FundKey = group.First().FundKey,
                     FundCode = group.Key.FundCode,
                     TransactionType = group.Key.TransactionType,
                     Periods = periods,

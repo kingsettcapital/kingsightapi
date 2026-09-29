@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text;
 using kingsightapi.Entities;
 using Microsoft.Data.SqlClient;
@@ -13,56 +14,38 @@ namespace kingsightapi.Services
         DefaultSubjectiveAnalyticsLookupsDto GetLookups();
 
         Task<IReadOnlyList<DefaultSubjectiveAnalyticsRowDto>> GetAsync(
-            IReadOnlyList<int> loanAliasIds,
+            IReadOnlyList<int>? loanAliasIds,
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default);
 
         Task<bool> UpdateAsync(
             DefaultSubjectiveAnalyticsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default);
     }
 
     public sealed class DefaultSubjectiveAnalyticsService : IDefaultSubjectiveAnalyticsService
     {
-        private static readonly string[] MaturityDateColumnCandidates = ["maturity_date", "loan_maturity_date"];
-        private static readonly string[] DefaultStatusColumnCandidates =
-            ["default_subjective_status", "default_status_subjective"];
-        private static readonly string[] ExitPlanColumnCandidates =
-            ["subjective_exit_plan", "exit_plan", "default_exit_plan"];
-        private static readonly string[] ExitDateColumnCandidates =
-            ["subjective_exit_date", "exit_date", "default_exit_date"];
-        private static readonly string[] MaturityDetailColumnCandidates =
-            ["maturity_additional_detail", "maturity_detail", "maturity_addl_detail"];
-
-        private const string ListSqlFrom = """
-            from mort.dim_loan l
-            left join mort.loan_alias_master m
-                on l.loan_alias_key = m.loan_alias_id
-            where l.is_current = 1
-              and (l.is_leaf = 1 or l.is_leaf is null)
-            """;
-
         private readonly string _connectionString;
+        private readonly SubjectiveInputSql _sql;
         private readonly ILogger<DefaultSubjectiveAnalyticsService> _logger;
+
+        private bool _schemaProbed;
+        private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
         private string? _loanStatusKeyColumn;
-        private string? _maturityDateColumn;
-        private bool? _maturityDateColumnResolved;
-        private string? _defaultStatusColumn;
-        private bool? _defaultStatusColumnResolved;
-        private string? _exitPlanColumn;
-        private bool? _exitPlanColumnResolved;
-        private string? _exitDateColumn;
-        private bool? _exitDateColumnResolved;
-        private string? _maturityDetailColumn;
-        private bool? _maturityDetailColumnResolved;
+        private string? _dimLoanMaturityDateColumn;
+        private bool _relationshipHasMaturityDate = true;
+        private bool _exitDateIsTextColumn = true;
 
         public DefaultSubjectiveAnalyticsService(
             IConfiguration configuration,
-            ILogger<DefaultSubjectiveAnalyticsService> logger)
+            ILogger<DefaultSubjectiveAnalyticsService> logger,
+            FabricWarehouseTables tables)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
             _logger = logger;
+            _sql = new SubjectiveInputSql(tables);
         }
 
         public IReadOnlyList<DefaultSubjectiveAnalyticsOptionDto> GetDefaultStatusOptions() =>
@@ -87,89 +70,52 @@ namespace kingsightapi.Services
         }
 
         public async Task<IReadOnlyList<DefaultSubjectiveAnalyticsRowDto>> GetAsync(
-            IReadOnlyList<int> loanAliasIds,
+            IReadOnlyList<int>? loanAliasIds,
             IReadOnlyList<string>? statuses,
             CancellationToken cancellationToken = default)
         {
-            await ResolveReadColumnsAsync(cancellationToken);
+            await EnsureSchemaAsync(cancellationToken);
 
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
             string? loanStatusKeyColumn = null;
             if (statusFilter.HasFilter)
             {
-                loanStatusKeyColumn = await GetLoanStatusKeyColumnAsync(cancellationToken);
-                if (string.IsNullOrEmpty(loanStatusKeyColumn))
-                {
-                    throw new InvalidOperationException("Status filter requires loan_status_key on mort.dim_loan.");
-                }
+                loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync(cancellationToken);
             }
 
-            var sql = BuildListSql(
-                loanAliasIds,
-                statusFilter,
-                loanStatusKeyColumn,
-                _maturityDateColumn,
-                _defaultStatusColumn,
-                _exitPlanColumn,
-                _exitDateColumn,
-                _maturityDetailColumn);
+            var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
             await using var command = new SqlCommand(sql, connection);
-            AddLoanAliasParameters(command, loanAliasIds);
-            LoanStatusFilterParser.AddParameters(command, statusFilter);
-
-            var rows = new List<DefaultSubjectiveAnalyticsRowDto>();
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-
-            while (await reader.ReadAsync(cancellationToken))
+            if (loanAliasIds is { Count: > 0 })
             {
-                rows.Add(MapRow(reader));
+                AddLoanAliasParameters(command, loanAliasIds);
             }
 
-            _logger.LogInformation(
-                "Retrieved {Count} default subjective analytics rows for {AliasCount} loan alias filter(s).",
-                rows.Count,
-                loanAliasIds.Count);
+            LoanStatusFilterParser.AddParameters(command, statusFilter);
 
-            return rows;
+            try
+            {
+                return await ReadRowsAsync(command, loanAliasIds, cancellationToken);
+            }
+            catch (SqlException ex) when (statusFilter.HasFilter)
+            {
+                _logger.LogError(
+                    ex,
+                    "Default subjective analytics query failed with status filter (column={Column}).",
+                    loanStatusKeyColumn);
+                throw;
+            }
         }
 
         public async Task<bool> UpdateAsync(
             DefaultSubjectiveAnalyticsBulkUpdateRequest request,
+            string auditDisplayName,
             CancellationToken cancellationToken = default)
         {
-            await ResolveWritableColumnsAsync(cancellationToken);
-            var missing = GetMissingWritableColumns();
-            if (missing.Count > 0)
-            {
-                throw new InvalidOperationException(
-                    "mort.dim_loan is missing subjective analytics columns: "
-                    + string.Join(", ", missing)
-                    + ". Run Scripts/Alter_dim_loan_default_subjective_analytics.sql.");
-            }
-
-            var setClause = string.Join(
-                ", ",
-                new[]
-                {
-                    $"{_defaultStatusColumn} = @default_subjective_status",
-                    $"{_exitPlanColumn} = @subjective_exit_plan",
-                    $"{_exitDateColumn} = @subjective_exit_date",
-                    $"{_maturityDetailColumn} = @maturity_additional_detail",
-                    "user_updated_by = @user_updated_by",
-                    "user_updated_date = sysutcdatetime()"
-                });
-
-            var updateSql = $"""
-                update mort.dim_loan
-                set {setClause}
-                where loan_key = @loan_key
-                  and is_current = 1
-                  and (is_leaf = 1 or is_leaf is null)
-                """;
+            await EnsureSchemaAsync(cancellationToken);
 
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -183,25 +129,26 @@ namespace kingsightapi.Services
                     throw new InvalidOperationException(validationError);
                 }
 
-                await using var command = new SqlCommand(updateSql, connection);
-                command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
-                command.Parameters.AddWithValue(
-                    "@default_subjective_status",
-                    ToDbValue(DefaultSubjectiveAnalyticsValidation.CanonicalizeDefaultStatus(loan.ResolvedDefaultStatus)));
-                command.Parameters.AddWithValue(
-                    "@subjective_exit_plan",
-                    ToDbValue(DefaultSubjectiveAnalyticsValidation.CanonicalizeExitPlan(loan.ResolvedExitPlan)));
-                command.Parameters.AddWithValue(
-                    "@subjective_exit_date",
-                    ToDbValue(DefaultSubjectiveAnalyticsValidation.CanonicalizeExitDate(loan.ResolvedExitDate)));
-                command.Parameters.AddWithValue(
-                    "@maturity_additional_detail",
-                    ToDbValue(string.IsNullOrWhiteSpace(loan.MaturityAdditionalDetail)
-                        ? null
-                        : loan.MaturityAdditionalDetail.Trim()));
-                command.Parameters.AddWithValue("@user_updated_by", loan.UserUpdatedBy);
+                var rowsChanged = loan.LoanKey > 0
+                    ? await ExecuteUpdateAsync(
+                        BuildUpdateByLoanKeySql(),
+                        loan,
+                        auditDisplayName,
+                        connection,
+                        cancellationToken)
+                    : 0;
 
-                affectedRows += await command.ExecuteNonQueryAsync(cancellationToken);
+                if (rowsChanged == 0 && !string.IsNullOrWhiteSpace(loan.LoanCode))
+                {
+                    rowsChanged = await ExecuteUpdateAsync(
+                        BuildUpdateByLoanCodeSql(),
+                        loan,
+                        auditDisplayName,
+                        connection,
+                        cancellationToken);
+                }
+
+                affectedRows += rowsChanged;
             }
 
             if (affectedRows > 0)
@@ -216,187 +163,310 @@ namespace kingsightapi.Services
             return false;
         }
 
-        private async Task ResolveReadColumnsAsync(CancellationToken cancellationToken)
-        {
-            _ = await GetMaturityDateColumnAsync(cancellationToken);
-            _ = await GetDefaultStatusColumnAsync(cancellationToken);
-            _ = await GetExitPlanColumnAsync(cancellationToken);
-            _ = await GetExitDateColumnAsync(cancellationToken);
-            _ = await GetMaturityDetailColumnAsync(cancellationToken);
-        }
-
-        private Task ResolveWritableColumnsAsync(CancellationToken cancellationToken) =>
-            ResolveReadColumnsAsync(cancellationToken);
-
-        private IReadOnlyList<string> GetMissingWritableColumns()
-        {
-            var missing = new List<string>();
-            if (string.IsNullOrEmpty(_defaultStatusColumn))
-            {
-                missing.Add("default_subjective_status");
-            }
-
-            if (string.IsNullOrEmpty(_exitPlanColumn))
-            {
-                missing.Add("subjective_exit_plan");
-            }
-
-            if (string.IsNullOrEmpty(_exitDateColumn))
-            {
-                missing.Add("subjective_exit_date");
-            }
-
-            if (string.IsNullOrEmpty(_maturityDetailColumn))
-            {
-                missing.Add("maturity_additional_detail");
-            }
-
-            return missing;
-        }
-
-        private async Task<string?> GetMaturityDateColumnAsync(CancellationToken cancellationToken) =>
-            await ResolveColumnAsync(
-                MaturityDateColumnCandidates,
-                "maturity date",
-                () => _maturityDateColumn,
-                v => _maturityDateColumn = v,
-                () => _maturityDateColumnResolved,
-                v => _maturityDateColumnResolved = v,
-                cancellationToken);
-
-        private async Task<string?> GetDefaultStatusColumnAsync(CancellationToken cancellationToken) =>
-            await ResolveColumnAsync(
-                DefaultStatusColumnCandidates,
-                "default subjective status",
-                () => _defaultStatusColumn,
-                v => _defaultStatusColumn = v,
-                () => _defaultStatusColumnResolved,
-                v => _defaultStatusColumnResolved = v,
-                cancellationToken);
-
-        private async Task<string?> GetExitPlanColumnAsync(CancellationToken cancellationToken) =>
-            await ResolveColumnAsync(
-                ExitPlanColumnCandidates,
-                "subjective exit plan",
-                () => _exitPlanColumn,
-                v => _exitPlanColumn = v,
-                () => _exitPlanColumnResolved,
-                v => _exitPlanColumnResolved = v,
-                cancellationToken);
-
-        private async Task<string?> GetExitDateColumnAsync(CancellationToken cancellationToken) =>
-            await ResolveColumnAsync(
-                ExitDateColumnCandidates,
-                "subjective exit date",
-                () => _exitDateColumn,
-                v => _exitDateColumn = v,
-                () => _exitDateColumnResolved,
-                v => _exitDateColumnResolved = v,
-                cancellationToken);
-
-        private async Task<string?> GetMaturityDetailColumnAsync(CancellationToken cancellationToken) =>
-            await ResolveColumnAsync(
-                MaturityDetailColumnCandidates,
-                "maturity additional detail",
-                () => _maturityDetailColumn,
-                v => _maturityDetailColumn = v,
-                () => _maturityDetailColumnResolved,
-                v => _maturityDetailColumnResolved = v,
-                cancellationToken);
-
-        private async Task<string?> ResolveColumnAsync(
-            string[] candidates,
-            string logLabel,
-            Func<string?> getColumn,
-            Action<string?> setColumn,
-            Func<bool?> getResolved,
-            Action<bool?> setResolved,
+        private async Task<IReadOnlyList<DefaultSubjectiveAnalyticsRowDto>> ReadRowsAsync(
+            SqlCommand command,
+            IReadOnlyList<int>? loanAliasIds,
             CancellationToken cancellationToken)
         {
-            if (getResolved() == true)
+            var rows = new List<DefaultSubjectiveAnalyticsRowDto>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+            while (await reader.ReadAsync(cancellationToken))
             {
-                return getColumn();
+                rows.Add(MapRow(reader));
             }
 
-            var column = await DimLoanColumnProbe.FindFirstAsync(
-                _connectionString,
-                candidates,
-                cancellationToken);
+            _logger.LogInformation(
+                "Retrieved {Count} default subjective analytics rows (aliasFilter={AliasCount}).",
+                rows.Count,
+                loanAliasIds?.Count ?? 0);
 
-            setColumn(column);
-            setResolved(true);
-
-            if (!string.IsNullOrEmpty(column))
-            {
-                _logger.LogInformation(
-                    "Using mort.dim_loan.{Column} for {Label}.",
-                    column,
-                    logLabel);
-            }
-
-            return column;
+            return rows;
         }
 
-        private async Task<string> GetLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
+        private async Task<int> ExecuteUpdateAsync(
+            string sql,
+            DefaultSubjectiveAnalyticsUpdateItem loan,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_key", loan.LoanKey);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode?.Trim() ?? string.Empty);
+            AddTextParameter(
+                command,
+                "@default_subjective_status",
+                DefaultSubjectiveAnalyticsValidation.CanonicalizeDefaultStatus(loan.ResolvedDefaultStatus));
+            AddTextParameter(
+                command,
+                "@subjective_exit_plan",
+                DefaultSubjectiveAnalyticsValidation.CanonicalizeExitPlan(loan.ResolvedExitPlan));
+            AddTextParameter(
+                command,
+                "@subjective_exit_date",
+                DefaultSubjectiveAnalyticsValidation.CanonicalizeExitDate(loan.ResolvedExitDate));
+            AddTextParameter(
+                command,
+                "@maturity_additional_detail",
+                string.IsNullOrWhiteSpace(loan.MaturityAdditionalDetail)
+                    ? null
+                    : loan.MaturityAdditionalDetail.Trim());
+            _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        private static void AddTextParameter(SqlCommand command, string name, string? value)
+        {
+            var parameter = command.Parameters.Add(name, SqlDbType.NVarChar, 500);
+            parameter.Value = string.IsNullOrEmpty(value) ? DBNull.Value : value;
+        }
+
+        private async Task EnsureSchemaAsync(CancellationToken cancellationToken)
+        {
+            if (_schemaProbed)
+            {
+                return;
+            }
+
+            _auditColumns = await SubjectiveInputRelationshipAuditColumns.ProbeForScreenAsync(
+                _connectionString,
+                _sql.LoanAliasRelationship,
+                SubjectiveInputAuditScreen.DefaultSi,
+                cancellationToken);
+            _exitDateIsTextColumn = await IsTextColumnAsync(
+                _sql.LoanAliasRelationship,
+                "exit_date",
+                cancellationToken);
+            _dimLoanMaturityDateColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.SharedDimLoan,
+                ["maturity_date", "loan_maturity_date", "maturity_dt"],
+                cancellationToken);
+            _relationshipHasMaturityDate = await ColumnExistsAsync(
+                _sql.LoanAliasRelationship,
+                "maturity_date",
+                cancellationToken);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString, cancellationToken);
+
+            _logger.LogInformation(
+                "Default subjective analytics schema: dimLoanMaturity={DimMaturity}, relationshipMaturity={RelMaturity}, auditBy={AuditBy}.",
+                _dimLoanMaturityDateColumn ?? "(none)",
+                _relationshipHasMaturityDate,
+                _auditColumns.UpdatedByColumn ?? "(none)");
+
+            _schemaProbed = true;
+        }
+
+        private async Task<bool> ColumnExistsAsync(
+            string tableName,
+            string columnName,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(
+                    $"select top (0) [{columnName}] from {tableName}",
+                    connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                return true;
+            }
+            catch (SqlException)
+            {
+                return false;
+            }
+        }
+
+        private async Task<bool> IsTextColumnAsync(
+            string tableName,
+            string columnName,
+            CancellationToken cancellationToken)
+        {
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            await using var command = new SqlCommand($"select top (0) [{columnName}] from {tableName}", connection);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var dataType = reader.GetDataTypeName(reader.GetOrdinal(columnName));
+
+            return dataType.Contains("char", StringComparison.OrdinalIgnoreCase)
+                || dataType.Equals("text", StringComparison.OrdinalIgnoreCase)
+                || dataType.Equals("ntext", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private string BuildExitDateSetClause() =>
+            _exitDateIsTextColumn
+                ? "exit_date = @subjective_exit_date"
+                : "exit_date = coalesce("
+                    + "try_convert(date, @subjective_exit_date, 23), "   // ISO yyyy-MM-dd (native date picker)
+                    + "try_convert(date, @subjective_exit_date, 103))";  // legacy dd/MM/yyyy
+
+        private string BuildListSql(
+            IReadOnlyList<int>? loanAliasIds,
+            LoanStatusFilter statusFilter,
+            string? loanStatusKeyColumn)
+        {
+            var needsStatusJoin = statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn);
+            var maturitySelect = BuildMaturityDateSelectExpression();
+            var dimLoanApply = BuildDimLoanOuterApply();
+
+            var sql = new StringBuilder(
+                $"""
+                 select loan_key = isnull(l.loan_key, 0),
+                        r.loan_code,
+                        r.loan_description,
+                        r.loan_alias_name,
+                        {maturitySelect},
+                        r.default_status,
+                        r.exit_plan,
+                        r.exit_date,
+                        r.maturity_notes,
+                        user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression()},
+                        user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression()}
+                 from {_sql.LoanAliasRelationship} r
+                 {dimLoanApply}
+                 """);
+
+            if (loanAliasIds is { Count: > 0 })
+            {
+                sql.AppendLine(
+                    $"""
+                     inner join {_sql.LoanAliasMaster} m
+                         on r.loan_alias_name = m.loan_alias_name
+                     """);
+            }
+
+            if (loanAliasIds is { Count: > 0 })
+            {
+                sql.Append(" where m.loan_alias_id in (");
+                sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
+                sql.Append(')');
+
+                if (needsStatusJoin)
+                {
+                    LoanStatusFilterParser.AppendExistsSqlCondition(
+                        sql,
+                        "r",
+                        _sql.SharedDimLoan,
+                        loanStatusKeyColumn!,
+                        statusFilter,
+                        _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
+                }
+            }
+            else if (needsStatusJoin)
+            {
+                sql.AppendLine(" where 1 = 1");
+                LoanStatusFilterParser.AppendExistsSqlCondition(
+                    sql,
+                    "r",
+                    _sql.SharedDimLoan,
+                    loanStatusKeyColumn!,
+                    statusFilter,
+                    _sql.DimStatus,
+                    null,
+                    _sql.DimLoanCurrentIndicatorColumn);
+            }
+
+            sql.AppendLine();
+            sql.Append(" order by r.loan_alias_name, r.loan_code");
+            return sql.ToString();
+        }
+
+        /// <summary>
+        /// Yardi maturity date from shared.dim_loan (MAX per loan_code on current SCD rows),
+        /// falling back to relationship.maturity_date when present.
+        /// </summary>
+        private string BuildMaturityDateSelectExpression()
+        {
+            if (!string.IsNullOrEmpty(_dimLoanMaturityDateColumn) && _relationshipHasMaturityDate)
+            {
+                return "maturity_date = coalesce(l.yardi_maturity_date, r.maturity_date)";
+            }
+
+            if (!string.IsNullOrEmpty(_dimLoanMaturityDateColumn))
+            {
+                return "maturity_date = l.yardi_maturity_date";
+            }
+
+            if (_relationshipHasMaturityDate)
+            {
+                return "r.maturity_date";
+            }
+
+            return "maturity_date = cast(null as date)";
+        }
+
+        private string BuildDimLoanOuterApply()
+        {
+            var maturitySelect = string.IsNullOrEmpty(_dimLoanMaturityDateColumn)
+                ? "yardi_maturity_date = cast(null as date)"
+                : $"yardi_maturity_date = max(ck.[{_dimLoanMaturityDateColumn}])";
+
+            return $"""
+                outer apply (
+                    select
+                        loan_key = max(ck.loan_key),
+                        {maturitySelect}
+                    from {_sql.SharedDimLoan} ck
+                    where {SubjectiveInputSql.EqualsLoanCode("r", "loan_code", "ck", "loan_code")}
+                      and {_sql.DimLoanIsCurrent("ck")}
+                ) l
+                """;
+        }
+
+        private string BuildUpdateByLoanKeySql() =>
+            $"""
+                update r
+                set default_status = @default_subjective_status,
+                    exit_plan = @subjective_exit_plan,
+                    {BuildExitDateSetClause()},
+                    maturity_notes = @maturity_additional_detail{_auditColumns.BuildUpdateSetClause()}
+                from {_sql.LoanAliasRelationship} r
+                inner join {_sql.SharedDimLoan} l
+                    on l.loan_key = @loan_key
+                   and {SubjectiveInputSql.EqualsVarchar("l", "loan_code", "r", "loan_code")}
+                   and {_sql.DimLoanIsCurrent("l")}
+                """;
+
+        private string BuildUpdateByLoanCodeSql() =>
+            $"""
+                update r
+                set default_status = @default_subjective_status,
+                    exit_plan = @subjective_exit_plan,
+                    {BuildExitDateSetClause()},
+                    maturity_notes = @maturity_additional_detail{_auditColumns.BuildUpdateSetClause()}
+                from {_sql.LoanAliasRelationship} r
+                where cast(r.loan_code as varchar(100)) collate database_default = cast(@loan_code as varchar(100)) collate database_default
+                """;
+
+        private async Task<string?> TryResolveLoanStatusKeyColumnAsync(CancellationToken cancellationToken)
         {
             if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
             {
                 return _loanStatusKeyColumn;
             }
 
-            _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
-                _connectionString,
-                cancellationToken);
-
-            return _loanStatusKeyColumn;
-        }
-
-        private static string BuildListSql(
-            IReadOnlyList<int> loanAliasIds,
-            LoanStatusFilter statusFilter,
-            string? loanStatusKeyColumn,
-            string? maturityDateColumn,
-            string? defaultStatusColumn,
-            string? exitPlanColumn,
-            string? exitDateColumn,
-            string? maturityDetailColumn)
-        {
-            var sql = new StringBuilder();
-            sql.AppendLine("""
-                select l.loan_key,
-                       l.loan_code,
-                       l.loan_desc,
-                       loan_alias_name = isnull(m.loan_alias_name, ''),
-                """);
-            sql.AppendLine($"       {SelectColumnOrNull(maturityDateColumn, "date", "maturity_date")},");
-            sql.AppendLine($"       {SelectColumnOrNull(defaultStatusColumn, "varchar(50)", "default_subjective_status")},");
-            sql.AppendLine($"       {SelectColumnOrNull(exitPlanColumn, "varchar(50)", "subjective_exit_plan")},");
-            sql.AppendLine($"       {SelectColumnOrNull(exitDateColumn, "varchar(100)", "subjective_exit_date")},");
-            sql.AppendLine($"       {SelectColumnOrNull(maturityDetailColumn, "varchar(500)", "maturity_additional_detail")},");
-            sql.AppendLine("""
-                       l.user_updated_by,
-                       l.user_updated_date
-                """);
-            sql.Append(ListSqlFrom);
-
-            sql.Append(" and l.loan_alias_key in (");
-            sql.Append(string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}")));
-            sql.Append(')');
-
-            if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
+            try
             {
-                LoanStatusFilterParser.AppendSqlCondition(sql, "l", loanStatusKeyColumn, statusFilter);
+                _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+                    _connectionString,
+                    _sql.SharedDimLoan,
+                    cancellationToken);
+                return _loanStatusKeyColumn;
             }
-
-            sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name, l.loan_code");
-            return sql.ToString();
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Default subjective analytics status filter skipped; shared.dim_loan status column unavailable.");
+                return null;
+            }
         }
-
-        private static string SelectColumnOrNull(string? column, string sqlType, string alias) =>
-            string.IsNullOrEmpty(column)
-                ? $"cast(null as {sqlType}) as {alias}"
-                : $"l.{column} as {alias}";
 
         private static void AddLoanAliasParameters(SqlCommand command, IReadOnlyList<int> loanAliasIds)
         {
@@ -406,21 +476,31 @@ namespace kingsightapi.Services
             }
         }
 
-        private static DefaultSubjectiveAnalyticsRowDto MapRow(SqlDataReader reader) =>
-            new()
+        private static DefaultSubjectiveAnalyticsRowDto MapRow(SqlDataReader reader)
+        {
+            DateTime? updatedDate = null;
+            if (reader.TryGetOrdinal("user_updated_date", out var dateOrd) && !reader.IsDBNull(dateOrd))
+            {
+                updatedDate = DateTime.SpecifyKind(reader.GetDateTime(dateOrd), DateTimeKind.Utc);
+            }
+
+            return new DefaultSubjectiveAnalyticsRowDto
             {
                 LoanKey = GetInt64(reader, "loan_key"),
                 LoanId = GetString(reader, "loan_code"),
-                Description = GetString(reader, "loan_desc"),
+                Description = GetString(reader, "loan_description"),
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 MaturityDate = GetNullableDate(reader, "maturity_date"),
-                DefaultStatus = GetNullableString(reader, "default_subjective_status"),
-                ExitPlan = GetNullableString(reader, "subjective_exit_plan"),
-                ExitDate = GetNullableString(reader, "subjective_exit_date"),
-                MaturityAdditionalDetail = GetNullableString(reader, "maturity_additional_detail"),
-                UserUpdatedBy = GetNullableString(reader, "user_updated_by"),
-                UserUpdatedDate = GetNullableDateTime(reader, "user_updated_date")
+                DefaultStatus = GetNullableString(reader, "default_status"),
+                ExitPlan = GetNullableString(reader, "exit_plan"),
+                ExitDate = GetNullableString(reader, "exit_date"),
+                MaturityAdditionalDetail = GetNullableString(reader, "maturity_notes"),
+                UserUpdatedBy = reader.TryGetOrdinal("user_updated_by", out var byOrd) && !reader.IsDBNull(byOrd)
+                    ? reader.GetString(byOrd)
+                    : null,
+                UserUpdatedDate = updatedDate
             };
+        }
 
         private static object ToDbValue(string? value) =>
             string.IsNullOrEmpty(value) ? DBNull.Value : value;
@@ -458,12 +538,6 @@ namespace kingsightapi.Services
             return reader.GetFieldType(ordinal) == typeof(DateTime)
                 ? reader.GetDateTime(ordinal).Date
                 : Convert.ToDateTime(reader.GetValue(ordinal)).Date;
-        }
-
-        private static DateTime? GetNullableDateTime(SqlDataReader reader, string name)
-        {
-            var ordinal = reader.GetOrdinal(name);
-            return reader.IsDBNull(ordinal) ? null : reader.GetDateTime(ordinal);
         }
     }
 }

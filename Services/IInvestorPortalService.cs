@@ -14,8 +14,16 @@ public interface IInvestorPortalService
         string? sortDir,
         int page,
         int pageSize);
-    Task<InvestorDetailDto?> GetInvestorByKeyAsync(long investorKey);
-    Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(long investorKey, int page, int pageSize);
+    Task<InvestorProfileDto?> GetInvestorByKeyAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+    Task<PagedResult<InvestorInvestmentDto>> GetInvestorFundsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
     Task<PagedResult<FundPeriodDto>> GetInvestorPeriodsAsync(
         long investorKey,
         TimeGranularity view,
@@ -53,12 +61,30 @@ public interface IInvestorPortalService
         int page,
         int pageSize);
 
+    Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey);
+
+    Task<TransactionFilterOptionsDto> GetInvestorCapitalActivitiesFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetInvestorDistributionsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<TransactionFilterOptionsDto> GetInvestorIrrFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
     /// <summary>Capital Activities table (one row per fund) for the investor portfolio screen. Searchable by fund code or name; sortable.</summary>
     Task<PagedResult<InvestorFundCapitalActivitiesDto>> GetInvestorCapitalActivitiesAsync(
         long investorKey,
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
         int page,
@@ -70,6 +96,7 @@ public interface IInvestorPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
         int page,
@@ -81,8 +108,57 @@ public interface IInvestorPortalService
         TimeGranularity view,
         FundPeriodFilter? period,
         string? search,
+        string? fundCode,
         string? sortBy,
         string? sortDir,
+        int page,
+        int pageSize);
+
+    /// <summary>Capital obligations — commitment, unfunded, reserved, released (LTD or quarterly portfolio facts).</summary>
+    Task<PagedResult<InvestorFundObligationDto>> GetInvestorCapitalObligationsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? fundCode,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetInvestorObligationsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    /// <summary>Net assets table (quarterly only; unpivoted IRR horizon rows).</summary>
+    Task<PagedResult<InvestorFundNetAssetsDto>> GetInvestorNetAssetsAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        string? search,
+        string? fundCode,
+        string? sortBy,
+        string? sortDir,
+        int page,
+        int pageSize);
+
+    Task<TransactionFilterOptionsDto> GetInvestorNetAssetsFiltersAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period);
+
+    Task<PagedResult<InvestorFundExposureDto>> GetInvestorFundExposureAsync(
+        long investorKey,
+        TimeGranularity view,
+        FundPeriodFilter? period,
+        int page,
+        int pageSize);
+
+    /// <summary>Underlying assets grid — investor LTD funds joined to <c>dim_property.fund</c> = <c>dim_fund.fund_code</c>.</summary>
+    Task<PagedResult<InvestorUnderlyingAssetGridItemDto>> GetInvestorUnderlyingAssetsAsync(
+        long investorKey,
+        string? search,
         int page,
         int pageSize);
 }

@@ -6,6 +6,7 @@ namespace kingsightapi.Services
     {
         public static async Task<string?> FindFirstAsync(
             string connectionString,
+            string dimLoanTable,
             IReadOnlyList<string> columnCandidates,
             CancellationToken cancellationToken = default)
         {
@@ -14,13 +15,17 @@ namespace kingsightapi.Services
 
             foreach (var column in columnCandidates)
             {
-                var probeSql = $"select top 0 [{column}] from mort.dim_loan";
+                var probeSql = $"select top 0 [{column}] from {dimLoanTable}";
 
                 try
                 {
                     await using var command = new SqlCommand(probeSql, connection);
                     await using var reader = await command.ExecuteReaderAsync(cancellationToken);
                     return column;
+                }
+                catch (SqlException ex) when (ex.Number is 208 or 3701)
+                {
+                    return null;
                 }
                 catch (SqlException ex) when (ex.Number == 207)
                 {

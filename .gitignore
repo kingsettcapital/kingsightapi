@@ -1,6 +1,12 @@
 ## Build results
 [Bb]in/
 [Oo]bj/
+build-out/
+_buildcheck/
+_build_check/
+_build_out/
+tmp-build-check*/
+artifacts/
 
 ## CMHC uploads (local dev storage)
 CmhcUploads/

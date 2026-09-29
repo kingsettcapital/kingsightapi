@@ -57,7 +57,28 @@ public sealed partial class FundPortalService : IFundPortalService
         }
     }
 
-    public async Task<FundDetailDto?> GetFundByKeyAsync(int fundKey)
+    public async Task<ActiveFundsSummaryResultDto> GetActiveFundSummaryAsync(
+        string? search = null,
+        string? fundType = null,
+        string? strategy = null)
+    {
+        try
+        {
+            return await GetActiveFundSummaryInternalAsync(search, fundType, strategy);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get active fund summary cancelled");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving active fund summary");
+            throw;
+        }
+    }
+
+    public async Task<FundProfileDto?> GetFundByKeyAsync(int fundKey)
     {
         try
         {
@@ -366,9 +387,10 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" isnull(b.fund_strategy_name, '') as fund_strategy_name, ");
         pageSql.Append(" isnull(max(assets.assets_count), 0) as assets_count, ");
         pageSql.Append(" isnull(max(inv.investors_count), 0) as investors_count, ");
+        PortalPortfolioListSql.AppendItdAsOfDateAggregate(pageSql, view);
         PortalPortfolioListSql.AppendPortfolioMetricAggregates(pageSql);
         AppendFundListingFrom(pageSql, portfolioTable);
-        AppendFundListingInvestorAssetApplies(pageSql);
+        AppendFundListingInvestorAssetApplies(pageSql, portfolioTable);
         AppendFundListingWhere(pageSql, view, period);
         pageSql.Append(" group by b.fund_key, b.fund_name, b.fund_type_name, b.fund_strategy_name ");
         orderBy.AppendOrderBy(pageSql);
@@ -406,12 +428,88 @@ public sealed partial class FundPortalService : IFundPortalService
                 TotalCommitment = summary.TotalCommitment,
                 NetInvestedCapital = summary.NetInvestedCapital,
                 NetDistributed = summary.NetDistributed,
-                ReservedUncalled = summary.ReservedUncalled
+                Reserved = summary.Reserved,
+                Unfunded = summary.Unfunded,
+                ReleasedCapital = summary.ReleasedCapital,
+                AsOfDate = summary.AsOfDate,
             },
             Items = items,
             Page = normalizedPage,
             PageSize = normalizedPageSize,
             TotalCount = totalCount,
+        };
+    }
+
+    private async Task<ActiveFundsSummaryResultDto> GetActiveFundSummaryInternalAsync(
+        string? search,
+        string? fundType,
+        string? strategy)
+    {
+        var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
+        var fundTypeTerm = string.IsNullOrWhiteSpace(fundType) ? null : fundType.Trim();
+        var strategyTerm = string.IsNullOrWhiteSpace(strategy) ? null : strategy.Trim();
+
+        var sql = new StringBuilder();
+        sql.Append(" select ");
+        sql.Append(" b.as_of_date, ");
+        sql.Append(" b.fund_key, ");
+        sql.Append(" isnull(b.fund_name, '') as fund_name, ");
+        sql.Append(" isnull(b.fund_type_name, '') as fund_type_name, ");
+        sql.Append(" isnull(b.fund_strategy_name, '') as fund_strategy_name, ");
+        sql.Append(" isnull(b.assets_count, 0) as assets_count, ");
+        sql.Append(" isnull(b.investors_count, 0) as investors_count, ");
+        sql.Append(" isnull(b.net_invested_capital_amount, 0) as net_invested_capital_amount ");
+        sql.Append($" from {WarehouseTables.ViewActiveFundSummary} b ");
+        sql.Append(" where (@search is null ");
+        sql.Append(" or lower(isnull(b.fund_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" or lower(isnull(b.fund_strategy_name, '')) like '%' + lower(@search) + '%') ");
+        sql.Append(" and (@fundType is null or lower(isnull(b.fund_type_name, '')) = lower(@fundType)) ");
+        sql.Append(" and (@strategy is null or lower(isnull(b.fund_strategy_name, '')) = lower(@strategy)) ");
+        sql.Append(" order by isnull(b.fund_name, '') ");
+
+        await using var connection = new SqlConnection(_connectionString);
+        await connection.OpenAsync();
+
+        await using var command = new SqlCommand(sql.ToString(), connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        command.Parameters.AddWithValue("@search", (object?)searchTerm ?? DBNull.Value);
+        command.Parameters.AddWithValue("@fundType", (object?)fundTypeTerm ?? DBNull.Value);
+        command.Parameters.AddWithValue("@strategy", (object?)strategyTerm ?? DBNull.Value);
+
+        var items = new List<ActiveFundSummaryDto>();
+        DateTime? asOfDate = null;
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                var rowAsOf = reader.GetNullableDateTimeIfPresent("as_of_date");
+                asOfDate ??= rowAsOf;
+                items.Add(new ActiveFundSummaryDto
+                {
+                    FundKey = reader.GetInt32OrDefault("fund_key"),
+                    FundName = reader.GetStringOrEmpty("fund_name"),
+                    FundTypeName = reader.GetStringOrEmpty("fund_type_name"),
+                    FundStrategyName = reader.GetStringOrEmpty("fund_strategy_name"),
+                    Assets = reader.GetInt32OrDefault("assets_count"),
+                    Investors = reader.GetInt32OrDefault("investors_count"),
+                    NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+                    Status = "Active",
+                    AsOfDate = rowAsOf,
+                });
+            }
+        }
+
+        _logger.LogInformation(
+            "Retrieved {Count} active funds from vw_active_fund_summary (as_of={AsOf}).",
+            items.Count,
+            asOfDate);
+
+        return new ActiveFundsSummaryResultDto
+        {
+            AsOfDate = asOfDate,
+            Items = items,
         };
     }
 
@@ -426,6 +524,7 @@ public sealed partial class FundPortalService : IFundPortalService
     {
         var summarySql = new StringBuilder();
         summarySql.Append(" select ");
+        PortalPortfolioListSql.AppendItdAsOfDateAggregate(summarySql, view);
         summarySql.Append(" count(distinct b.fund_key) as fund_count, ");
         PortalPortfolioListSql.AppendPortfolioSummaryMetricSums(summarySql);
         AppendFundListingFrom(summarySql, portfolioTable);
@@ -445,7 +544,10 @@ public sealed partial class FundPortalService : IFundPortalService
             TotalCommitment = reader.GetDecimalOrDefault("total_commitment"),
             NetInvestedCapital = reader.GetDecimalOrDefault("net_invested_capital"),
             NetDistributed = reader.GetDecimalOrDefault("net_distributed"),
-            ReservedUncalled = reader.GetDecimalOrDefault("reserved_uncalled")
+            Reserved = reader.GetDecimalOrDefault("reserved"),
+            Unfunded = reader.GetDecimalOrDefault("unfunded"),
+            ReleasedCapital = reader.GetDecimalOrDefault("released_capital"),
+            AsOfDate = reader.GetNullableDateTimeIfPresent("as_of_date"),
         };
     }
 
@@ -468,23 +570,31 @@ public sealed partial class FundPortalService : IFundPortalService
         WarehouseSql.AppendFundStrategyFilter(sql, "b");
     }
 
-    /// <summary>Per-fund asset and investor counts (same logic as fund detail summary).</summary>
-    private static void AppendFundListingInvestorAssetApplies(StringBuilder sql, string fundAlias = "b")
+    /// <summary>Per-fund asset and investor counts (investors from portfolio facts).</summary>
+    private static void AppendFundListingInvestorAssetApplies(
+        StringBuilder sql,
+        string portfolioTable,
+        string fundAlias = "b")
     {
         sql.Append(" outer apply ( ");
-        sql.Append(" select count(*) as assets_count ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
+        sql.Append(" select count(*) as assets_count from ( ");
+        sql.Append(" select c.property_key ");
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        sql.Append($" inner join {WarehouseTables.DimFund} ff ");
+        sql.Append(" on isnull(c.fund, '') = isnull(ff.yardi_fund_code, '') ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "ff");
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(sql, "p", fundAlias);
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        sql.Append($" and ff.fund_key = {fundAlias}.fund_key ");
+        sql.Append(" group by c.property_key ");
+        sql.Append(" ) consolidated_assets ");
         sql.Append(" ) assets ");
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as investors_count ");
         sql.Append(" from ( ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = {fundAlias}.fund_key ");
-        sql.Append(" union ");
-        sql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = {fundAlias}.fund_key ");
+        sql.Append($" select investor_key from {portfolioTable} where fund_key = {fundAlias}.fund_key ");
         sql.Append(" ) invkeys ");
         sql.Append(" ) inv ");
     }
@@ -502,8 +612,22 @@ public sealed partial class FundPortalService : IFundPortalService
         PortalPortfolioListSql.AddPeriodParameter(command, period);
     }
 
-    private static FundListItemDto MapFundListItem(SqlDataReader reader) =>
-        new()
+    private static string ResolveFundStrategyName(string strategyName, string fundTypeName)
+    {
+        if (!string.IsNullOrWhiteSpace(strategyName))
+        {
+            return strategyName.Trim();
+        }
+
+        return fundTypeName.Trim();
+    }
+
+    private static FundListItemDto MapFundListItem(SqlDataReader reader)
+    {
+        var commitment = reader.GetDecimalOrDefault("commitment_amount");
+        var netInvested = reader.GetDecimalOrDefault("net_invested_capital_amount");
+
+        return new FundListItemDto
         {
             FundKey = reader.GetInt32OrDefault("fund_key"),
             FundName = reader.GetStringOrEmpty("fund_name"),
@@ -511,217 +635,73 @@ public sealed partial class FundPortalService : IFundPortalService
             FundStrategyName = reader.GetStringOrEmpty("fund_strategy_name"),
             Investors = reader.GetInt32OrDefault("investors_count"),
             Assets = reader.GetInt32OrDefault("assets_count"),
-            CommitmentAmount = reader.GetDecimalOrDefault("commitment_amount"),
-            NetInvestedCapitalAmount = reader.GetDecimalOrDefault("net_invested_capital_amount"),
+            CommitmentAmount = commitment,
+            NetInvestedCapitalAmount = netInvested,
             NetDistributedAmount = reader.GetDecimalOrDefault("net_distributed_amount"),
             ReservedAmount = reader.GetDecimalOrDefault("reserved_amount"),
-            ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount")
-        };
-
-    private async Task<FundDetailDto?> GetFundByKeyInternalAsync(int fundKey)
-    {
-        var summarySql = new StringBuilder();
-        summarySql.Append(" select ");
-        summarySql.Append(" f.fund_key, ");
-        summarySql.Append(" f.fund_id, ");
-        summarySql.Append(" isnull(f.fund_code, '') as fund_code, ");
-        summarySql.Append(" f.fund_name, ");
-        summarySql.Append(" isnull(f.fund_type_name, 'Fund') as fund_type_name, ");
-        summarySql.Append(" case when isnull(f.is_active, 0) = 1 then 'Active' else 'Inactive' end as fund_status, ");
-        summarySql.Append(" isnull(port.commitment, 0) as commitment, ");
-        summarySql.Append(" isnull(port.called, 0) as called, ");
-        summarySql.Append(" isnull(port.netinvestedamount, 0) as netinvestedamount, ");
-        summarySql.Append(" isnull(port.netinvestedunits, 0) as netinvestedunits, ");
-        summarySql.Append(" isnull(port.reserveamount, 0) as reserveamount, ");
-        summarySql.Append(" isnull(assets.assets_count, 0) as assets_count, ");
-        summarySql.Append(" isnull(inv.investors_count, 0) as investors_count ");
-        summarySql.Append($" from {WarehouseTables.DimFund} f ");
-        summarySql.Append(" outer apply ( ");
-        summarySql.Append(" select ");
-        summarySql.Append(" commitment = sum(commitment_amount), ");
-        summarySql.Append(" called = sum(capital_called_amount), ");
-        summarySql.Append(" netinvestedamount = sum(net_invested_capital_amount), ");
-        summarySql.Append(" netinvestedunits = sum(net_invested_capital_units), ");
-        summarySql.Append(" reserveamount = sum(reserved_amount) ");
-        summarySql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
-        summarySql.Append(" where fund_key = f.fund_key ");
-        summarySql.Append(" ) port ");
-        summarySql.Append(" outer apply ( ");
-        summarySql.Append(" select count(*) as assets_count ");
-        summarySql.Append($" from {WarehouseTables.DimProperty} p ");
-        summarySql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(summarySql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(summarySql, "p", "f");
-        WarehouseSql.AppendPropertyFundLevel000Filter(summarySql, "p");
-        summarySql.Append(" ) assets ");
-        summarySql.Append(" outer apply ( ");
-        summarySql.Append(" select count(*) as investors_count ");
-        summarySql.Append(" from ( ");
-        summarySql.Append($" select distinct investor_key from {WarehouseTables.FactCommitted} where fund_key = f.fund_key ");
-        summarySql.Append(" union ");
-        summarySql.Append($" select distinct investor_key from {WarehouseTables.FactInvestment} where fund_key = f.fund_key ");
-        summarySql.Append(" ) invkeys ");
-        summarySql.Append(" ) inv ");
-        summarySql.Append(" where f.fund_key = @fundKey ");
-        summarySql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(summarySql, "f");
-
-        await using var connection = new SqlConnection(_connectionString);
-        await connection.OpenAsync();
-
-        await using var summaryCommand = new SqlCommand(summarySql.ToString(), connection)
-        {
-            CommandType = System.Data.CommandType.Text
-        };
-        summaryCommand.Parameters.AddWithValue("@fundKey", fundKey);
-
-        FundSummaryDto summary;
-        await using (var summaryReader = await summaryCommand.ExecuteReaderAsync())
-        {
-            if (!await summaryReader.ReadAsync())
-            {
-                return null;
-            }
-
-            summary = new FundSummaryDto
-            {
-                FundId = summaryReader.GetInt32OrDefault("fund_id"),
-                FundCode = summaryReader.GetStringOrEmpty("fund_code"),
-                FundName = summaryReader.GetStringOrEmpty("fund_name"),
-                FundType = summaryReader.GetStringOrEmpty("fund_type_name"),
-                Status = summaryReader.GetStringOrEmpty("fund_status"),
-                Assets = summaryReader.GetInt32OrDefault("assets_count"),
-                Investors = summaryReader.GetInt32OrDefault("investors_count"),
-                FundKey = summaryReader.GetInt32OrDefault("fund_key"),
-                Commitment = summaryReader.GetDecimalOrDefault("commitment"),
-                Called = summaryReader.GetDecimalOrDefault("called"),
-                Netinvestedamount = summaryReader.GetDecimalOrDefault("netinvestedamount"),
-                Netinvestedunits = summaryReader.GetDecimalOrDefault("netinvestedunits"),
-                Reserveamount = summaryReader.GetDecimalOrDefault("reserveamount")
-            };
-        }
-        var financialSummary = new List<DynamicFieldDto>
-        {
-            DisplayFieldBuilder.ToDynamicField("commitment", DisplayFieldBuilder.Money(summary.Commitment)),
-            DisplayFieldBuilder.ToDynamicField("called", DisplayFieldBuilder.Money(summary.Called)),
-            DisplayFieldBuilder.ToDynamicField("netInvestedAmount", DisplayFieldBuilder.Money(summary.Netinvestedamount)),
-            DisplayFieldBuilder.ToDynamicField("netInvestedUnits", DisplayFieldBuilder.Number(summary.Netinvestedunits)),
-            DisplayFieldBuilder.ToDynamicField("reserveAmount", DisplayFieldBuilder.Money(summary.Reserveamount))
-        };
-
-        var sectionSql = new StringBuilder();
-        sectionSql.Append(" select ");
-        sectionSql.Append(" isnull(f.fund_type_name, 'Fund') as fund_type_name, ");
-        sectionSql.Append(" isnull(f.fund_strategy_name, '') as fund_strategy_name, ");
-        sectionSql.Append(" case when isnull(f.is_active, 0) = 1 then 'Active' else 'Inactive' end as fund_status, ");
-        sectionSql.Append(" f.fund_start_date, ");
-        sectionSql.Append(" isnull(f.is_sidecar, 0) as is_sidecar ");
-        sectionSql.Append($" from {WarehouseTables.DimFund} f ");
-        sectionSql.Append(" where f.fund_key = @fundKey ");
-        sectionSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(sectionSql, "f");
-
-        await using var sectionCommand = new SqlCommand(sectionSql.ToString(), connection)
-        {
-            CommandType = System.Data.CommandType.Text
-        };
-        sectionCommand.Parameters.AddWithValue("@fundKey", fundKey);
-
-        await using var sectionReader = await sectionCommand.ExecuteReaderAsync();
-
-        var investmentDetails = new List<DynamicFieldDto>();
-
-        if (await sectionReader.ReadAsync())
-        {
-            var fundType = sectionReader.GetStringOrEmpty("fund_type_name");
-            var fundStrategy = sectionReader.GetStringOrEmpty("fund_strategy_name");
-            var status = sectionReader.GetStringOrEmpty("fund_status");
-            var fundStartDate = sectionReader.GetNullableDateTime("fund_start_date");
-            var isSidecar = sectionReader.GetInt32OrDefault("is_sidecar") == 1;
-
-            investmentDetails =
-            [
-                DisplayFieldBuilder.ToDynamicField("investmentType", DisplayFieldBuilder.Text(fundType)),
-                DisplayFieldBuilder.ToDynamicField("strategy", DisplayFieldBuilder.Text(fundStrategy)),
-                DisplayFieldBuilder.ToDynamicField("startDate", DisplayFieldBuilder.Date(fundStartDate)),
-                DisplayFieldBuilder.ToDynamicField("status", DisplayFieldBuilder.Status(status))
-            ];
-            financialSummary.Add(DisplayFieldBuilder.ToDynamicField("isSidecar", DisplayFieldBuilder.Boolean(isSidecar)));
-        }
-
-        return new FundDetailDto
-        {
-            Summary = summary,
-            Sections =
-            [
-                new DynamicSectionDto
-                {
-                    Title = "Investment Details",
-                    Fields = investmentDetails
-                },
-                new DynamicSectionDto
-                {
-                    Title = "Financial Summary",
-                    Fields = financialSummary
-                }
-            ]
+            ReleasedCapitalAmount = reader.GetDecimalOrDefault("released_capital_amount"),
+            UnfundedAmount = reader.GetDecimalOrDefault("unfunded_amount"),
+            InvestedPercent = PortalPortfolioMetrics.ComputeInvestedPercent(commitment, netInvested),
+            AsOfDate = reader.GetNullableDateTimeIfPresent("as_of_date"),
         };
     }
 
-    public async Task<PagedResult<FundAssetDto>> GetFundAssetsAsync(int fundKey, int page, int pageSize)
+    public async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize)
     {
         try
         {
-            return await GetFundAssetsInternalAsync(fundKey, page, pageSize);
+            return await GetFundUnderlyingAssetsInternalAsync(fundKey, page, pageSize);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            _logger.LogInformation("Get underlying assets for fund {FundKey} cancelled", fundKey);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving assets for fund {FundKey}", fundKey);
+            _logger.LogError(ex, "Error retrieving underlying assets for fund {FundKey}", fundKey);
             throw;
         }
     }
 
-    private async Task<PagedResult<FundAssetDto>> GetFundAssetsInternalAsync(int fundKey, int page, int pageSize)
+    private async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsInternalAsync(int fundKey, int page, int pageSize)
     {
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
 
         var countSql = new StringBuilder();
-        countSql.Append(" select count(*) ");
-        countSql.Append($" from {WarehouseTables.DimProperty} p ");
-        countSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
-        countSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(countSql, "f");
-        countSql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(countSql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(countSql, "p", "f");
-        WarehouseSql.AppendPropertyFundLevel000Filter(countSql, "p");
+        countSql.Append(" select count(*) from ( ");
+        countSql.Append(" select c.property_key ");
+        AppendFundAssetHoldingsFrom(countSql);
+        countSql.Append(" group by c.property_key ");
+        countSql.Append(" ) consolidated_assets ");
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" p.property_key, ");
-        pageSql.Append(" isnull(p.property_name, '') as property_name, ");
-        pageSql.Append(" isnull(p.city, '') as city, ");
-        pageSql.Append(" isnull(p.province, '') as province, ");
-        pageSql.Append(" isnull(p.geography, '') as geography, ");
-        pageSql.Append(" isnull(p.asset_type, '') as asset_type, ");
-        pageSql.Append(" isnull(p.investment_type, '') as investment_type, ");
-        pageSql.Append(" isnull(p.property_status, '') as property_status, ");
-        pageSql.Append(" p.property_acquisition, ");
-        pageSql.Append(" p.property_disposition ");
-        pageSql.Append($" from {WarehouseTables.DimProperty} p ");
-        pageSql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = @fundKey ");
-        pageSql.Append(" and ");
-        WarehouseSql.AppendCurrentFundFilter(pageSql, "f");
-        pageSql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(pageSql, "p");
-        WarehouseSql.AppendPropertyBelongsToFundFilter(pageSql, "p", "f");
-        WarehouseSql.AppendPropertyFundLevel000Filter(pageSql, "p");
-        pageSql.Append(" order by p.property_name ");
+        pageSql.Append(" c.property_key, ");
+        pageSql.Append(" isnull(c.property_name, '') as property_name, ");
+        pageSql.Append(" isnull(c.city, '') as city, ");
+        pageSql.Append(" isnull(c.province, '') as province, ");
+        pageSql.Append(" isnull(c.geography, '') as geography, ");
+        pageSql.Append(" isnull(c.asset_type, '') as asset_type, ");
+        pageSql.Append(" isnull(c.investment_type, '') as investment_type, ");
+        pageSql.Append(" isnull(c.property_status, '') as property_status, ");
+        pageSql.Append(" c.property_acquisition, ");
+        pageSql.Append(" c.property_disposition, ");
+        pageSql.Append(" sum(metrics.gross_leasable_area_sqft) as gla_sf, ");
+        pageSql.Append(" sum(metrics.occupied_area_sqft) as occupied_sf ");
+        AppendFundAssetHoldingsFrom(pageSql);
+        pageSql.Append(" group by ");
+        pageSql.Append(" c.property_key, ");
+        pageSql.Append(" isnull(c.property_name, ''), ");
+        pageSql.Append(" isnull(c.city, ''), ");
+        pageSql.Append(" isnull(c.province, ''), ");
+        pageSql.Append(" isnull(c.geography, ''), ");
+        pageSql.Append(" isnull(c.asset_type, ''), ");
+        pageSql.Append(" isnull(c.investment_type, ''), ");
+        pageSql.Append(" isnull(c.property_status, ''), ");
+        pageSql.Append(" c.property_acquisition, ");
+        pageSql.Append(" c.property_disposition ");
+        pageSql.Append(" order by isnull(c.property_name, '') ");
         pageSql.Append(" offset @offset rows fetch next @pageSize rows only ");
 
         await using var connection = new SqlConnection(_connectionString);
@@ -747,6 +727,14 @@ public sealed partial class FundPortalService : IFundPortalService
         {
             while (await reader.ReadAsync())
             {
+                var glaSf = reader.GetNullableDecimal("gla_sf");
+                var occupiedSf = reader.GetNullableDecimal("occupied_sf");
+                decimal? occupancyPct = null;
+                if (glaSf is > 0m && occupiedSf.HasValue)
+                {
+                    occupancyPct = Math.Round(occupiedSf.Value / glaSf.Value * 100m, 4, MidpointRounding.AwayFromZero);
+                }
+
                 items.Add(new FundAssetDto
                 {
                     PropertyKey = reader.GetInt64OrDefault("property_key"),
@@ -758,7 +746,11 @@ public sealed partial class FundPortalService : IFundPortalService
                     InvestmentType = reader.GetStringOrEmpty("investment_type"),
                     PropertyStatus = reader.GetStringOrEmpty("property_status"),
                     PropertyAcquisition = reader.GetNullableStringIfPresent("property_acquisition"),
-                    PropertyDisposition = reader.GetNullableStringIfPresent("property_disposition")
+                    PropertyDisposition = reader.GetNullableStringIfPresent("property_disposition"),
+                    GlaSf = glaSf,
+                    OccupancyPct = occupancyPct,
+                    MarketValue = null,
+                    CapRate = null
                 });
             }
         }
@@ -770,6 +762,24 @@ public sealed partial class FundPortalService : IFundPortalService
             PageSize = normalizedPageSize,
             TotalCount = totalCount
         };
+    }
+
+    /// <summary>
+    /// Asset Holdings: leaf 000 properties → ownership hierarchy → consolidated asset (c),
+    /// metrics summed from leaf latest <c>fact_asset_metrics</c>, scoped by consolidated yardi fund.
+    /// </summary>
+    private static void AppendFundAssetHoldingsFrom(StringBuilder sql)
+    {
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        sql.Append($" inner join {WarehouseTables.DimFund} f ");
+        sql.Append(" on isnull(c.fund, '') = isnull(f.yardi_fund_code, '') ");
+        sql.Append(" and ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "f");
+        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p");
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
+        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        sql.Append(" and f.fund_key = @fundKey ");
     }
 
     private async Task<PagedResult<FundInvestorDto>> GetFundInvestorsInternalAsync(int fundKey, string? search, int page, int pageSize)
@@ -1048,7 +1058,7 @@ public sealed partial class FundPortalService : IFundPortalService
             or FundMetricSource.UnfundedCommitments)
         {
             sql.Append($" from {WarehouseTables.FactInvestorPortfolioQuarterly} q ");
-            sql.Append($" inner join {WarehouseTables.DimDate} d on d.quarter_year = q.quarter_year ");
+            sql.Append($" inner join {WarehouseTables.DimDate} d on {WarehouseSql.QuarterYearEquals("d.quarter_year", "q.quarter_year")} ");
             sql.Append(" where q.fund_key = @fundKey ");
             sql.Append(" group by d.quarter_year, d.calendar_year ");
         }
@@ -1257,7 +1267,7 @@ public sealed partial class FundPortalService : IFundPortalService
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" commitment_amount = sum(commitment_amount), ");
         pageSql.Append(" Description = 'Total Commitment as of Date' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
@@ -1416,7 +1426,7 @@ public sealed partial class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(unfunded_amount), ");
         pageSql.Append(" Description = 'Total Unfunded Commitment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
@@ -1557,7 +1567,7 @@ public sealed partial class FundPortalService : IFundPortalService
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" amount = sum(nav), ");
         pageSql.Append(" Description = 'Total NAV' ");
         pageSql.Append($" from {WarehouseTables.FactFundNav} ");
@@ -1712,7 +1722,7 @@ public sealed partial class FundPortalService : IFundPortalService
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
-        pageSql.Append(" Period = 'Life To Date', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         pageSql.Append(" invested_amount = sum(isnull(fi.invested_amount, 0)), ");
         pageSql.Append(" Description = 'Total Investment' ");
         pageSql.Append($" from {WarehouseTables.FactInvestment} fi ");
@@ -1859,7 +1869,7 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" select ");
         AppendFundCodeScalarSelect(pageSql);
         pageSql.Append(" transaction_type = isnull(tt.transaction_type_name, ''), ");
-        pageSql.Append(" Period = 'LTD', ");
+        pageSql.Append($" Period = '{PortalPeriodLabels.InceptionToDate}', ");
         AppendDistributionAggregatedDateSelect(pageSql, hasDimDateJoin: false);
         AppendDistributionTotalsSelect(pageSql, "fd");
         pageSql.Append($" from {WarehouseTables.FactDistribution} fd ");
@@ -2085,7 +2095,7 @@ public sealed partial class FundPortalService : IFundPortalService
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Commitment";
         }
@@ -2108,7 +2118,7 @@ public sealed partial class FundPortalService : IFundPortalService
         }
 
         var description = reader.GetNullableStringIfPresent("Description") ?? string.Empty;
-        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !string.Equals(period, "Life To Date", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrEmpty(description) && !string.IsNullOrEmpty(period) && !PortalPeriodLabels.IsInceptionToDate(period))
         {
             description = $"{period} Investment";
         }

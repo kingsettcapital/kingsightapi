@@ -31,11 +31,13 @@ public sealed class PortalFilterService : IPortalFilterService
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync();
 
+            var dimInvestor = WarehouseTables.DimInvestor;
+
             var investorTypes = await ReadDistinctOptionsAsync(
                 connection,
-                """
+                $"""
                 select distinct isnull(investor_type_name, '') as option_value
-                from dbo.dim_investor
+                from {dimInvestor}
                 where isnull(is_current, 1) = 1
                   and isnull(investor_type_name, '') <> ''
                 order by option_value
@@ -43,9 +45,9 @@ public sealed class PortalFilterService : IPortalFilterService
 
             var relationships = await ReadDistinctOptionsAsync(
                 connection,
-                """
+                $"""
                 select distinct isnull(relationship_name, '') as option_value
-                from dbo.dim_investor
+                from {dimInvestor}
                 where isnull(is_current, 1) = 1
                   and isnull(relationship_name, '') <> ''
                 order by option_value
@@ -125,12 +127,20 @@ public sealed class PortalFilterService : IPortalFilterService
                 connection,
                 BuildPropertyDistinctSql("property_status"));
 
+            var fundCodes = await ReadDistinctOptionsAsync(
+                connection,
+                BuildCurrentFundDistinctSql("fund_code"));
+
+            var quarterlyPeriods = await ReadAssetQuarterlyPeriodOptionsAsync(connection);
+
             return new AssetListFilterOptionsDto
             {
                 AssetTypes = assetTypes,
                 InvestmentTypes = investmentTypes,
                 Geographies = geographies,
-                Statuses = statuses
+                Statuses = statuses,
+                FundCodes = fundCodes,
+                QuarterlyPeriods = quarterlyPeriods
             };
         }
         catch (Exception ex)
@@ -156,12 +166,9 @@ public sealed class PortalFilterService : IPortalFilterService
     private static string BuildPropertyDistinctSql(string columnName)
     {
         var sql = new StringBuilder();
-        sql.Append($" select distinct isnull(p.{columnName}, '') as option_value ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
-        sql.Append($" and isnull(p.{columnName}, '') <> '' ");
+        sql.Append($" select distinct isnull(c.{columnName}, '') as option_value ");
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        sql.Append($" where isnull(c.{columnName}, '') <> '' ");
         sql.Append(" order by option_value ");
         return sql.ToString();
     }
@@ -192,16 +199,54 @@ public sealed class PortalFilterService : IPortalFilterService
         return options;
     }
 
+    private static async Task<IReadOnlyList<PortalQuarterPeriodOptionDto>> ReadAssetQuarterlyPeriodOptionsAsync(
+        SqlConnection connection)
+    {
+        var sql = $"""
+            select
+                d.quarter_year,
+                d.calendar_year,
+                date_key = max(m.date_key)
+            from {WarehouseTables.FactAssetMetrics} m
+            inner join {WarehouseTables.DimDate} d on d.date_key = m.date_key
+            group by d.quarter_year, d.calendar_year
+            order by d.calendar_year desc, d.quarter_year desc
+            """;
+
+        await using var command = new SqlCommand(sql, connection);
+        await using var reader = await command.ExecuteReaderAsync();
+
+        var options = new List<PortalQuarterPeriodOptionDto>();
+        while (await reader.ReadAsync())
+        {
+            var quarterYear = reader.GetStringOrEmpty("quarter_year");
+            var calendarYear = reader.GetInt32OrDefault("calendar_year");
+            var dateKey = reader.GetInt32OrDefault("date_key");
+            var quarter = ParseQuarterNumber(quarterYear, calendarYear);
+
+            options.Add(new PortalQuarterPeriodOptionDto
+            {
+                DateKey = dateKey,
+                CalendarYear = calendarYear,
+                Quarter = quarter,
+                QuarterYear = quarterYear,
+                Label = BuildQuarterLabel(quarterYear, calendarYear, quarter)
+            });
+        }
+
+        return options;
+    }
+
     private static async Task<IReadOnlyList<PortalQuarterPeriodOptionDto>> ReadQuarterlyPeriodOptionsAsync(
         SqlConnection connection)
     {
-        const string sql = """
+        var sql = $"""
             select
                 d.quarter_year,
                 d.calendar_year,
                 date_key = max(d.date_key)
-            from dbo.fact_investor_portfolio_quarterly q
-            inner join dbo.dim_date d on d.quarter_year = q.quarter_year
+            from {WarehouseTables.FactInvestorPortfolioQuarterly} q
+            inner join {WarehouseTables.DimDate} d on {WarehouseSql.QuarterYearEquals("d.quarter_year", "q.quarter_year")}
             group by d.quarter_year, d.calendar_year
             order by d.calendar_year desc, d.quarter_year desc
             """;

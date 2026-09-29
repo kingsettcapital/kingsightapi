@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,13 +11,16 @@ namespace kingsightapi.Controllers
     public class LoanSecurityValueController : ControllerBase
     {
         private readonly ILoanSecurityValueService _service;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<LoanSecurityValueController> _logger;
 
         public LoanSecurityValueController(
             ILoanSecurityValueService service,
+            ICurrentUserResolver currentUserResolver,
             ILogger<LoanSecurityValueController> logger)
         {
             _service = service;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -42,7 +46,8 @@ namespace kingsightapi.Controllers
         }
 
         // GET: api/LoanSecurityValue?loanAliasIds=1&statuses=3&statuses=In%20Default
-        // statuses: dim_status.status_key (numeric) or status_name; (null) = loan has no status FK
+        // statuses: wh_gold1.shared.dim_status.status_key (numeric) or status_name;
+        // applied via shared.dim_loan.funding_status_code; (null) = no funding status on dim_loan
         [HttpGet]
         public async Task<ActionResult<List<LoanSecurityValueDto>>> GetAll(
             [FromQuery] long[]? loanAliasIds,
@@ -67,7 +72,9 @@ namespace kingsightapi.Controllers
 
         // PUT: api/LoanSecurityValue
         [HttpPut]
-        public async Task<IActionResult> Update([FromBody] LoanSecurityValueBatchUpdateRequest request)
+        public async Task<IActionResult> Update(
+            [FromBody] LoanSecurityValueBatchUpdateRequest request,
+            CancellationToken cancellationToken)
         {
             if (request is null || request.LoanSecurityValues.Count == 0)
             {
@@ -80,16 +87,21 @@ namespace kingsightapi.Controllers
                 {
                     return BadRequest("Loan alias id is required.");
                 }
+            }
 
-                if (string.IsNullOrWhiteSpace(item.UpdatedBy))
-                {
-                    return BadRequest("Updated by is required.");
-                }
+            var clientAudit = request.LoanSecurityValues.FirstOrDefault()?.UpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "updatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
             }
 
             try
             {
-                var updated = await _service.UpdateAsync(request);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!);
                 return updated ? NoContent() : NotFound();
             }
             catch (OperationCanceledException)

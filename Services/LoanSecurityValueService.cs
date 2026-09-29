@@ -1,462 +1,823 @@
 using System.Text;
+
 using kingsightapi.Entities;
+
 using Microsoft.Data.SqlClient;
+
 using Microsoft.Extensions.Configuration;
+
 using Microsoft.Extensions.Logging;
 
+
+
 namespace kingsightapi.Services
+
 {
+
     public interface ILoanSecurityValueService
+
     {
+
         Task<IReadOnlyList<LoanSecurityValueDto>> GetAllAsync(
+
             IReadOnlyList<long>? loanAliasIds = null,
+
             IReadOnlyList<string>? statuses = null);
+
+
 
         Task<IReadOnlyList<LoanSecurityValueStatusOptionDto>> GetStatusOptionsAsync();
 
-        Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request);
+
+
+        Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request, string auditDisplayName);
+
     }
+
+
 
     public sealed class LoanSecurityValueService : ILoanSecurityValueService
+
     {
-        private const string CollateralSubqueryBase = """
-            select l.loan_alias_key,
-                   sum(isnull(l.collateral, 0)) as collateral_per_yardi
-            from mort.dim_loan l
-            where l.is_current = 1
-              and l.loan_alias_key is not null
-            """;
-
-        private const string ListSqlBase = """
-            select m.loan_alias_id,
-                   m.loan_alias_name,
-                   isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
-                   m.security_value,
-                   m.units,
-                   m.square_feet,
-                   m.acres,
-                   isnull(m.updated_by, '') as updated_by,
-                   m.updated_dtm
-            from mort.loan_alias_master m
-            left join (
-            """;
-
-        private const string ListSqlFallback = """
-            select m.loan_alias_id,
-                   m.loan_alias_name,
-                   isnull(c.collateral_per_yardi, 0) as collateral_per_yardi,
-                   m.security_value,
-                   isnull(m.updated_by, '') as updated_by,
-                   m.updated_dtm
-            from mort.loan_alias_master m
-            left join (
-            """;
-
-        private const string ListSqlJoinEnd = """
-            ) c on m.loan_alias_id = c.loan_alias_key
-            """;
-
-        private const string UpdateSql = """
-            update mort.loan_alias_master
-            set security_value = @security_value,
-                units = @units,
-                square_feet = @square_feet,
-                acres = @acres,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string UpdateSqlFallback = """
-            update mort.loan_alias_master
-            set security_value = @security_value,
-                updated_by = @updated_by,
-                updated_dtm = getutcdate()
-            where loan_alias_id = @loan_alias_id
-            """;
-
-        private const string StatusOptionsSql = """
-            select s.status_key,
-                   s.status_name
-            from mort.dim_status s
-            order by s.status_name
-            """;
-
-        private static readonly string[] LoanStatusKeyColumnCandidates =
-        [
-            "loan_status_key",
-            "status_key",
-            "loan_status_id",
-            "status_id",
-            "funding_status_key"
-        ];
 
         private readonly string _connectionString;
+
+        private readonly SubjectiveInputSql _sql;
+
+        private readonly string _tblDimLoan;
+
+        private readonly string _tblLoanAliasMaster;
+
+        private readonly string _tblLoanAliasRelationship;
+
+        private readonly string _tblDimStatus;
+
+        private readonly string _tblYardiCollateralValue;
+
+        private readonly string _tblYardiCollateralXref;
+
+        private readonly string _tblYardiCollateral;
+
+        private readonly string _tblYardiLookupValues;
+
         private readonly ILogger<LoanSecurityValueService> _logger;
-        private bool? _extendedColumnsAvailable;
+
+
+
+        private bool _schemaProbed;
+
+        private SubjectiveInputMasterAuditColumns _auditColumns = new();
+
         private string? _loanStatusKeyColumn;
 
-        public LoanSecurityValueService(IConfiguration configuration, ILogger<LoanSecurityValueService> logger)
+
+
+        public LoanSecurityValueService(
+
+            IConfiguration configuration,
+
+            ILogger<LoanSecurityValueService> logger,
+
+            FabricWarehouseTables tables)
+
         {
+
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
+
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+
             _logger = logger;
+
+
+
+            _sql = new SubjectiveInputSql(tables);
+
+            _tblDimLoan = _sql.SharedDimLoan;
+
+            _tblLoanAliasMaster = _sql.LoanAliasMaster;
+
+            _tblLoanAliasRelationship = _sql.LoanAliasRelationship;
+
+            _tblDimStatus = _sql.DimStatus;
+
+            _tblYardiCollateralValue = tables.Yardi("Collateral_Value");
+
+            _tblYardiCollateralXref = tables.Yardi("collateral_xref");
+
+            _tblYardiCollateral = tables.Yardi("collateral");
+
+            _tblYardiLookupValues = tables.Yardi("Lookup_Values");
         }
+
+
 
         public async Task<IReadOnlyList<LoanSecurityValueDto>> GetAllAsync(
+
             IReadOnlyList<long>? loanAliasIds = null,
+
             IReadOnlyList<string>? statuses = null)
+
         {
-            var useExtendedColumns = await GetExtendedColumnsAvailableAsync();
+
+            await EnsureSchemaAsync();
+
+
+
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
-            var loanStatusKeyColumn = statusFilter.HasFilter
-                ? await GetLoanStatusKeyColumnAsync()
-                : null;
-            var sql = BuildListSql(loanAliasIds, statusFilter, useExtendedColumns, loanStatusKeyColumn);
+
+            string? loanStatusKeyColumn = null;
+
+            if (statusFilter.HasFilter)
+
+            {
+
+                loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync();
+
+            }
+
+
+
+            var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
+
+
 
             await using var connection = new SqlConnection(_connectionString);
+
             await connection.OpenAsync();
+
+
 
             await using var command = new SqlCommand(sql, connection)
+
             {
+
                 CommandType = System.Data.CommandType.Text
+
             };
+
             AddFilterParameters(command, loanAliasIds, statusFilter);
 
+
+
             try
+
             {
-                return await ReadRowsAsync(command, useExtendedColumns);
+
+                return await ReadRowsAsync(command);
+
             }
-            catch (SqlException ex) when (IsMissingOptionalColumnError(ex) && useExtendedColumns)
+
+            catch (SqlException ex) when (statusFilter.HasFilter)
+
             {
-                _extendedColumnsAvailable = false;
-                _logger.LogWarning(
-                    "loan_alias_master is missing units/square_feet/acres; retrying without those columns.");
-                return await GetAllAsync(loanAliasIds, statuses);
+
+                _logger.LogError(
+
+                    ex,
+
+                    "Loan security value query failed with status filter (column={Column}).",
+
+                    loanStatusKeyColumn);
+
+                throw;
+
             }
+
         }
+
+
 
         public async Task<IReadOnlyList<LoanSecurityValueStatusOptionDto>> GetStatusOptionsAsync()
+
         {
+
             var options = new List<LoanSecurityValueStatusOptionDto>
+
             {
+
                 new()
+
                 {
+
                     Value = LoanSecurityValueStatusTokens.NullValue,
+
                     DisplayLabel = "(Not set)"
+
                 }
+
             };
 
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
 
-            await using var command = new SqlCommand(StatusOptionsSql, connection);
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                var statusKey = reader.IsDBNull(0) ? 0L : Convert.ToInt64(reader.GetValue(0));
-                var statusName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-                if (statusKey <= 0 || string.IsNullOrWhiteSpace(statusName))
-                {
-                    continue;
-                }
-
-                options.Add(new LoanSecurityValueStatusOptionDto
-                {
-                    Value = statusKey.ToString(),
-                    DisplayLabel = statusName
-                });
-            }
-
-            _logger.LogInformation("Retrieved {Count} loan security value status options from dim_status.", options.Count);
-            return options;
-        }
-
-        public async Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request)
-        {
-            var useExtendedColumns = await GetExtendedColumnsAvailableAsync();
-            var updateSql = useExtendedColumns ? UpdateSql : UpdateSqlFallback;
-
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-
-            var affectedRows = 0;
-            foreach (var item in request.LoanSecurityValues)
-            {
-                await using var command = new SqlCommand(updateSql, connection)
-                {
-                    CommandType = System.Data.CommandType.Text
-                };
-                command.Parameters.AddWithValue("@loan_alias_id", item.LoanAliasId);
-                command.Parameters.AddWithValue(
-                    "@security_value",
-                    item.SecurityValue.HasValue ? item.SecurityValue.Value : DBNull.Value);
-                command.Parameters.AddWithValue("@updated_by", item.UpdatedBy);
-
-                if (useExtendedColumns)
-                {
-                    command.Parameters.AddWithValue(
-                        "@units",
-                        item.Units.HasValue ? item.Units.Value : DBNull.Value);
-                    command.Parameters.AddWithValue(
-                        "@square_feet",
-                        item.SquareFeet.HasValue ? item.SquareFeet.Value : DBNull.Value);
-                    command.Parameters.AddWithValue(
-                        "@acres",
-                        item.Acres.HasValue ? item.Acres.Value : DBNull.Value);
-                }
-
-                try
-                {
-                    affectedRows += await command.ExecuteNonQueryAsync();
-                }
-                catch (SqlException ex) when (IsMissingOptionalColumnError(ex) && useExtendedColumns)
-                {
-                    _extendedColumnsAvailable = false;
-                    _logger.LogWarning(
-                        "loan_alias_master is missing units/square_feet/acres; retrying update without those columns.");
-                    return await UpdateAsync(request);
-                }
-            }
-
-            if (affectedRows > 0)
-            {
-                _logger.LogInformation("Updated {AffectedRows} loan security value rows.", affectedRows);
-                return true;
-            }
-
-            _logger.LogWarning("No loan security value rows updated.");
-            return false;
-        }
-
-        private async Task<string> GetLoanStatusKeyColumnAsync()
-        {
-            if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
-            {
-                return _loanStatusKeyColumn;
-            }
-
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
-
-            foreach (var column in LoanStatusKeyColumnCandidates)
-            {
-                var probeSql = $"select top 0 [{column}] from mort.dim_loan";
-
-                try
-                {
-                    await using var command = new SqlCommand(probeSql, connection);
-                    await using var reader = await command.ExecuteReaderAsync();
-                    _loanStatusKeyColumn = column;
-                    _logger.LogInformation(
-                        "Using mort.dim_loan.{Column} for loan status filter.",
-                        column);
-                    return column;
-                }
-                catch (SqlException ex) when (ex.Number == 207)
-                {
-                    // Try next candidate column name.
-                }
-            }
-
-            throw new InvalidOperationException(
-                "mort.dim_loan does not have a recognized status foreign key column. "
-                + $"Expected one of: {string.Join(", ", LoanStatusKeyColumnCandidates)}.");
-        }
-
-        private async Task<bool> GetExtendedColumnsAvailableAsync()
-        {
-            if (_extendedColumnsAvailable.HasValue)
-            {
-                return _extendedColumnsAvailable.Value;
-            }
-
-            const string probeSql = """
-                select top 0 units, square_feet, acres
-                from mort.loan_alias_master
-                """;
-
-            await using var connection = new SqlConnection(_connectionString);
-            await connection.OpenAsync();
 
             try
+
             {
-                await using var command = new SqlCommand(probeSql, connection);
+
+                await using var connection = new SqlConnection(_connectionString);
+
+                await connection.OpenAsync();
+
+
+
+                var statusOptionsSql = $"""
+                    select s.status_key,
+                           s.status_name
+                    from {_tblDimStatus} s
+                    where isnull(s.is_active, 1) = 1
+                      and isnull(s.status_type, 'FUNDING') = 'FUNDING'
+                    order by isnull(s.sort_order, 999999), s.status_name
+                    """;
+
+
+
+                await using var command = new SqlCommand(statusOptionsSql, connection);
+
                 await using var reader = await command.ExecuteReaderAsync();
-                _extendedColumnsAvailable = true;
-            }
-            catch (SqlException ex) when (IsMissingOptionalColumnError(ex))
-            {
-                _extendedColumnsAvailable = false;
+
+                while (await reader.ReadAsync())
+
+                {
+
+                    var statusKey = reader.IsDBNull(0) ? 0L : Convert.ToInt64(reader.GetValue(0));
+
+                    var statusName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+
+                    if (statusKey < 0 || string.IsNullOrWhiteSpace(statusName))
+
+                    {
+
+                        continue;
+
+                    }
+
+
+
+                    options.Add(new LoanSecurityValueStatusOptionDto
+
+                    {
+
+                        Value = statusKey.ToString(),
+
+                        DisplayLabel = statusName
+
+                    });
+
+                }
+
             }
 
-            return _extendedColumnsAvailable.Value;
+            catch (Exception ex)
+
+            {
+
+                _logger.LogWarning(ex, "Status filter options skipped; dim_status unavailable.");
+
+            }
+
+
+
+            return options;
+
         }
 
-        private async Task<IReadOnlyList<LoanSecurityValueDto>> ReadRowsAsync(
-            SqlCommand command,
-            bool useExtendedColumns)
+
+
+        public async Task<bool> UpdateAsync(LoanSecurityValueBatchUpdateRequest request, string auditDisplayName)
+
         {
-            var rows = new List<LoanSecurityValueDto>();
 
-            await using var reader = await command.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
+            await EnsureSchemaAsync();
+
+
+
+            var updateSql = BuildUpdateSql();
+
+
+
+            await using var connection = new SqlConnection(_connectionString);
+
+            await connection.OpenAsync();
+
+
+
+            var affectedRows = 0;
+
+            foreach (var item in request.LoanSecurityValues)
+
             {
-                rows.Add(MapRow(reader, useExtendedColumns));
+
+                await using var command = new SqlCommand(updateSql, connection)
+
+                {
+
+                    CommandType = System.Data.CommandType.Text
+
+                };
+
+
+
+                command.Parameters.AddWithValue("@loan_alias_id", item.LoanAliasId);
+
+                command.Parameters.AddWithValue(
+
+                    "@security_value",
+
+                    item.SecurityValue.HasValue ? item.SecurityValue.Value : DBNull.Value);
+
+                command.Parameters.AddWithValue(
+
+                    "@units",
+
+                    item.Units.HasValue ? item.Units.Value : DBNull.Value);
+
+                command.Parameters.AddWithValue(
+
+                    "@square_feet",
+
+                    item.SquareFeet.HasValue ? item.SquareFeet.Value : DBNull.Value);
+
+                command.Parameters.AddWithValue(
+
+                    "@acres",
+
+                    item.Acres.HasValue ? item.Acres.Value : DBNull.Value);
+
+                _auditColumns.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+
+
+                affectedRows += await command.ExecuteNonQueryAsync();
+
             }
 
-            _logger.LogInformation("Retrieved {Count} loan security value rows.", rows.Count);
-            return rows;
+
+
+            if (affectedRows > 0)
+
+            {
+
+                _logger.LogInformation("Updated {AffectedRows} loan security value rows.", affectedRows);
+
+                return true;
+
+            }
+
+
+
+            _logger.LogWarning("No loan security value rows updated.");
+
+            return false;
+
         }
 
-        private static string BuildListSql(
+
+
+        private async Task EnsureSchemaAsync()
+        {
+            if (_schemaProbed)
+            {
+                return;
+            }
+
+            _auditColumns = await SubjectiveInputMasterAuditColumns.ProbeAsync(
+                _connectionString,
+                _tblLoanAliasMaster);
+            await _sql.EnsureDimLoanCurrentIndicatorAsync(_connectionString);
+            _schemaProbed = true;
+        }
+
+        private string BuildUpdateSql() =>
+            $"""
+                update {_tblLoanAliasMaster}
+                set security_value = @security_value,
+                    units = @units,
+                    square_feet = @square_feet,
+                    net_acres = @acres{_auditColumns.BuildUpdateSetClause()}
+                where loan_alias_id = @loan_alias_id
+                """;
+
+        private async Task<string?> TryResolveLoanStatusKeyColumnAsync()
+
+        {
+
+            if (!string.IsNullOrEmpty(_loanStatusKeyColumn))
+
+            {
+
+                return _loanStatusKeyColumn;
+
+            }
+
+
+
+            try
+
+            {
+
+                _loanStatusKeyColumn = await LoanDimStatusColumnResolver.ResolveAsync(
+
+                    _connectionString,
+
+                    _tblDimLoan);
+
+                _logger.LogInformation(
+
+                    "Using shared.dim_loan.{Column} for loan security value status filter.",
+
+                    _loanStatusKeyColumn);
+
+                return _loanStatusKeyColumn;
+
+            }
+
+            catch (Exception ex)
+
+            {
+
+                _logger.LogWarning(ex, "Status filter skipped; shared.dim_loan status column unavailable.");
+
+                return null;
+
+            }
+
+        }
+
+
+
+        private string BuildListSql(
+
             IReadOnlyList<long>? loanAliasIds,
+
             LoanStatusFilter statusFilter,
-            bool useExtendedColumns,
+
             string? loanStatusKeyColumn)
+
         {
-            var collateralSql = new StringBuilder(CollateralSubqueryBase);
-            if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
-            {
-                LoanStatusFilterParser.AppendSqlCondition(
-                    collateralSql,
-                    "l",
-                    loanStatusKeyColumn,
-                    statusFilter);
-            }
 
-            collateralSql.AppendLine();
-            collateralSql.Append(" group by l.loan_alias_key");
+            var auditSelect = BuildAuditSelectColumns();
 
-            var sql = new StringBuilder(useExtendedColumns ? ListSqlBase : ListSqlFallback);
-            sql.Append(collateralSql);
-            sql.Append(ListSqlJoinEnd);
+
+
+            var sql = new StringBuilder(
+
+                $"""
+
+                 with latest_collateral_value as (
+
+                     select collateral_id, valuation_date, collateral_amount
+
+                     from (
+
+                         select collateral_id, valuation_date, collateral_amount,
+
+                                row_number() over (partition by collateral_id order by valuation_date desc) as rn
+
+                         from {_tblYardiCollateralValue}
+
+                     ) t
+
+                     where rn = 1
+
+                 ),
+
+                 dataset as (
+
+                     select e.loan_alias_name,
+
+                            e.loan_code,
+
+                            col.collateral_name,
+
+                            cv.collateral_amount,
+
+                            row_number() over (
+
+                                partition by e.loan_alias_name, col.collateral_name
+
+                                order by e.loan_alias_name, col.collateral_name
+
+                            ) as rn
+
+                     from {_tblLoanAliasRelationship} e
+
+                     inner join {_tblDimLoan} f
+
+                         on {SubjectiveInputSql.EqualsVarchar("e", "loan_code", "f", "loan_code")}
+
+                     inner join {_tblLoanAliasMaster} g
+
+                         on e.loan_alias_name = g.loan_alias_name
+
+                     left join (
+
+                         select distinct collateral_id, loan_id
+
+                         from {_tblYardiCollateralXref}
+
+                     ) xref on xref.loan_id = f.loan_id
+
+                     left join {_tblYardiCollateral} col
+
+                         on xref.collateral_id = col.collateral_id
+
+                     inner join {_tblYardiLookupValues} lv
+
+                         on col.collateral_type = lv.lookup_sk
+
+                        and lv.lookup_value = 'Real Estate'
+
+                     left join latest_collateral_value cv
+
+                         on col.collateral_id = cv.collateral_id
+
+                 ),
+
+                 dataset2 as (
+
+                     select loan_alias_name,
+
+                            sum(collateral_amount) as collateral
+
+                     from dataset
+
+                     where rn = 1
+
+                     group by loan_alias_name
+
+                 )
+
+                 select a.loan_alias_id,
+
+                        a.loan_alias_name,
+
+                        collateral = isnull(b.collateral, 0),
+
+                        security_value = coalesce(nullif(a.security_value, 0), b.collateral),
+
+                        a.units,
+
+                        a.net_acres,
+
+                        a.square_feet{auditSelect}
+
+                 from {_tblLoanAliasMaster} a
+
+                 left join dataset2 b
+
+                     on a.loan_alias_name = b.loan_alias_name
+
+                 """);
+
+
 
             var whereClauses = new List<string>();
+
             if (loanAliasIds is { Count: > 0 })
+
             {
+
                 whereClauses.Add(
-                    "m.loan_alias_id in ("
+
+                    "a.loan_alias_id in ("
+
                     + string.Join(", ", loanAliasIds.Select((_, i) => $"@loan_alias_id_{i}"))
+
                     + ')');
+
             }
+
+
 
             if (statusFilter.HasFilter && !string.IsNullOrEmpty(loanStatusKeyColumn))
+
             {
+
                 var existsSql = new StringBuilder();
+
                 existsSql.Append("exists (");
-                existsSql.Append("select 1 from mort.dim_loan lf");
-                existsSql.Append(" where lf.is_current = 1");
-                existsSql.Append(" and lf.loan_alias_key = m.loan_alias_id");
+
+                existsSql.Append($"select 1 from {_tblLoanAliasRelationship} rf");
+
+                existsSql.Append(
+
+                    $" inner join {_tblDimLoan} lf on {SubjectiveInputSql.EqualsVarchar("lf", "loan_code", "rf", "loan_code")} and {_sql.DimLoanIsCurrent("lf")}");
+
+                existsSql.Append(" where rf.loan_alias_name = a.loan_alias_name");
+
                 LoanStatusFilterParser.AppendSqlCondition(
+
                     existsSql,
+
                     "lf",
+
                     loanStatusKeyColumn,
-                    statusFilter);
+
+                    statusFilter,
+
+                    _tblDimStatus);
+
                 existsSql.Append(')');
+
                 whereClauses.Add(existsSql.ToString());
+
             }
+
+
 
             if (whereClauses.Count > 0)
+
             {
+
                 sql.Append(" where ");
+
                 sql.Append(string.Join(" and ", whereClauses));
+
             }
+
+
 
             sql.AppendLine();
-            sql.Append(" order by m.loan_alias_name");
+
+            sql.Append(" order by a.loan_alias_name");
+
             return sql.ToString();
+
         }
+
+
+
+        private string BuildAuditSelectColumns()
+
+        {
+
+            var columns = _auditColumns.SelectListColumns()
+
+                .Select(column => column.Trim('[', ']'))
+
+                .ToList();
+
+            return columns.Count == 0
+
+                ? string.Empty
+
+                : ",\n                        " + string.Join(",\n                        ", columns);
+
+        }
+
+
+
+        private async Task<IReadOnlyList<LoanSecurityValueDto>> ReadRowsAsync(SqlCommand command)
+
+        {
+
+            var rows = new List<LoanSecurityValueDto>();
+
+
+
+            await using var reader = await command.ExecuteReaderAsync();
+
+            while (await reader.ReadAsync())
+
+            {
+
+                rows.Add(MapRow(reader));
+
+            }
+
+
+
+            _logger.LogInformation("Retrieved {Count} loan security value rows.", rows.Count);
+
+            return rows;
+
+        }
+
+
 
         private static void AddFilterParameters(
+
             SqlCommand command,
+
             IReadOnlyList<long>? loanAliasIds,
+
             LoanStatusFilter statusFilter)
+
         {
+
             if (loanAliasIds is { Count: > 0 })
+
             {
+
                 for (var i = 0; i < loanAliasIds.Count; i++)
+
                 {
+
                     command.Parameters.AddWithValue($"@loan_alias_id_{i}", loanAliasIds[i]);
+
                 }
+
             }
+
+
 
             LoanStatusFilterParser.AddParameters(command, statusFilter);
+
         }
 
-        private static LoanSecurityValueDto MapRow(SqlDataReader reader, bool useExtendedColumns)
-        {
-            return new LoanSecurityValueDto
-            {
-                LoanAliasId = GetInt64(reader, "loan_alias_id"),
-                LoanAliasName = GetString(reader, "loan_alias_name"),
-                CollateralPerYardi = GetDecimal(reader, "collateral_per_yardi") ?? 0m,
-                SecurityValue = GetDecimal(reader, "security_value"),
-                Units = useExtendedColumns ? GetInt32(reader, "units") : null,
-                SquareFeet = useExtendedColumns ? GetDecimal(reader, "square_feet") : null,
-                Acres = useExtendedColumns ? GetDecimal(reader, "acres") : null,
-                UpdatedBy = GetString(reader, "updated_by"),
-                UpdatedDtm = GetDateTime(reader, "updated_dtm")
-            };
-        }
 
-        private static bool IsMissingOptionalColumnError(SqlException ex) =>
-            ex.Number == 207 && (
-                ex.Message.Contains("units", StringComparison.OrdinalIgnoreCase)
-                || ex.Message.Contains("square_feet", StringComparison.OrdinalIgnoreCase)
-                || ex.Message.Contains("acres", StringComparison.OrdinalIgnoreCase));
 
-        private static int? FindOrdinal(SqlDataReader reader, string columnName)
+        private LoanSecurityValueDto MapRow(SqlDataReader reader)
+
         {
-            for (var i = 0; i < reader.FieldCount; i++)
+
+            DateTime? ReadAuditDate(string? column)
+
             {
-                if (reader.GetName(i).Equals(columnName, StringComparison.OrdinalIgnoreCase))
+
+                if (string.IsNullOrWhiteSpace(column))
+
                 {
-                    return i;
+
+                    return null;
+
                 }
+
+
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+
+                {
+
+                    return null;
+
+                }
+
+
+
+                return DateTime.SpecifyKind(reader.GetDateTime(ordinal), DateTimeKind.Utc);
+
             }
 
-            return null;
+
+
+            string ReadAuditUser(string? column)
+
+            {
+
+                if (string.IsNullOrWhiteSpace(column))
+
+                {
+
+                    return string.Empty;
+
+                }
+
+
+
+                if (!reader.TryGetOrdinal(column, out var ordinal) || reader.IsDBNull(ordinal))
+
+                {
+
+                    return string.Empty;
+
+                }
+
+
+
+                return reader.GetString(ordinal);
+
+            }
+
+
+
+            return new LoanSecurityValueDto
+
+            {
+
+                LoanAliasId = reader.GetInt64OrDefault("loan_alias_id"),
+
+                LoanAliasName = reader.GetStringOrEmpty("loan_alias_name"),
+
+                CollateralPerYardi = reader.GetDecimalOrDefault("collateral"),
+
+                SecurityValue = reader.GetNullableDecimal("security_value"),
+
+                Units = reader.GetNullableInt32("units"),
+
+                SquareFeet = reader.GetNullableDecimal("square_feet"),
+
+                Acres = reader.GetNullableDecimal("net_acres"),
+
+                UpdatedBy = ReadAuditUser(_auditColumns.ReadUpdatedByColumn),
+
+                UpdatedDtm = ReadAuditDate(_auditColumns.ReadUpdatedDtmColumn)
+
+            };
+
         }
 
-        private static long GetInt64(SqlDataReader reader, string columnName)
-        {
-            var ordinal = FindOrdinal(reader, columnName);
-            return ordinal is null || reader.IsDBNull(ordinal.Value)
-                ? 0L
-                : Convert.ToInt64(reader.GetValue(ordinal.Value));
-        }
-
-        private static string GetString(SqlDataReader reader, string columnName)
-        {
-            var ordinal = FindOrdinal(reader, columnName);
-            return ordinal is null || reader.IsDBNull(ordinal.Value)
-                ? string.Empty
-                : reader.GetString(ordinal.Value);
-        }
-
-        private static decimal? GetDecimal(SqlDataReader reader, string columnName)
-        {
-            var ordinal = FindOrdinal(reader, columnName);
-            return ordinal is null || reader.IsDBNull(ordinal.Value)
-                ? null
-                : Convert.ToDecimal(reader.GetValue(ordinal.Value));
-        }
-
-        private static int? GetInt32(SqlDataReader reader, string columnName)
-        {
-            var ordinal = FindOrdinal(reader, columnName);
-            return ordinal is null || reader.IsDBNull(ordinal.Value)
-                ? null
-                : Convert.ToInt32(reader.GetValue(ordinal.Value));
-        }
-
-        private static DateTime? GetDateTime(SqlDataReader reader, string columnName)
-        {
-            var ordinal = FindOrdinal(reader, columnName);
-            return ordinal is null || reader.IsDBNull(ordinal.Value)
-                ? null
-                : reader.GetDateTime(ordinal.Value);
-        }
     }
+
 }
+
+

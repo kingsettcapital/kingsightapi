@@ -14,7 +14,7 @@ namespace kingsightapi.Entities
 
         public static readonly IReadOnlyList<string> ExitPlanOptions =
         [
-            "Timing",
+            "Sitting",
             "Constructing",
             "Pre-Development",
             "Selling",
@@ -68,6 +68,7 @@ namespace kingsightapi.Entities
     public sealed class DefaultSubjectiveAnalyticsUpdateItem
     {
         public long LoanKey { get; set; }
+        public string LoanCode { get; set; } = string.Empty;
         public string? DefaultStatus { get; set; }
         public string? ExitPlan { get; set; }
         public string? ExitDate { get; set; }

@@ -1,3 +1,4 @@
+using kingsightapi.Configuration;
 using kingsightapi.Entities;
 using kingsightapi.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -10,33 +11,34 @@ namespace kingsightapi.Controllers
     {
         private readonly IOtherCostCaptureService _service;
         private readonly ILoanSecurityValueService _loanSecurityValueService;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<OtherCostCaptureController> _logger;
 
         public OtherCostCaptureController(
             IOtherCostCaptureService service,
             ILoanSecurityValueService loanSecurityValueService,
+            ICurrentUserResolver currentUserResolver,
             ILogger<OtherCostCaptureController> logger)
         {
             _service = service;
             _loanSecurityValueService = loanSecurityValueService;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
         // GET: api/OtherCostCapture?loanAliasId=1&statuses=2
         [HttpGet]
         public async Task<ActionResult<List<OtherCostCaptureDto>>> Get(
-            [FromQuery] int loanAliasId,
+            [FromQuery] int? loanAliasId,
             [FromQuery] string[]? statuses,
             CancellationToken cancellationToken)
         {
-            if (loanAliasId <= 0)
-            {
-                return BadRequest("loanAliasId is required.");
-            }
-
             try
             {
-                var result = await _service.GetAsync(loanAliasId, statuses, cancellationToken);
+                var result = await _service.GetAsync(
+                    loanAliasId is > 0 ? loanAliasId : null,
+                    statuses,
+                    cancellationToken);
                 return Ok(result);
             }
             catch (OperationCanceledException)
@@ -86,20 +88,25 @@ namespace kingsightapi.Controllers
 
             foreach (var loan in request.Loans)
             {
-                if (loan.LoanKey <= 0)
+                if (loan.LoanKey <= 0 && string.IsNullOrWhiteSpace(loan.LoanCode))
                 {
-                    return BadRequest("Loan key is required.");
+                    return BadRequest("Loan key or loan code is required.");
                 }
+            }
 
-                if (string.IsNullOrWhiteSpace(loan.UserUpdatedBy))
-                {
-                    return BadRequest("User updated by is required.");
-                }
+            var clientAudit = request.Loans.FirstOrDefault()?.UserUpdatedBy;
+            var (auditDisplayName, auditError) = await _currentUserResolver.RequireAuditDisplayNameAsync(
+                clientAudit,
+                "userUpdatedBy",
+                cancellationToken);
+            if (auditError is not null)
+            {
+                return auditError;
             }
 
             try
             {
-                var updated = await _service.UpdateAsync(request, cancellationToken);
+                var updated = await _service.UpdateAsync(request, auditDisplayName!, cancellationToken);
                 return updated ? NoContent() : NotFound();
             }
             catch (OperationCanceledException)

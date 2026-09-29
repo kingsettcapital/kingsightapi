@@ -22,7 +22,7 @@ public static class DashboardWidgetIds
     private static readonly IReadOnlyDictionary<string, string> Labels =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            [PortfolioValue] = "Portfolio Value",
+            [PortfolioValue] = "Total Equity Under Management",
             [ActiveFunds] = "Active Funds",
             [TotalAum] = "Total AUM",
             [YtdReturns] = "YTD Returns",
@@ -120,7 +120,8 @@ public sealed class DashboardWidgetOptionDto
 /// <summary>Single response for the Kingsight dashboard (all widgets).</summary>
 public sealed class DashboardResponseDto
 {
-    public DateTime LastUpdated { get; init; }
+    /// <summary>Snapshot date from <c>vw_active_fund_summary.as_of_date</c>.</summary>
+    public DateTime? LastUpdated { get; init; }
     public int CalendarYear { get; init; }
 
     /// <summary>Only requested widgets are populated; omitted keys are null.</summary>

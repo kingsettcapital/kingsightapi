@@ -3,28 +3,47 @@ namespace kingsightapi.Entities
     public sealed class LtvValidationRowDto
     {
         public long LoanKey { get; init; }
-        public string ParentLoanId { get; init; } = string.Empty;
-        public string ChildLoanId { get; init; } = string.Empty;
-
-        /// <summary>SPA fallback when childLoanId is empty.</summary>
-        public string LoanId => ChildLoanId;
-
-        public string Description { get; init; } = string.Empty;
+        public string? ParentLoanCode { get; init; }
+        public string LoanCode { get; init; } = string.Empty;
+        public string LoanName { get; init; } = string.Empty;
         public string LoanAliasName { get; init; } = string.Empty;
         public string InvestorAliasName { get; init; } = string.Empty;
         public decimal? SecurityValue { get; init; }
         public decimal? Exposure { get; init; }
         public int? Ranking { get; init; }
         public decimal? Ltv { get; init; }
-        public string? AiCommentary { get; init; }
+        public decimal? PriorLtv { get; init; }
+        public string? UpdateReason { get; init; }
+        public string? UpdateComment { get; init; }
+        public string? AiComments { get; init; }
+        public decimal? AiConfidenceScore { get; init; }
+        public string? QrSlideLink { get; init; }
         public string? UserUpdatedBy { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
+
+        /// <summary>True when <c>is_confirmed = 'Y'</c> on loan_alias_relationship (LTV locked).</summary>
+        public bool IsConfirmed { get; init; }
+
+        /// <summary>Legacy SPA field — same as <see cref="LoanCode"/>.</summary>
+        public string ChildLoanId => LoanCode;
+
+        /// <summary>Legacy SPA field — same as <see cref="LoanName"/>.</summary>
+        public string Description => LoanName;
+
+        /// <summary>Legacy SPA field — same as <see cref="ParentLoanCode"/>.</summary>
+        public string? ParentLoanId => ParentLoanCode;
+
+        /// <summary>Legacy SPA field — same as <see cref="AiComments"/>.</summary>
+        public string? AiCommentary => AiComments;
     }
 
     public sealed class LtvValidationUpdateItem
     {
         public long LoanKey { get; init; }
+        public string? LoanCode { get; init; }
         public decimal? Ltv { get; init; }
+        public string? UpdateReason { get; init; }
+        public string? UpdateComment { get; init; }
         public string UserUpdatedBy { get; init; } = "system";
     }
 
@@ -36,6 +55,41 @@ namespace kingsightapi.Entities
     public sealed class LtvValidationConfirmRequest
     {
         public List<long> LoanKeys { get; init; } = [];
+        /// <summary>Preferred: lock by loan_code (sets is_confirmed = 'Y').</summary>
+        public List<string> LoanCodes { get; init; } = [];
         public string UserUpdatedBy { get; init; } = "system";
+    }
+
+    /// <summary>Unlock LTV — same loan keys/codes as confirm; sets is_confirmed = 'N'.</summary>
+    public sealed class LtvValidationUnlockRequest
+    {
+        public List<long> LoanKeys { get; init; } = [];
+        public List<string> LoanCodes { get; init; } = [];
+        public string UserUpdatedBy { get; init; } = "system";
+    }
+
+    /// <summary>
+    /// Dates shown under Prior LTV / Current LTV column headers.
+    /// Current = latest file_upload_history.as_of_date via loan_alias_relationship (order by uploaded_date desc).
+    /// Prior = latest file_upload_history.as_of_date via loan_alias_relationship_history where is_confirmed = 'Y'
+    /// (order by snapshot_date desc).
+    /// </summary>
+    public sealed class LtvValidationColumnDatesDto
+    {
+        /// <summary>Latest current LTV as_of_date (yyyy-MM-dd).</summary>
+        public string? CurrentLtvAsOfDate { get; init; }
+
+        /// <summary>Latest confirmed prior LTV as_of_date (yyyy-MM-dd).</summary>
+        public string? PriorLtvConfirmedDate { get; init; }
+
+        /// <summary>True when current LTV review is locked (<c>is_confirmed = 'Y'</c> on latest upload batch).</summary>
+        public bool IsCurrentLtvConfirmed { get; init; }
+    }
+
+    /// <summary>LTV lock status for reports (as-of date + confirm flag).</summary>
+    public sealed class LtvReviewStatusDto
+    {
+        public string? LtvAsOfDate { get; init; }
+        public bool IsLtvConfirmed { get; init; }
     }
 }

@@ -19,15 +19,18 @@ public class FundsController : ControllerBase
 {
     private readonly IFundPortalService _service;
     private readonly IPortalFilterService _filterService;
+    private readonly IFundSharePointDocumentsService _documentsService;
     private readonly ILogger<FundsController> _logger;
 
     public FundsController(
         IFundPortalService service,
         IPortalFilterService filterService,
+        IFundSharePointDocumentsService documentsService,
         ILogger<FundsController> logger)
     {
         _service = service;
         _filterService = filterService;
+        _documentsService = documentsService;
         _logger = logger;
     }
 
@@ -50,6 +53,31 @@ public class FundsController : ControllerBase
             return StatusCode(500, "An error occurred while retrieving fund filter options.");
         }
     }
+
+    // GET: api/funds/active-summary?search=&fundType=&strategy=
+    /// <summary>Dashboard Active Funds from <c>vw_active_fund_summary</c> (includes as_of_date).</summary>
+    [HttpGet("active-summary")]
+    public async Task<ActionResult<ActiveFundsSummaryResultDto>> GetActiveSummary(
+        [FromQuery] string? search,
+        [FromQuery] string? fundType,
+        [FromQuery] string? strategy)
+    {
+        try
+        {
+            return Ok(await _service.GetActiveFundSummaryAsync(search, fundType, strategy));
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get active fund summary cancelled");
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving active fund summary");
+            return StatusCode(500, "An error occurred while retrieving active funds.");
+        }
+    }
+
     // GET: api/funds?search=&view=ltd|quarterly&dateKey=&fundType=&strategy=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PortalListPageResult<FundListItemDto, FundListSummaryDto>>> GetAll(
@@ -132,7 +160,7 @@ public class FundsController : ControllerBase
 
     // GET: api/funds/{fundKey}
     [HttpGet("{fundKey:int}")]
-    public async Task<ActionResult<FundDetailDto>> GetByKey(int fundKey)
+    public async Task<ActionResult<FundProfileDto>> GetByKey(int fundKey)
     {
         try
         {
@@ -151,27 +179,27 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/assets?page=1&pageSize=50
-    [HttpGet("{fundKey:int}/assets")]
-    public async Task<ActionResult<PagedResult<FundAssetDto>>> GetAssets(
+    // GET: api/funds/{fundKey}/underlying-assets?page=1&pageSize=50
+    [HttpGet("{fundKey:int}/underlying-assets")]
+    public async Task<ActionResult<PagedResult<FundAssetDto>>> GetUnderlyingAssets(
         int fundKey,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50)
     {
         try
         {
-            var result = await _service.GetFundAssetsAsync(fundKey, page, pageSize);
+            var result = await _service.GetFundUnderlyingAssetsAsync(fundKey, page, pageSize);
             return Ok(result);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("Get assets for fund {FundKey} cancelled", fundKey);
+            _logger.LogInformation("Get underlying assets for fund {FundKey} cancelled", fundKey);
             return StatusCode(499);
         }
         catch (Exception ex)
         {
-            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving assets for fund {FundKey}", fundKey);
-            return StatusCode(500, "An error occurred while retrieving fund assets.");
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving underlying assets for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund underlying assets.");
         }
     }
 
@@ -352,14 +380,15 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/capital-activities?view=ltd|quarterly|daily&dateKey=&search=&sortBy=&sortDir=&page=1&pageSize=50
-    // search matches investor code or investor name. sortBy: investorCode, investorName, called, transferIn, transferOut, redemption.
+    // GET: api/funds/{fundKey}/capital-activities?view=ltd|quarterly|daily&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
     [HttpGet("{fundKey:int}/capital-activities")]
     public async Task<ActionResult<PagedResult<FundInvestorCapitalActivitiesDto>>> GetCapitalActivities(
         int fundKey,
         [FromQuery] TimeGranularity? view,
         [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear,
         [FromQuery] string? search,
+        [FromQuery] string? investorName,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -371,10 +400,16 @@ public class FundsController : ControllerBase
                 $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
         }
 
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
         try
         {
-            var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetFundCapitalActivitiesAsync(fundKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            var result = await _service.GetFundCapitalActivitiesAsync(
+                fundKey, view.Value, period, search, investorName, sortBy, sortDir, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -393,14 +428,50 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/distributions-table?view=ltd|quarterly|daily&dateKey=&search=&sortBy=&sortDir=&page=1&pageSize=50
-    // search matches investor code or investor name. sortBy: investorCode, investorName, committed, unfunded, cashDist, gainDist, preferredReturn, returnOfCapital, released.
+    // GET: api/funds/{fundKey}/capital-activities/filters?view=ltd|quarterly|daily&dateKey=&calendarYear=
+    [HttpGet("{fundKey:int}/capital-activities/filters")]
+    public async Task<ActionResult<TransactionFilterOptionsDto>> GetCapitalActivitiesFilters(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
+        }
+
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            return Ok(await _service.GetFundCapitalActivitiesFiltersAsync(fundKey, view.Value, period));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving capital activities filters for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving capital activities filters.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/distributions-table?view=ltd|quarterly|daily&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
     [HttpGet("{fundKey:int}/distributions-table")]
     public async Task<ActionResult<PagedResult<FundInvestorDistributionsDto>>> GetDistributionsTable(
         int fundKey,
         [FromQuery] TimeGranularity? view,
         [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear,
         [FromQuery] string? search,
+        [FromQuery] string? investorName,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -412,10 +483,16 @@ public class FundsController : ControllerBase
                 $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
         }
 
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
         try
         {
-            var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetFundDistributionsSummaryAsync(fundKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            var result = await _service.GetFundDistributionsSummaryAsync(
+                fundKey, view.Value, period, search, investorName, sortBy, sortDir, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -434,14 +511,50 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/irr?view=ltd|quarterly|daily&dateKey=&search=&sortBy=&sortDir=&page=1&pageSize=50
-    // search matches investor code or investor name. sortBy: investorCode, investorName, irr1Year, irr3Year, irr5Year, irr7Year, irr10Year, irrLtd.
+    // GET: api/funds/{fundKey}/distributions-table/filters?view=ltd|quarterly|daily&dateKey=&calendarYear=
+    [HttpGet("{fundKey:int}/distributions-table/filters")]
+    public async Task<ActionResult<TransactionFilterOptionsDto>> GetDistributionsTableFilters(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
+        }
+
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            return Ok(await _service.GetFundDistributionsFiltersAsync(fundKey, view.Value, period));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving distributions filters for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving distributions filters.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/irr?view=ltd|quarterly|daily&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
     [HttpGet("{fundKey:int}/irr")]
     public async Task<ActionResult<PagedResult<FundInvestorIrrDto>>> GetIrr(
         int fundKey,
         [FromQuery] TimeGranularity? view,
         [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear,
         [FromQuery] string? search,
+        [FromQuery] string? investorName,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -453,10 +566,16 @@ public class FundsController : ControllerBase
                 $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
         }
 
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
         try
         {
-            var period = BuildPeriodFilter(dateKey);
-            var result = await _service.GetFundIrrAsync(fundKey, view.Value, period, search, sortBy, sortDir, page, pageSize);
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            var result = await _service.GetFundIrrAsync(
+                fundKey, view.Value, period, search, investorName, sortBy, sortDir, page, pageSize);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -472,6 +591,227 @@ public class FundsController : ControllerBase
         {
             ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} IRR for fund {FundKey}", view, fundKey);
             return StatusCode(500, "An error occurred while retrieving IRR.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/irr/filters?view=ltd|quarterly|daily&dateKey=&calendarYear=
+    [HttpGet("{fundKey:int}/irr/filters")]
+    public async Task<ActionResult<TransactionFilterOptionsDto>> GetIrrFilters(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: {TimeGranularities.QueryValues}.");
+        }
+
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            return Ok(await _service.GetFundIrrFiltersAsync(fundKey, view.Value, period));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving IRR filters for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving IRR filters.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/capital-obligations?view=ltd|quarterly&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
+    [HttpGet("{fundKey:int}/capital-obligations")]
+    public async Task<ActionResult<PagedResult<FundInvestorObligationDto>>> GetCapitalObligations(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear,
+        [FromQuery] string? search,
+        [FromQuery] string? investorName,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
+        }
+
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
+        {
+            return BadRequest("Capital obligations are only available when view is ltd or quarterly.");
+        }
+
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            var result = await _service.GetFundCapitalObligationsAsync(
+                fundKey, view.Value, period, search, investorName, sortBy, sortDir, page, pageSize);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} capital obligations for fund {FundKey} cancelled", view, fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving {View} capital obligations for fund {FundKey}", view, fundKey);
+            return StatusCode(500, "An error occurred while retrieving capital obligations.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/capital-obligations/filters?view=ltd|quarterly&dateKey=&calendarYear=
+    [HttpGet("{fundKey:int}/capital-obligations/filters")]
+    public async Task<ActionResult<TransactionFilterOptionsDto>> GetCapitalObligationsFilters(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
+        }
+
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
+        {
+            return BadRequest("Capital obligations filters are only available when view is ltd or quarterly.");
+        }
+
+        if (view == TimeGranularity.Quarterly && dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            return Ok(await _service.GetFundObligationsFiltersAsync(fundKey, view.Value, period));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving capital obligations filters for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving capital obligations filters.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/net-assets?view=quarterly&dateKey=&calendarYear=&search=&investorName=&sortBy=&sortDir=&page=1&pageSize=50
+    [HttpGet("{fundKey:int}/net-assets")]
+    public async Task<ActionResult<PagedResult<FundInvestorNetAssetsDto>>> GetNetAssets(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear,
+        [FromQuery] string? search,
+        [FromQuery] string? investorName,
+        [FromQuery] string? sortBy,
+        [FromQuery] string? sortDir,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+        }
+
+        if (view != TimeGranularity.Quarterly)
+        {
+            return BadRequest("Net assets are only available when view is quarterly.");
+        }
+
+        if (dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            var result = await _service.GetFundNetAssetsAsync(
+                fundKey, view.Value, period, search, investorName, sortBy, sortDir, page, pageSize);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get net assets for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving net assets for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving net assets.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/net-assets/filters?view=quarterly&dateKey=&calendarYear=
+    [HttpGet("{fundKey:int}/net-assets/filters")]
+    public async Task<ActionResult<TransactionFilterOptionsDto>> GetNetAssetsFilters(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] int? calendarYear)
+    {
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: quarterly.");
+        }
+
+        if (view != TimeGranularity.Quarterly)
+        {
+            return BadRequest("Net assets filters are only available when view is quarterly.");
+        }
+
+        if (dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return BadRequest("Pass dateKey for one quarter or calendarYear for all quarters in a year.");
+        }
+
+        try
+        {
+            var period = BuildPeriodFilter(dateKey, calendarYear);
+            return Ok(await _service.GetFundNetAssetsFiltersAsync(fundKey, view.Value, period));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving net assets filters for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving net assets filters.");
         }
     }
 
@@ -513,6 +853,160 @@ public class FundsController : ControllerBase
         }
     }
 
-    private static FundPeriodFilter? BuildPeriodFilter(int? dateKey) =>
-        dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+    // GET: api/funds/{fundKey}/financial-metrics?view=ltd|quarterly&dateKey=&period=ITD|Q2 2026
+    [HttpGet("{fundKey:int}/financial-metrics")]
+    public async Task<ActionResult<FundFinancialMetricsDto?>> GetFinancialMetrics(
+        int fundKey,
+        [FromQuery] TimeGranularity? view,
+        [FromQuery] int? dateKey,
+        [FromQuery] string? period)
+    {
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
+        if (view is null)
+        {
+            return BadRequest(
+                $"Query parameter '{TimeGranularities.QueryParameterName}' is required. Valid values: ltd, quarterly.");
+        }
+
+        if (view is not (TimeGranularity.Ltd or TimeGranularity.Quarterly))
+        {
+            return BadRequest("Financial metrics support view=ltd or view=quarterly only.");
+        }
+
+        if (view == TimeGranularity.Quarterly
+            && string.IsNullOrWhiteSpace(period)
+            && dateKey is not > 0)
+        {
+            return BadRequest("Pass period (e.g. Q2 2026) or dateKey when view is quarterly.");
+        }
+
+        try
+        {
+            var periodFilter = BuildPeriodFilter(dateKey);
+            var result = await _service.GetFundFinancialMetricsAsync(
+                fundKey, view.Value, periodFilter, period);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get {View} financial metrics for fund {FundKey} cancelled", view, fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving {View} financial metrics for fund {FundKey}", view, fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund financial metrics.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/asset-overview
+    [HttpGet("{fundKey:int}/asset-overview")]
+    public async Task<ActionResult<FundAssetOverviewDto?>> GetAssetOverview(int fundKey)
+    {
+        try
+        {
+            var result = await _service.GetFundAssetOverviewAsync(fundKey);
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get asset overview for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving asset overview for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund asset overview.");
+        }
+    }
+
+    // GET: api/funds/{fundKey}/documents?category=interim|advisory
+    [HttpGet("{fundKey:int}/documents")]
+    public async Task<ActionResult<FundDocumentsResultDto>> GetDocuments(
+        int fundKey,
+        [FromQuery] string? category,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _documentsService.GetFundDocumentsAsync(fundKey, category, cancellationToken);
+            return Ok(result);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound($"Fund {fundKey} was not found.");
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("Get documents for fund {FundKey} cancelled", fundKey);
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error retrieving SharePoint documents for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while retrieving fund documents.");
+        }
+    }
+
+    // PUT: api/funds/{fundKey}/documents/library
+    [HttpPut("{fundKey:int}/documents/library")]
+    public async Task<IActionResult> UpsertDocumentsLibrary(
+        int fundKey,
+        [FromBody] UpsertFundSharePointLibraryRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.SharePointUrl))
+        {
+            return BadRequest("sharepoint_url is required.");
+        }
+
+        try
+        {
+            await _documentsService.UpsertFundLibraryUrlAsync(
+                fundKey,
+                request.SharePointUrl,
+                auditUser: User?.Identity?.Name,
+                cancellationToken);
+            return NoContent();
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound($"Fund {fundKey} was not found.");
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(
+                _logger, ex, "Error saving SharePoint library URL for fund {FundKey}", fundKey);
+            return StatusCode(500, "An error occurred while saving the SharePoint library URL.");
+        }
+    }
+
+    private static FundPeriodFilter? BuildPeriodFilter(int? dateKey, int? calendarYear = null)
+    {
+        if (dateKey is not > 0 && calendarYear is not > 1900)
+        {
+            return null;
+        }
+
+        return new FundPeriodFilter
+        {
+            DateKey = dateKey is > 0 ? dateKey : null,
+            CalendarYear = calendarYear is > 1900 ? calendarYear : null
+        };
+    }
 }

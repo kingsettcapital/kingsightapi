@@ -2,7 +2,9 @@ namespace kingsightapi.Entities
 {
     /// <summary>
     /// Loan alias security value row for the Security Value screen.
-    /// Collateral is summed from mort.dim_loan; other fields are stored on mort.loan_alias_master.
+    /// Collateral Per Yardi is the latest Real Estate collateral_amount sum from Yardi;
+    /// security_value / units / acres / SF are stored on loan_alias_master
+    /// (security_value falls back to collateral when null or 0).
     /// </summary>
     public sealed class LoanSecurityValueDto
     {
@@ -33,8 +35,9 @@ namespace kingsightapi.Entities
     }
 
     /// <summary>
-    /// Filter option from mort.dim_status (value = status_key; label = status_name).
-    /// Use <see cref="LoanSecurityValueStatusTokens.NullValue"/> to filter loans with no status FK on dim_loan.
+    /// Filter option from wh_gold1.shared.dim_status (value = status_key; label = status_name).
+    /// Loan rows filter via shared.dim_loan.funding_status_code = dim_status.status_key.
+    /// Use <see cref="LoanSecurityValueStatusTokens.NullValue"/> to filter loans with no status on dim_loan.
     /// </summary>
     public sealed class LoanSecurityValueStatusOptionDto
     {

@@ -1,0 +1,156 @@
+---
+description: Mortgage subjective input — wh_gold1.subjective_input table mapping for Kingsight API services
+globs:
+  - Services/LoanAliasService.cs
+  - Services/InvestorAliasService.cs
+  - Services/LoanService.cs
+  - Services/InvestorService.cs
+  - Services/TaxArrearsService.cs
+  - Services/LoanSecurityValueService.cs
+  - Services/OtherCostCaptureService.cs
+  - Services/DefaultDateCaptureService.cs
+  - Services/DefaultSubjectiveAnalyticsService.cs
+  - Services/LtvValidationService.cs
+  - Services/SubjectiveInputSql.cs
+  - Services/FabricWarehouseTables.cs
+---
+
+# Subjective input schema (`wh_gold.subjective_input`)
+
+Mortgage capture screens read/write **`wh_gold.subjective_input`** tables. Status lookups use **`wh_gold.shared.dim_status`**. Loan status filters join **`wh_gold.shared.dim_loan.funding_status_code`** to **`shared.dim_status.status_key`**. Loan keys resolve via **`wh_gold.shared.dim_loan`**. Yardi collateral uses **`FabricWarehouse:SilverLakehouseDatabase`** (`shortcut_lh_silver`).
+
+**Do not** retarget Capital dashboard services, `ManagementSummaryService`, or `CapitalInvestorService` unless explicitly requested.
+
+## LTV Validation
+
+`security_value` uses the same rule as Loan Security Value:
+`coalesce(nullif(loan_alias_master.security_value, 0), yardi_real_estate_collateral)`.
+
+See the Security Value CTE block below for the Yardi collateral source; LTV list joins that aggregate by `loan_alias_name`.
+
+| DB column | API field |
+|-----------|-----------|
+| `parent_loan_code` | `parentLoanId` |
+| `loan_code` | `childLoanId` |
+| `loan_to_value` | `ltv` |
+| `ai_comments` | `aiCommentary` |
+
+Writes update `loan_to_value` on `loan_alias_relationship`. Confirm stamps audit when `loan_to_value` is present (AI-extracted value accepted).
+
+## Configuration
+
+```json
+"FabricWarehouse": {
+  "Database": "wh_gold",
+  "SilverLakehouseDatabase": "shortcut_lh_silver"
+}
+```
+
+Use `FabricWarehouseTables.SubjectiveInput("table_name")` — never hard-code `wh_gold`.
+Use `FabricWarehouseTables.Yardi("table_name")` for silver Yardi tables.
+
+## Table → screen mapping
+
+| Table | API / screen |
+|-------|----------------|
+| `investor_alias_master` | `InvestorAliasController` — Investor Alias CRUD |
+| `loan_alias_master` | `LoanAliasController`, `LoanSecurityValueController` |
+| `loan_alias_relationship` | `LoansController`, `OtherCostCapture`, `DefaultDateCapture`, `DefaultSubjectiveAnalytics` |
+| `investor_alias_relationship` | `InvestorsController` — Investor Alias assignment |
+| `loan_tax_details` | `TaxArrearsController` |
+| `loan_alias_relationship` + `shared.dim_loan` | `LtvValidationController` |
+
+## UI query reference (source of truth)
+
+```sql
+-- Investor Alias CRUD
+select * from wh_gold.subjective_input.investor_alias_master;
+
+-- Loan Alias CRUD
+select * from wh_gold.subjective_input.loan_alias_master;
+
+-- Loan Alias assignment
+select loan_code, loan_description from wh_gold.subjective_input.loan_alias_relationship;
+select loan_alias_name from wh_gold.subjective_input.loan_alias_master;
+
+-- Investor Alias assignment
+select investor_code, investor_name from wh_gold.subjective_input.investor_alias_relationship;
+select investor_alias_name from wh_gold.subjective_input.investor_alias_master;
+
+-- Tax Arrears
+select a.loan_code, b.loan_description, b.loan_alias_name, a.tax_memo_date, a.tax_year, a.tax_arrears, a.tax_notes
+from wh_gold.subjective_input.loan_tax_details a
+inner join wh_gold.subjective_input.loan_alias_relationship b on a.loan_code = b.loan_code;
+
+-- Security Value (Collateral Per Yardi from latest Real Estate Yardi collateral)
+with latest_collateral_value as (
+  select collateral_id, valuation_date, collateral_amount
+  from (
+    select collateral_id, valuation_date, collateral_amount,
+           row_number() over (partition by collateral_id order by valuation_date desc) as rn
+    from shortcut_lh_silver.yardi.Collateral_Value
+  ) t
+  where rn = 1
+),
+dataset as (
+  select e.loan_alias_name, a.collateral_name, c.collateral_amount,
+         row_number() over (partition by e.loan_alias_name, a.collateral_name
+                            order by e.loan_alias_name, a.collateral_name) as rn
+  from wh_gold.subjective_input.loan_alias_relationship e
+  inner join wh_gold.shared.dim_loan f on e.loan_code = f.loan_code
+  inner join wh_gold.subjective_input.loan_alias_master g on e.loan_alias_name = g.loan_alias_name
+  left join (select distinct collateral_id, loan_id from shortcut_lh_silver.yardi.collateral_xref) d
+    on d.loan_id = f.loan_id
+  left join shortcut_lh_silver.yardi.collateral a on d.collateral_id = a.collateral_id
+  inner join shortcut_lh_silver.yardi.Lookup_Values b
+    on a.collateral_type = b.lookup_sk and b.lookup_value = 'Real Estate'
+  left join latest_collateral_value c on a.collateral_id = c.collateral_id
+),
+dataset2 as (
+  select loan_alias_name, sum(collateral_amount) as collateral
+  from dataset where rn = 1
+  group by loan_alias_name
+)
+select b.loan_alias_name, a.collateral,
+       coalesce(nullif(b.security_value, 0), a.collateral) as security_value,
+       b.units, b.net_acres, b.square_feet
+from wh_gold.subjective_input.loan_alias_master b
+left join dataset2 a on a.loan_alias_name = b.loan_alias_name;
+
+-- Other cost / default date / default subjective
+select * from wh_gold1.subjective_input.loan_alias_relationship;
+```
+
+## Column aliases (API DTO compatibility)
+
+| DB column | API / DTO field |
+|-----------|-----------------|
+| `loan_description` | `description` / `loanDesc` |
+| `tax_notes` | `notes` |
+| `outstanding_invoice` | `outstandingInvoices` |
+| `estimated_realization_costs` | `estRealizationCosts` |
+| `cost_to_complete` | `costToComplete` |
+| `maturity_notes` | `maturityAdditionalDetail` |
+| `net_acres` | `acres` |
+| `default_status` | `defaultStatus` |
+| `exit_plan` | `exitPlan` |
+| `exit_date` | `exitDate` |
+
+## Shared helper
+
+`SubjectiveInputSql` centralizes table names and `loan_code` → `loan_key` joins. Reuse it when adding new mortgage capture endpoints.
+
+## Join pattern
+
+```sql
+from wh_gold1.subjective_input.loan_alias_relationship r
+left join wh_gold1.subjective_input.loan_alias_master m
+  on r.loan_alias_name = m.loan_alias_name
+left join wh_gold1.shared.dim_loan l
+  on l.loan_code = r.loan_code
+ and cast(l.scd_cur_ind as varchar(10)) in ('1', 'Y', 'y', 'true', 'TRUE')
+left join wh_gold1.shared.dim_status s
+  on l.funding_status_code = s.status_key
+```
+
+Filter by alias id: `m.loan_alias_id in (@ids)`. Status filter: append `LoanStatusFilterParser` on `l` using column `funding_status_code` and `shared.dim_status`.

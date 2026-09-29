@@ -116,9 +116,11 @@ public sealed class DashboardService : IDashboardService
                 calendarYear,
                 string.Join(", ", requested));
 
+            var asOfDate = await LoadActiveFundAsOfDateAsync(connection, cancellationToken);
+
             return new DashboardResponseDto
             {
-                LastUpdated = DateTime.UtcNow,
+                LastUpdated = asOfDate,
                 CalendarYear = calendarYear,
                 Widgets = widgets
             };
@@ -159,6 +161,29 @@ public sealed class DashboardService : IDashboardService
         public int? FundsAddedYtd { get; init; }
     }
 
+    /// <summary>Dashboard header as-of from <c>vw_active_fund_summary.as_of_date</c>.</summary>
+    private static async Task<DateTime?> LoadActiveFundAsOfDateAsync(
+        SqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var sql = $"""
+            select max(as_of_date) as as_of_date
+            from {WarehouseTables.ViewActiveFundSummary}
+            """;
+
+        await using var command = new SqlCommand(sql, connection)
+        {
+            CommandType = System.Data.CommandType.Text
+        };
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return reader.GetNullableDateTimeIfPresent("as_of_date");
+    }
+
     // KPI snapshot — portfolio totals, counts, and YTD return from warehouse facts.
     private static async Task<KpiSnapshot> LoadKpiSnapshotAsync(
         SqlConnection connection,
@@ -174,6 +199,7 @@ public sealed class DashboardService : IDashboardService
         sql.Append("   where ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
         sql.Append(" ), 0), ");
+        // AUM — sum of net invested capital across all current funds (LTD portfolio facts).
         sql.Append(" total_aum = isnull(( ");
         sql.Append("   select sum(isnull(a.net_invested_capital_amount, 0)) ");
         sql.Append($"   from {WarehouseTables.FactInvestorPortfolioLtd} a ");
@@ -278,9 +304,9 @@ public sealed class DashboardService : IDashboardService
     private static DashboardKpiWidgetDto BuildPortfolioValueKpi(KpiSnapshot kpi) =>
         new()
         {
-            Value = kpi.PortfolioValue,
+            Value = kpi.TotalAum,
             YtdChangePercent = kpi.YtdReturnPercent,
-            Subtitle = "Market Value",
+            Subtitle = "Equity Under Management",
             Format = "money"
         };
 
@@ -436,7 +462,8 @@ public sealed class DashboardService : IDashboardService
         sql.Append(" isnull(nullif(ltrim(rtrim(p.asset_type)), ''), 'Unknown') as asset_type, ");
         sql.Append(" property_count = count(*) ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
+        //sql.Append(" where  ");
+        sql.Append(" where p.property_status <> 'SOLD' and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         sql.Append(" group by isnull(nullif(ltrim(rtrim(p.asset_type)), ''), 'Unknown') ");
@@ -618,7 +645,7 @@ public sealed class DashboardService : IDashboardService
         sql.Append(" end, ");
         sql.Append(" property_count = count(*) ");
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
+        sql.Append(" where p.property_status <> 'SOLD' and ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         sql.Append(" group by case ");

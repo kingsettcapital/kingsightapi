@@ -30,14 +30,21 @@ public sealed class InvestorListSummaryDto
     [JsonPropertyName("net_distributed")]
     public decimal NetDistributed { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved { get; init; }
+
     [JsonPropertyName("reserved_uncalled")]
-    public decimal ReservedUncalled { get; init; }
+    public decimal ReservedUncalled => Reserved;
 
     [JsonPropertyName("unfunded")]
     public decimal Unfunded { get; init; }
 
     [JsonPropertyName("released_capital")]
     public decimal ReleasedCapital { get; init; }
+
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
 }
 
 /// <summary>Investments list page KPI row (Figma summary cards).</summary>
@@ -55,8 +62,21 @@ public sealed class FundListSummaryDto
     [JsonPropertyName("net_distributed")]
     public decimal NetDistributed { get; init; }
 
+    [JsonPropertyName("reserved")]
+    public decimal Reserved { get; init; }
+
     [JsonPropertyName("reserved_uncalled")]
-    public decimal ReservedUncalled { get; init; }
+    public decimal ReservedUncalled => Reserved;
+
+    [JsonPropertyName("unfunded")]
+    public decimal Unfunded { get; init; }
+
+    [JsonPropertyName("released_capital")]
+    public decimal ReleasedCapital { get; init; }
+
+    /// <summary>ITD snapshot date from <c>fact_investor_portfolio_itd.date_key</c>.</summary>
+    [JsonPropertyName("as_of_date")]
+    public DateTime? AsOfDate { get; init; }
 }
 
 /// <summary>Assets list page KPI row (Figma summary cards).</summary>

@@ -5,6 +5,16 @@ namespace kingsightapi.Services;
 /// <summary>Shared SQL fragments appended via StringBuilder (dim/fund SCD, fact aggregates).</summary>
 internal static class WarehouseSql
 {
+    /// <summary>
+    /// Fabric collation bridge between <c>shared.dim_date.quarter_year</c> and
+    /// <c>investor_servicing</c> portfolio fact <c>quarter_year</c> columns.
+    /// </summary>
+    public const string QuarterYearCollation = "Latin1_General_100_CI_AS_KS_WS_SC_UTF8";
+
+    /// <summary>Equality on <c>quarter_year</c> with shared UTF-8 collation.</summary>
+    public static string QuarterYearEquals(string leftExpr, string rightExpr) =>
+        $"{leftExpr} collate {QuarterYearCollation} = {rightExpr} collate {QuarterYearCollation}";
+
     public static void AppendCurrentFundFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" ( ");
@@ -98,6 +108,22 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    /// <summary>Exact fund code filter for transaction table dropdowns.</summary>
+    public static void AppendFundCodeFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append(" and (@fundCode is null ");
+        sql.Append($" or lower(isnull({fundAlias}.fund_code, '')) = lower(@fundCode) ");
+        sql.Append(" ) ");
+    }
+
+    /// <summary>Exact investor name filter for fund-scoped transaction table dropdowns.</summary>
+    public static void AppendInvestorNameFilter(StringBuilder sql, string investorAlias = "i")
+    {
+        sql.Append(" and (@investorName is null ");
+        sql.Append($" or lower(isnull({investorAlias}.investor_name, '')) = lower(@investorName) ");
+        sql.Append(" ) ");
+    }
+
     public static void AppendFundTypeFilter(StringBuilder sql, string fundAlias = "f")
     {
         sql.Append(" and (@fundType is null ");
@@ -127,11 +153,44 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    public static void AppendInvestorFundAssetSearchFilter(StringBuilder sql, string assetAlias = "a")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull({assetAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.city, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.province, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.asset_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.asset_sub_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({assetAlias}.investment_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendInvestorFundAssetFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.ViewInvestorFundAsset} a ");
+        sql.Append($" inner join {WarehouseTables.DimFund} b on a.fund_key = b.fund_key ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, "b");
+    }
+
+    public static void AppendInvestorFundAssetScopeWhere(StringBuilder sql, string assetAlias = "a")
+    {
+        sql.Append($" where {assetAlias}.investor_key = @investorKey ");
+        sql.Append($" and isnull({assetAlias}.is_current, 1) = 1 ");
+    }
+
     public static void AppendPropertyAssetTypeFilter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append(" and (@assetType is null ");
         sql.Append($" or lower(isnull({propertyAlias}.asset_type, '')) = lower(@assetType) ");
         sql.Append(" ) ");
+    }
+
+    /// <summary>Assets listing — exclude rows with null or blank <c>asset_type</c>.</summary>
+    public static void AppendPropertyAssetTypePresentFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and nullif(ltrim(rtrim(isnull({propertyAlias}.asset_type, ''))), '') is not null ");
     }
 
     public static void AppendPropertyInvestmentTypeFilter(StringBuilder sql, string propertyAlias = "p")
@@ -187,32 +246,173 @@ internal static class WarehouseSql
         sql.Append(" ) ");
     }
 
+    /// <summary>Join <c>dim_property.fund</c> to <c>dim_fund.fund_code</c> (underlying assets).</summary>
+    public static void AppendPropertyFundCodeJoin(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" inner join {WarehouseTables.DimFund} {fundAlias} on isnull({propertyAlias}.fund, '') = isnull({fundAlias}.fund_code, '') ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, fundAlias);
+    }
+
+    /// <summary>Join <c>dim_property.fund</c> to <c>dim_fund.yardi_fund_code</c> (consolidated asset holdings).</summary>
+    public static void AppendPropertyYardiFundCodeJoin(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" inner join {WarehouseTables.DimFund} {fundAlias} on isnull({propertyAlias}.fund, '') = isnull({fundAlias}.yardi_fund_code, '') ");
+        sql.Append(" and ");
+        AppendCurrentFundFilter(sql, fundAlias);
+    }
+
+    /// <summary>Match <c>dim_property.fund</c> to an outer fund row's <c>yardi_fund_code</c>.</summary>
+    public static void AppendPropertyBelongsToFundByYardiCodeFilter(
+        StringBuilder sql,
+        string propertyAlias = "p",
+        string fundAlias = "f")
+    {
+        sql.Append($" and isnull({propertyAlias}.fund, '') = isnull({fundAlias}.yardi_fund_code, '') ");
+    }
+
+    /// <summary>Limit to funds where the investor has ITD portfolio exposure.</summary>
+    public static void AppendInvestorFundKeyScopeFilter(StringBuilder sql, string fundAlias = "f")
+    {
+        sql.Append($" and {fundAlias}.fund_key in ( ");
+        sql.Append($" select distinct fund_key from {WarehouseTables.FactInvestorPortfolioLtd} ");
+        sql.Append(" where investor_key = @investorKey ");
+        sql.Append(" ) ");
+    }
+
+    public static void AppendPropertyUnderlyingAssetSearchFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append(" and (@search is null ");
+        sql.Append($" or lower(isnull({propertyAlias}.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.city, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.province, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.geography, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.asset_sub_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append($" or lower(isnull({propertyAlias}.investment_type, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" ) ");
+    }
+
     /// <summary>Property rows at fund level 000 Property (warehouse may use '000 - Property').</summary>
     public static void AppendPropertyFundLevel000Filter(StringBuilder sql, string propertyAlias = "p")
     {
         sql.Append($" and isnull({propertyAlias}.fund_level, '') in ('000 Property', '000 - Property') ");
     }
 
-    /// <summary>Latest <c>fact_asset_metrics</c> row per property (max <c>date_key</c>).</summary>
+    /// <summary>Consolidated asset rows (<c>fund_level = '500 - Consolidated Asset'</c>).</summary>
+    public static void AppendPropertyFundLevel500ConsolidatedFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and isnull({propertyAlias}.fund_level, '') = '500 - Consolidated Asset' ");
+    }
+
+    /// <summary>Fund asset counts — only active properties.</summary>
+    public static void AppendPropertyActiveStatusFilter(StringBuilder sql, string propertyAlias = "p")
+    {
+        sql.Append($" and {propertyAlias}.property_status = 'Active' ");
+    }
+
+    /// <summary>
+    /// Leaf property → ownership hierarchy → consolidated asset.
+    /// Metrics stay on leaf <c>p</c>; list/KPIs group by consolidated <c>c</c>.
+    /// Hierarchy uses <c>SELECT DISTINCT property_key, consolidated_asset_key</c> to avoid
+    /// duplicate join rows that inflate area sums on the Assets list.
+    /// </summary>
+    public static void AppendConsolidatedAssetFrom(StringBuilder sql)
+    {
+        sql.Append($" from {WarehouseTables.DimProperty} p ");
+        sql.Append(" inner join ( ");
+        sql.Append(" select distinct property_key, consolidated_asset_key ");
+        sql.Append($" from {WarehouseTables.DimOwnershipHierarchy} ");
+        sql.Append(" ) e on p.property_key = e.property_key ");
+        sql.Append($" inner join {WarehouseTables.DimProperty} c ");
+        sql.Append(" on e.consolidated_asset_key = c.property_key ");
+    }
+
+    /// <summary>GROUP BY consolidated asset attributes (Assets list roll-up).</summary>
+    public static void AppendConsolidatedAssetGroupBy(StringBuilder sql)
+    {
+        sql.Append(" group by ");
+        sql.Append(" c.property_key, ");
+        sql.Append(" isnull(c.property_code, ''), ");
+        sql.Append(" isnull(c.property_name, ''), ");
+        sql.Append(" isnull(c.geography, ''), ");
+        sql.Append(" isnull(c.city, ''), ");
+        sql.Append(" isnull(c.province, ''), ");
+        sql.Append(" isnull(c.asset_type, ''), ");
+        sql.Append(" isnull(c.investment_type, ''), ");
+        sql.Append(" isnull(c.development_type, ''), ");
+        sql.Append(" isnull(c.property_status, ''), ");
+        sql.Append(" isnull(c.portfolio, 0) ");
+    }
+
+    /// <summary>
+    /// Latest <c>investor_servicing.fact_asset_metrics</c> per property: sum rows for the same
+    /// <c>date_key</c>, then take the most recent date (matches consolidated Assets list SQL).
+    /// </summary>
     public static void AppendLatestAssetMetricsApply(
         StringBuilder sql,
         string propertyAlias = "p",
         string applyAlias = "metrics")
     {
+        AppendLatestAssetMetricsApply(sql, propertyAlias, applyAlias, includeLeasingColumns: false);
+    }
+
+    /// <summary>
+    /// Latest metrics for a property: <c>SUM</c> by <c>date_key</c>, then <c>TOP 1</c> by date desc.
+    /// When <paramref name="restrictToQuarterFromDateKey"/> is true, only dates in the same
+    /// <c>quarter_year</c> as <c>@dateKey</c> are considered (requires <c>@dateKey</c> parameter).
+    /// </summary>
+    public static void AppendLatestAssetMetricsApply(
+        StringBuilder sql,
+        string propertyAlias,
+        string applyAlias,
+        bool includeLeasingColumns,
+        bool restrictToQuarterFromDateKey = false)
+    {
         sql.Append($" outer apply ( ");
         sql.Append(" select top 1 ");
-        sql.Append(" gross_leasable_area_sqft, ");
-        sql.Append(" occupied_area_sqft, ");
-        sql.Append(" committed_area_sqft, ");
-        sql.Append(" vacant_area_sqft, ");
-        sql.Append(" total_units, ");
-        sql.Append(" occupied_units, ");
-        sql.Append(" vacant_units, ");
-        sql.Append(" weighted_avg_lease_term_months, ");
-        sql.Append(" weighted_avg_lease_term_rent_months ");
+        sql.Append(" date_key, ");
+        sql.Append(" gross_leasable_area_sqft = sum(gross_leasable_area_sqft), ");
+        sql.Append(" occupied_area_sqft = sum(occupied_area_sqft), ");
+        sql.Append(" committed_area_sqft = sum(committed_area_sqft+occupied_area_sqft), ");
+        sql.Append(" vacant_area_sqft = sum(vacant_area_sqft), ");
+        sql.Append(" total_units = sum(total_units), ");
+        sql.Append(" occupied_units = sum(occupied_units), ");
+        sql.Append(" vacant_units = sum(vacant_units), ");
+        sql.Append(" weighted_avg_lease_term_months = 0, ");
+        sql.Append(" weighted_avg_lease_term_rent_months = 0 ");
+        if (includeLeasingColumns)
+        {
+            sql.Append(", gla_available_to_lease_sqft = sum(gla_available_to_lease_sqft) ");
+            sql.Append(", total_leasing_committed_sqft = sum(total_leasing_committed_sqft) ");
+            sql.Append(", new_leasing_committed_sqft = sum(new_leasing_committed_sqft) ");
+            sql.Append(", renewal_leasing_committed_sqft = sum(renewal_leasing_committed_sqft) ");
+            sql.Append(", gla_available_to_lease_units = sum(gla_available_to_lease_units) ");
+            sql.Append(", total_leasing_committed_units = sum(total_leasing_committed_units) ");
+            sql.Append(", new_leasing_committed_units = sum(new_leasing_committed_units) ");
+            sql.Append(", renewal_leasing_committed_units = sum(renewal_leasing_committed_units) ");
+            sql.Append(", last_refreshed_date = cast(null as datetime2) ");
+        }
+
         sql.Append($" from {WarehouseTables.FactAssetMetrics} m ");
         sql.Append($" where m.property_key = {propertyAlias}.property_key ");
-        sql.Append(" order by m.date_key desc ");
+        if (restrictToQuarterFromDateKey)
+        {
+            sql.Append(" and exists ( ");
+            sql.Append($" select 1 from {WarehouseTables.DimDate} md ");
+            sql.Append(" where md.date_key = m.date_key ");
+            sql.Append($" and md.quarter_year = (select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey) ");
+            sql.Append(" ) ");
+        }
+
+        sql.Append(" group by date_key ");
+        sql.Append(" order by date_key desc ");
         sql.Append($" ) {applyAlias} ");
     }
 }

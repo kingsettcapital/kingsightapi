@@ -21,50 +21,58 @@ namespace kingsightapi.Services
 
     public sealed class CapitalInvestorService : ICapitalInvestorService
     {
-        private const string UpdateInvestorAliasByKeySql = """
-            update mort.dim_investor
-            set investor_alias_name = @investor_alias_name,
-                user_updated_date = @user_updated_date,
-                user_updated_by = @user_updated_by
-            where investor_key = @investor_key
-              and is_current = 1
-            """; 
-            //test
-
-        private const string UpdateInvestorAliasByCodeSql = """
-            update mort.dim_investor
-            set investor_alias_name = @investor_alias_name,
-                user_updated_date = @user_updated_date,
-                user_updated_by = @user_updated_by
-            where investor_code = @investor_code
-              and is_current = 1
-            """;
-
-        private const string InsertInvestorSql = """
-            insert into mort.dim_investor (
-                investor_code,
-                investor_name,
-                investor_alias_name,
-                is_current,
-                user_updated_date,
-                user_updated_by)
-            values (
-                @investor_code,
-                @investor_name,
-                @investor_alias_name,
-                1,
-                @user_updated_date,
-                @user_updated_by)
-            """;
+        private readonly string UpdateInvestorAliasByKeySql;
+        private readonly string UpdateInvestorAliasByCodeSql;
+        private readonly string InsertInvestorSql;
 
         private readonly string _connectionString;
+        private readonly FabricWarehouseTables _tables;
         private readonly ILogger<InvestorService> _logger;
 
-        public CapitalInvestorService(IConfiguration configuration, ILogger<InvestorService> logger)
+        public CapitalInvestorService(IConfiguration configuration, FabricWarehouseTables tables, ILogger<InvestorService> logger)
         {
             _connectionString = configuration.GetConnectionString("FabricConnectionString")
                 ?? throw new InvalidOperationException("Configuration key 'FabricConnectionString' is missing.");
+            _tables = tables;
             _logger = logger;
+
+            var dimInvestor = tables.Mort("dim_investor");
+
+            UpdateInvestorAliasByKeySql = $"""
+                update {dimInvestor}
+                set investor_alias_name = @investor_alias_name,
+                    user_updated_date = @user_updated_date,
+                    user_updated_by = @user_updated_by
+                where investor_key = @investor_key
+                  and is_current = 1
+                """;
+            //test
+
+            UpdateInvestorAliasByCodeSql = $"""
+                update {dimInvestor}
+                set investor_alias_name = @investor_alias_name,
+                    user_updated_date = @user_updated_date,
+                    user_updated_by = @user_updated_by
+                where investor_code = @investor_code
+                  and is_current = 1
+                """;
+
+            InsertInvestorSql = $"""
+                insert into {dimInvestor} (
+                    investor_code,
+                    investor_name,
+                    investor_alias_name,
+                    is_current,
+                    user_updated_date,
+                    user_updated_by)
+                values (
+                    @investor_code,
+                    @investor_name,
+                    @investor_alias_name,
+                    1,
+                    @user_updated_date,
+                    @user_updated_by)
+                """;
         }
 
         public async Task<PagedResult<DimInvestorDto>> GetInvestorsAsync(
@@ -87,7 +95,7 @@ namespace kingsightapi.Services
 
             var countSql = new StringBuilder();
             countSql.Append(" select count(*) ");
-            countSql.Append(" from mort.dim_investor ");
+            countSql.Append($" from {_tables.Mort("dim_investor")} ");
             countSql.Append(" where is_current = 1 ");
             countSql.Append(nameFilter);
 
@@ -105,7 +113,7 @@ namespace kingsightapi.Services
             dataSql.Append("        investor_alias_name, ");
             dataSql.Append("        user_updated_date, ");
             dataSql.Append("        user_updated_by ");
-            dataSql.Append(" from mort.dim_investor ");
+            dataSql.Append($" from {_tables.Mort("dim_investor")} ");
             dataSql.Append(" where is_current = 1 ");
             dataSql.Append(nameFilter);
             dataSql.Append(" order by investor_name ");
@@ -239,7 +247,7 @@ namespace kingsightapi.Services
         {
             var sql = new StringBuilder();
             sql.Append(" select investor_key, investor_code, investor_name ");
-            sql.Append(" from mort.dim_investor ");
+            sql.Append($" from {_tables.Mort("dim_investor")} ");
             sql.Append(" where is_current = 1 ");
             sql.Append(" order by investor_name ");
 
@@ -321,7 +329,7 @@ namespace kingsightapi.Services
             return true;
         }
 
-        private static async Task<int> ExecuteInvestorUpdateByKeyAsync(
+        private async Task<int> ExecuteInvestorUpdateByKeyAsync(
             SqlConnection connection,
             long investorKey,
             string alias,
@@ -341,7 +349,7 @@ namespace kingsightapi.Services
             return await command.ExecuteNonQueryAsync();
         }
 
-        private static async Task<int> ExecuteInvestorUpdateByCodeAsync(
+        private async Task<int> ExecuteInvestorUpdateByCodeAsync(
             SqlConnection connection,
             string investorCode,
             string alias,
@@ -361,7 +369,7 @@ namespace kingsightapi.Services
             return await command.ExecuteNonQueryAsync();
         }
 
-        private static async Task<int> ExecuteInvestorInsertAsync(
+        private async Task<int> ExecuteInvestorInsertAsync(
             SqlConnection connection,
             string investorCode,
             string investorName,
