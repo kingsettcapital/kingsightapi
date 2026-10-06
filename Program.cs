@@ -142,6 +142,9 @@ namespace kingsightapi
                 cmhcUploadOptions.FabricWorkspaceId,
                 cmhcUploadOptions.FabricLakehouseId,
                 cmhcUploadOptions.UploadParentDirectory);
+            startupLogger.LogInformation(
+                "CORS allowed origins: {Origins}",
+                string.Join(", ", configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? ["(built-in defaults)"]));
 
             if (string.IsNullOrWhiteSpace(fabricConnectionString))
             {
