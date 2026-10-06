@@ -13,6 +13,7 @@ public static class CorsExtensions
             ?? ["http://localhost:4200", 
                 "https://localhost:4200", 
                 "https://kingsightdev.kingsettcapital.com",
+                "https://kingsight.kingsettcapital.com",
                 "https://kingsightuat.kingsettcapital.com"];
 
         services.AddCors(options =>
