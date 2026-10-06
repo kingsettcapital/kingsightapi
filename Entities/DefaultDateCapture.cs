@@ -8,6 +8,7 @@ namespace kingsightapi.Entities
         public string LoanAliasName { get; init; } = string.Empty;
         public DateTime? LoanTermDefaultDate { get; init; }
         public DateTime? DefaultDate { get; init; }
+        public string FundingStatusName { get; init; } = string.Empty;
         public string? UserUpdatedBy { get; init; }
         public DateTime? UserUpdatedDate { get; init; }
     }
