@@ -139,29 +139,55 @@ namespace kingsightapi.Services
             ManagementSummaryDashboardQuery query,
             CancellationToken cancellationToken = default)
         {
-            var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
+            // Warehouse TVFs take one funding status / sponsor. Multiple statuses fan out one call
+            // per status (a loan has exactly one status, so merged totals stay exact); multiple
+            // sponsors are applied in-process against alias rows.
+            var fundingStatuses = ResolveFundingStatusDescriptions(query.Statuses);
+            var fundingStatus = fundingStatuses is { Count: 1 } ? fundingStatuses[0] : null;
+            var multiStatus = fundingStatuses is { Count: > 1 };
+            var selectedSponsors = ResolveSelectedSponsors(query.Sponsors);
+            var multiSponsor = selectedSponsors is { Count: > 1 };
+            var deriveChartsFromAliasRows = multiStatus || multiSponsor;
             // % of Fundings denominator ignores Funding Status (except excludes Unfunded) —
             // load the all-status and Unfunded universes in parallel with the main queries.
             var queryWithoutFundingStatus = WithoutFundingStatusFilter(query);
 
             // Keep Fabric round-trips minimal: only queries that cannot be derived from alias rows.
             // LTV risk / top 5 / sponsor / exposure breakdown are computed in-memory from alias data.
-            var kpisTask = LoadDashboardKpisAndBreakdownAsync(query, fundingStatus, cancellationToken);
-            var aliasTask = LoadDashboardAliasRowsAsync(query, fundingStatus, cancellationToken);
+            var kpisTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadDashboardKpisAndBreakdownAsync(query, status, cancellationToken));
+            var aliasTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadDashboardAliasRowsAsync(query, status, cancellationToken));
             var fundingsUniverseTask = LoadDashboardAliasRowsAsync(
                 queryWithoutFundingStatus, null, cancellationToken);
             var unfundedUniverseTask = LoadDashboardAliasRowsAsync(
                 queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
-            var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatus, cancellationToken);
-            var investorTask = LoadDashboardInvestorSummaryAsync(query, fundingStatus, cancellationToken);
-            var exposureAnalysisTask = LoadDashboardExposureAnalysisAsync(query, fundingStatus, cancellationToken);
-            var top5Task = LoadDashboardTop5ExposuresAsync(
-                query, fundingStatus, cancellationToken);
-            var exposureBreakdownTask = LoadDashboardExposureBreakdownAsync(
-                query, fundingStatus, cancellationToken);
-            var sponsorSummaryTask = LoadDashboardSponsorSummaryAsync(
-                query, fundingStatus, cancellationToken);
+            var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatuses, cancellationToken);
+            var investorTask = multiSponsor
+                ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
+                : LoadPerFundingStatusAsync(
+                    fundingStatuses,
+                    status => LoadDashboardInvestorSummaryAsync(query, status, cancellationToken));
+            var investorPortfolioTask = multiSponsor
+                ? LoadPerFundingStatusAsync(
+                    fundingStatuses,
+                    status => LoadDashboardInvestorExposureRowsAsync(query, status, cancellationToken))
+                : Task.FromResult<IReadOnlyList<List<InvestorExposureRow>>>([]);
+            var exposureAnalysisTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadDashboardExposureAnalysisAsync(query, status, cancellationToken));
+            var top5Task = deriveChartsFromAliasRows
+                ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
+                : LoadDashboardTop5ExposuresAsync(query, fundingStatus, cancellationToken);
+            var exposureBreakdownTask = deriveChartsFromAliasRows
+                ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
+                : LoadDashboardExposureBreakdownAsync(query, fundingStatus, cancellationToken);
+            var sponsorSummaryTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadDashboardSponsorSummaryAsync(query, status, cancellationToken));
 
             await Task.WhenAll(
                 kpisTask,
@@ -171,12 +197,13 @@ namespace kingsightapi.Services
                 watchlistTask,
                 filterOptionsTask,
                 investorTask,
+                investorPortfolioTask,
                 exposureAnalysisTask,
                 top5Task,
                 exposureBreakdownTask,
                 sponsorSummaryTask);
 
-            var kpisAndBreakdown = await kpisTask;
+            var kpisAndBreakdown = MergeKpisAcrossStatuses(await kpisTask);
             // Investor→alias membership should not depend on the selected funding status,
             // so % of Fundings / other filters stay aligned across status selections.
             var investorAliasNames = await LoadLoanAliasNamesForInvestorsAsync(
@@ -184,11 +211,15 @@ namespace kingsightapi.Services
                 null,
                 query.InvestorAliases,
                 cancellationToken);
-            var aliasRows = ApplyDashboardFilters(await aliasTask, query, investorAliasNames);
+            var aliasRows = ApplyDashboardFilters(
+                MergeAliasRowsAcrossStatuses(await aliasTask),
+                query,
+                investorAliasNames);
             var watchlistRows = DeduplicateWatchlistRows(await watchlistTask ?? []);
             var filterOptions = await filterOptionsTask;
-            var investorSlices = await investorTask;
-            var exposureAnalysisRows = ApplyExposureAnalysisFilters(await exposureAnalysisTask, query);
+            var exposureAnalysisRows = ApplyExposureAnalysisFilters(
+                MergeExposureAnalysisAcrossStatuses(await exposureAnalysisTask),
+                selectedSponsors);
 
             var filteredAliasNames = new HashSet<string>(
                 aliasRows.Select(row => row.LoanAlias),
@@ -198,17 +229,33 @@ namespace kingsightapi.Services
                 .Where(row => filteredAliasNames.Contains(row.LoanAlias))
                 .ToList();
 
+            var investorSlices = multiSponsor
+                ? BuildInvestorSummaryFromExposureRows(
+                    (await investorPortfolioTask).SelectMany(rows => rows),
+                    filteredAliasNames)
+                : MergeChartSlicesByLabel(await investorTask);
+
             var kpis = kpisAndBreakdown.Kpis;
             var outstanding = kpisAndBreakdown.OutstandingInterest;
-            var exposureBreakdown = await exposureBreakdownTask;
 
             // Always align header balance / LTV / outstanding interest with the alias table
             // on screen (SQL KPI query can disagree or return zeros while alias rows have amounts).
             var aliasMetrics = BuildMetricsFromAliasRows(aliasRows);
+            var exposureBreakdown = deriveChartsFromAliasRows
+                ? aliasMetrics.ExposureBreakdown
+                : await exposureBreakdownTask;
+            var top5Exposures = deriveChartsFromAliasRows
+                ? BuildTop5FromAliasRows(aliasRows)
+                : await top5Task;
+            var sponsorSummary = FilterSponsorSummary(
+                MergeChartSlicesByLabel(await sponsorSummaryTask),
+                multiSponsor ? selectedSponsors : null);
             var percentOfFundings = ComputePercentOfFundings(
                 aliasRows,
                 ApplyDashboardFilters(await fundingsUniverseTask, queryWithoutFundingStatus, investorAliasNames),
-                ApplyDashboardFilters(await unfundedUniverseTask, queryWithoutFundingStatus, investorAliasNames));
+                ApplyDashboardFilters(await unfundedUniverseTask, queryWithoutFundingStatus, investorAliasNames),
+                selectionIncludesUnfunded: fundingStatuses is null
+                    || fundingStatuses.Contains("UNFUNDED", StringComparer.OrdinalIgnoreCase));
             kpis = new ManagementSummaryKpisDto
             {
                 NumberOfLoans = HasPostSqlDashboardFilters(query)
@@ -240,8 +287,8 @@ namespace kingsightapi.Services
                     aliasRows.Sum(row => row.TotalExposure)),
                 exposureAnalysisRows,
                 BuildLtvRiskDistributionFromAliasRows(aliasRows),
-                await top5Task,
-                await sponsorSummaryTask);
+                top5Exposures,
+                sponsorSummary);
 
             var watchlistDates = watchlistRows
                 .Select(row => row.ReportDate)
@@ -305,38 +352,356 @@ namespace kingsightapi.Services
             };
         }
 
-        private static string? ResolveFundingStatusDescription(IReadOnlyList<string>? statuses)
+        /// <summary>
+        /// Distinct funding status codes for vw_loan_attributes.funding_status_description
+        /// (shared.dim_status status_code, e.g. DEFAULT). UI may send status_name or status_code.
+        /// Null means no status predicate (All / nothing selected).
+        /// </summary>
+        private static IReadOnlyList<string>? ResolveFundingStatusDescriptions(IReadOnlyList<string>? statuses)
         {
-            // Filter vw_loan_attributes.funding_status_description using shared.dim_status
-            // status_code (e.g. DEFAULT). UI may send status_name or status_code.
             if (statuses is null or { Count: 0 })
             {
                 return null;
             }
 
-            if (statuses.Any(status => status.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            var codes = statuses
+                .Where(status => !string.IsNullOrWhiteSpace(status))
+                .Select(status => status.Trim().ToUpperInvariant())
+                .ToList();
+            if (codes.Count == 0 || codes.Contains("ALL"))
             {
                 return null;
             }
 
-            var token = statuses
-                .Select(status => status?.Trim())
-                .FirstOrDefault(status => !string.IsNullOrWhiteSpace(status));
-            if (string.IsNullOrWhiteSpace(token))
-            {
-                return null;
-            }
-
-            var normalized = token.ToUpperInvariant();
-            return normalized switch
-            {
-                "ALL" => null,
-                "IN DEFAULT" or "DEFAULTED" or "IN_DEFAULT" or "INDEFAULT" => "DEFAULT",
-                "PERFORMING" => "FUNDED",
-                // status_name uppercases to status_code for Unfunded/Funded/Default/Repaid
-                _ => normalized
-            };
+            return codes
+                .Select(code => code switch
+                {
+                    "IN DEFAULT" or "DEFAULTED" or "IN_DEFAULT" or "INDEFAULT" => "DEFAULT",
+                    "PERFORMING" => "FUNDED",
+                    // status_name uppercases to status_code for Unfunded/Funded/Default/Repaid
+                    _ => code
+                })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
         }
+
+        /// <summary>Selected sponsors (trimmed, distinct); null when All / nothing selected.</summary>
+        private static IReadOnlyList<string>? ResolveSelectedSponsors(IReadOnlyList<string>? sponsors)
+        {
+            if (sponsors is null or { Count: 0 }
+                || sponsors.Any(sponsor => sponsor?.Trim().Equals("All", StringComparison.OrdinalIgnoreCase) == true))
+            {
+                return null;
+            }
+
+            var selected = sponsors
+                .Where(sponsor => !string.IsNullOrWhiteSpace(sponsor))
+                .Select(sponsor => sponsor.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return selected.Count == 0 ? null : selected;
+        }
+
+        private static async Task<IReadOnlyList<T>> LoadPerFundingStatusAsync<T>(
+            IReadOnlyList<string>? fundingStatuses,
+            Func<string?, Task<T>> load)
+        {
+            if (fundingStatuses is not { Count: > 1 })
+            {
+                return [await load(fundingStatuses is { Count: 1 } ? fundingStatuses[0] : null)];
+            }
+
+            return await Task.WhenAll(fundingStatuses.Select(status => load(status)));
+        }
+
+        private static (
+            ManagementSummaryKpisDto Kpis,
+            ManagementSummaryOutstandingInterestDto OutstandingInterest,
+            IReadOnlyList<ChartSliceDto> ExposureBreakdown)
+            MergeKpisAcrossStatuses(
+                IReadOnlyList<(
+                    ManagementSummaryKpisDto Kpis,
+                    ManagementSummaryOutstandingInterestDto OutstandingInterest,
+                    IReadOnlyList<ChartSliceDto> ExposureBreakdown)> perStatus)
+        {
+            if (perStatus.Count == 1)
+            {
+                return perStatus[0];
+            }
+
+            // Ratios (average LTV, % of fundings) are recomputed from merged alias rows by the caller.
+            return (
+                new ManagementSummaryKpisDto
+                {
+                    NumberOfLoans = perStatus.Sum(item => item.Kpis.NumberOfLoans),
+                    TotalOutstandingBalance = perStatus.Sum(item => item.Kpis.TotalOutstandingBalance),
+                    AverageLtvTrendLabel = perStatus
+                        .Select(item => item.Kpis.AverageLtvTrendLabel)
+                        .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label)),
+                },
+                new ManagementSummaryOutstandingInterestDto
+                {
+                    InterestDisbursed = perStatus.Sum(item => item.OutstandingInterest.InterestDisbursed),
+                    InterestNotDisbursed = perStatus.Sum(item => item.OutstandingInterest.InterestNotDisbursed),
+                    TotalOutstandingInterest = perStatus.Sum(item => item.OutstandingInterest.TotalOutstandingInterest),
+                    TotalLateInterest = perStatus.Sum(item => item.OutstandingInterest.TotalLateInterest),
+                },
+                Array.Empty<ChartSliceDto>());
+        }
+
+        private static decimal? PrincipalWeightedLtv(IEnumerable<(decimal? Ltv, decimal Weight)> rows)
+        {
+            var list = rows.ToList();
+            var weighted = list.Where(r => r.Ltv.HasValue && r.Weight > 0).ToList();
+            if (weighted.Count > 0)
+            {
+                var weightSum = weighted.Sum(r => r.Weight);
+                return Math.Round(weighted.Sum(r => r.Ltv!.Value * r.Weight) / weightSum, 2);
+            }
+
+            var ltvs = list.Where(r => r.Ltv.HasValue).Select(r => r.Ltv!.Value).ToList();
+            return ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null;
+        }
+
+        private static List<LoanAliasSummaryRowDto> MergeAliasRowsAcrossStatuses(
+            IReadOnlyList<List<LoanAliasSummaryRowDto>> perStatus)
+        {
+            if (perStatus.Count == 1)
+            {
+                return perStatus[0];
+            }
+
+            return perStatus
+                .SelectMany(rows => rows)
+                .GroupBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var rows = group.ToList();
+                    if (rows.Count == 1)
+                    {
+                        return rows[0];
+                    }
+
+                    var ltv = PrincipalWeightedLtv(rows.Select(r => (r.Ltv, r.Principal)));
+                    return new LoanAliasSummaryRowDto
+                    {
+                        LoanAliasKey = rows.Max(r => r.LoanAliasKey),
+                        LoanAlias = rows[0].LoanAlias,
+                        Sponsor = rows.Select(r => r.Sponsor).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                        DefaultDate = MinDate(rows.Select(r => r.DefaultDate)),
+                        MaturityDate = MinDate(rows.Select(r => r.MaturityDate)),
+                        InterestStatus = JoinDistinct(rows.Select(r => r.InterestStatus)),
+                        Units = rows.Select(r => r.Units).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)),
+                        Exit = JoinDistinct(rows.Select(r => r.Exit)),
+                        Security = rows.Max(r => r.Security),
+                        Principal = rows.Sum(r => r.Principal),
+                        OsInt = rows.Sum(r => r.OsInt),
+                        Accrued = rows.Sum(r => r.Accrued),
+                        LateInt = rows.Sum(r => r.LateInt),
+                        TaxIns = rows.Sum(r => r.TaxIns),
+                        IntAdv = rows.Sum(r => r.IntAdv),
+                        Other = rows.Sum(r => r.Other),
+                        TotalExposure = rows.Sum(r => r.TotalExposure),
+                        Ltv = ltv,
+                        Risk = MapDashboardRiskBand(ltv)
+                    };
+                })
+                .OrderBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static string? JoinDistinct(IEnumerable<string?> values)
+        {
+            var distinct = values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(value => value!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return distinct.Count == 0 ? null : string.Join(", ", distinct);
+        }
+
+        private static List<ExposureAnalysisRowDto> MergeExposureAnalysisAcrossStatuses(
+            IReadOnlyList<List<ExposureAnalysisRowDto>> perStatus)
+        {
+            if (perStatus.Count == 1)
+            {
+                return perStatus[0];
+            }
+
+            return perStatus
+                .SelectMany(rows => rows)
+                .GroupBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var rows = group.ToList();
+                    if (rows.Count == 1)
+                    {
+                        return rows[0];
+                    }
+
+                    return new ExposureAnalysisRowDto
+                    {
+                        LoanAliasKey = rows.Max(r => r.LoanAliasKey),
+                        LoanAlias = rows[0].LoanAlias,
+                        Sponsor = rows.Select(r => r.Sponsor).FirstOrDefault(s => !string.IsNullOrWhiteSpace(s)) ?? string.Empty,
+                        ExternalBalance = rows.Sum(r => r.ExternalBalance),
+                        SmfBalance = rows.Sum(r => r.SmfBalance),
+                        MlpBalance = rows.Sum(r => r.MlpBalance),
+                        TotalKsExposure = rows.Sum(r => r.TotalKsExposure),
+                        SubordinateExposure = rows.Sum(r => r.SubordinateExposure),
+                        Ltv = PrincipalWeightedLtv(rows.Select(r => (r.Ltv, r.TotalKsExposure)))
+                    };
+                })
+                .OrderBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> MergeChartSlicesByLabel(
+            IReadOnlyList<IReadOnlyList<ChartSliceDto>> perStatus)
+        {
+            if (perStatus.Count == 0)
+            {
+                return [];
+            }
+
+            if (perStatus.Count == 1)
+            {
+                return perStatus[0];
+            }
+
+            var merged = perStatus
+                .SelectMany(slices => slices)
+                .GroupBy(slice => slice.Label, StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var slices = group.ToList();
+                    var counted = slices.Where(s => s.AverageLtv.HasValue && s.Count is > 0).ToList();
+                    var countSum = counted.Sum(s => s.Count!.Value);
+                    return new ChartSliceDto
+                    {
+                        Label = slices[0].Label,
+                        Value = slices.Sum(s => s.Value),
+                        Count = slices.Any(s => s.Count.HasValue) ? slices.Sum(s => s.Count ?? 0) : null,
+                        AverageLtv = countSum > 0
+                            ? Math.Round(counted.Sum(s => s.AverageLtv!.Value * s.Count!.Value) / countSum, 2)
+                            : slices.Select(s => s.AverageLtv).FirstOrDefault(ltv => ltv.HasValue)
+                    };
+                })
+                .ToList();
+
+            var total = merged.Sum(slice => slice.Value);
+            return merged
+                .Select(slice => new ChartSliceDto
+                {
+                    Label = slice.Label,
+                    Value = slice.Value,
+                    Count = slice.Count,
+                    AverageLtv = slice.AverageLtv,
+                    SharePercent = total > 0 ? Math.Round(slice.Value / total * 100m, 2) : null
+                })
+                .OrderByDescending(slice => slice.Value)
+                .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> FilterSponsorSummary(
+            IReadOnlyList<ChartSliceDto> slices,
+            IReadOnlyList<string>? sponsors)
+        {
+            if (sponsors is null)
+            {
+                return slices;
+            }
+
+            var selected = new HashSet<string>(sponsors, StringComparer.OrdinalIgnoreCase);
+            return slices
+                .Where(slice => SponsorMatches(slice.Label, selected))
+                .ToList();
+        }
+
+        /// <summary>Sponsor cells may hold a comma-separated list; match any listed sponsor.</summary>
+        private static bool SponsorMatches(string? sponsorCell, IReadOnlySet<string> selected) =>
+            !string.IsNullOrWhiteSpace(sponsorCell)
+            && sponsorCell
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Any(selected.Contains);
+
+        private static IReadOnlyList<ChartSliceDto> BuildTop5FromAliasRows(
+            IReadOnlyList<LoanAliasSummaryRowDto> aliasRows) =>
+            aliasRows
+                .Where(row => row.TotalExposure != 0m)
+                .OrderByDescending(row => row.TotalExposure)
+                .Take(5)
+                .Select(row => new ChartSliceDto
+                {
+                    Label = row.LoanAlias,
+                    Value = row.TotalExposure
+                })
+                .ToList();
+
+        private sealed record InvestorExposureRow(string LoanAlias, string LoanCode, string Investor, decimal Exposure);
+
+        /// <summary>
+        /// Loan-grain investor exposure (no alias scope) so the investor summary can follow
+        /// in-process filters (e.g. several sponsors) via the filtered alias set.
+        /// </summary>
+        private async Task<List<InvestorExposureRow>> LoadDashboardInvestorExposureRowsAsync(
+            ManagementSummaryDashboardQuery query,
+            string? fundingStatus,
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select
+                    p.loan_alias_name,
+                    p.loan_code,
+                    p.investor_name,
+                    p.exposure
+                from {_fnManagementDetailsLoanPortfolio}(
+                    @as_of_date,
+                    @default_date_from,
+                    @default_date_to,
+                    @maturity_date_from,
+                    @maturity_date_to,
+                    @sponsor,
+                    @investor_alias,
+                    @risk,
+                    @funding_status) p
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            AddLoanDetailFilterParameters(command, query, fundingStatus);
+
+            var rows = new List<InvestorExposureRow>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                rows.Add(new InvestorExposureRow(
+                    GetNullableString(reader, "loan_alias_name") ?? string.Empty,
+                    GetNullableString(reader, "loan_code") ?? string.Empty,
+                    GetNullableString(reader, "investor_name") ?? string.Empty,
+                    GetNullableDecimal(reader, "exposure") ?? 0m));
+            }
+
+            return rows;
+        }
+
+        private static IReadOnlyList<ChartSliceDto> BuildInvestorSummaryFromExposureRows(
+            IEnumerable<InvestorExposureRow> rows,
+            IReadOnlySet<string> aliasNames) =>
+            rows
+                .Where(row => aliasNames.Contains(row.LoanAlias) && !string.IsNullOrWhiteSpace(row.Investor))
+                .GroupBy(row => row.Investor.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group => new ChartSliceDto
+                {
+                    Label = group.Key,
+                    Value = group.Sum(row => row.Exposure),
+                    Count = group
+                        .Select(row => row.LoanCode)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Count()
+                })
+                .ToList();
 
         private static string AppendFundingStatusFilter(string sql, string? fundingStatus, string columnExpression)
         {
@@ -372,7 +737,7 @@ namespace kingsightapi.Services
                 query.DefaultDateTo,
                 query.MaturityDateFrom,
                 query.MaturityDateTo,
-                query.Sponsor,
+                query.Sponsors,
                 query.InvestorAliases,
                 query.RiskLevels,
                 fundingStatus);
@@ -390,7 +755,7 @@ namespace kingsightapi.Services
                 query.DefaultDateTo,
                 query.MaturityDateFrom,
                 query.MaturityDateTo,
-                query.Sponsor,
+                query.Sponsors,
                 query.InvestorAliases,
                 query.RiskLevels,
                 fundingStatus);
@@ -403,7 +768,7 @@ namespace kingsightapi.Services
             DateOnly? defaultDateTo,
             DateOnly? maturityDateFrom,
             DateOnly? maturityDateTo,
-            string? sponsor,
+            IReadOnlyList<string>? sponsors,
             IReadOnlyList<string>? investorAliases,
             IReadOnlyList<string>? riskLevels,
             string? fundingStatus)
@@ -413,7 +778,7 @@ namespace kingsightapi.Services
             AddTvfDateParameter(command, "@default_date_to", defaultDateTo);
             AddTvfDateParameter(command, "@maturity_date_from", maturityDateFrom);
             AddTvfDateParameter(command, "@maturity_date_to", maturityDateTo);
-            AddTvfNVarCharParameter(command, "@sponsor", ResolveTvfSponsor(sponsor), 255);
+            AddTvfNVarCharParameter(command, "@sponsor", ResolveTvfSponsor(sponsors), 255);
             AddTvfNVarCharParameter(command, "@investor_alias", ResolveTvfInvestorAlias(investorAliases), 255);
             AddTvfNVarCharParameter(command, "@risk", ResolveTvfRiskLevel(riskLevels), 50);
             AddTvfNVarCharParameter(command, "@funding_status", fundingStatus, 50);
@@ -437,15 +802,11 @@ namespace kingsightapi.Services
             parameter.Value = string.IsNullOrWhiteSpace(value) ? DBNull.Value : value;
         }
 
-        private static string? ResolveTvfSponsor(string? sponsor)
+        /// <summary>Only a single sponsor is pushed to TVFs; several are filtered in-process.</summary>
+        private static string? ResolveTvfSponsor(IReadOnlyList<string>? sponsors)
         {
-            if (string.IsNullOrWhiteSpace(sponsor)
-                || sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
-            {
-                return null;
-            }
-
-            return sponsor.Trim();
+            var selected = ResolveSelectedSponsors(sponsors);
+            return selected is { Count: 1 } ? selected[0] : null;
         }
 
         private static string? ResolveTvfInvestorAlias(IReadOnlyList<string>? investorAliases)
@@ -1187,41 +1548,45 @@ namespace kingsightapi.Services
 
         private static List<ExposureAnalysisRowDto> ApplyExposureAnalysisFilters(
             List<ExposureAnalysisRowDto> rows,
-            ManagementSummaryDashboardQuery query)
+            IReadOnlyList<string>? sponsors)
         {
-            IEnumerable<ExposureAnalysisRowDto> filtered = rows;
-
-            if (!string.IsNullOrWhiteSpace(query.Sponsor)
-                && !query.Sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
+            if (sponsors is null)
             {
-                filtered = filtered.Where(row =>
-                    row.Sponsor.Contains(query.Sponsor, StringComparison.OrdinalIgnoreCase));
+                return rows;
             }
 
-            return filtered.ToList();
+            var selected = new HashSet<string>(sponsors, StringComparer.OrdinalIgnoreCase);
+            return rows
+                .Where(row => SponsorMatches(row.Sponsor, selected)
+                    || sponsors.Any(sponsor => row.Sponsor.Contains(sponsor, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
         }
 
         private async Task<ManagementSummaryFilterOptionsDto> LoadMortgageViewFilterOptionsAsync(
-            string? fundingStatus,
+            IReadOnlyList<string>? fundingStatuses,
             CancellationToken cancellationToken)
         {
-            var cacheKey = fundingStatus ?? string.Empty;
+            var statusList = fundingStatuses?
+                .OrderBy(status => status, StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+            var cacheKey = string.Join("|", statusList);
             if (_filterOptionsCache.TryGetValue(cacheKey, out var cached))
             {
                 return cached;
             }
 
+            var statusParamNames = statusList.Select((_, index) => $"@funding_status{index}").ToList();
             var sql = $"""
                 select distinct
                     sponsor = ltrim(rtrim(sponsor)),
                     investor_alias_name = ltrim(rtrim(investor_alias_name))
                 from {_vwLoanAttributes}
                 """;
-            if (!string.IsNullOrEmpty(fundingStatus))
+            if (statusParamNames.Count > 0)
             {
-                sql += """
+                sql += $"""
 
-                    where funding_status_description = @funding_status
+                    where funding_status_description in ({string.Join(", ", statusParamNames)})
                     """;
             }
 
@@ -1231,9 +1596,9 @@ namespace kingsightapi.Services
             await using var connection = new SqlConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
-            if (!string.IsNullOrEmpty(fundingStatus))
+            for (var i = 0; i < statusList.Count; i++)
             {
-                command.Parameters.AddWithValue("@funding_status", fundingStatus);
+                command.Parameters.AddWithValue(statusParamNames[i], statusList[i]);
             }
 
             await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
@@ -1324,7 +1689,12 @@ namespace kingsightapi.Services
         {
             // Honor UI funding-status filter (including All → no status predicate).
             // SPA sends Default explicitly when that is selected; empty/null means no filter.
-            var fundingStatus = ResolveFundingStatusDescription(query.Statuses);
+            // Several statuses: loan-grain sections fan out per status; alias-level summaries
+            // (top bar, key dates, property stats, ...) use no status predicate.
+            var fundingStatuses = ResolveFundingStatusDescriptions(query.Statuses);
+            var fundingStatus = fundingStatuses is { Count: 1 } ? fundingStatuses[0] : null;
+            var multiStatus = fundingStatuses is { Count: > 1 };
+            var selectedSponsors = ResolveSelectedSponsors(query.Sponsors);
             var aliasName = await ResolveLoanAliasNameAsync(loanAliasKey, cancellationToken);
             if (string.IsNullOrWhiteSpace(aliasName))
             {
@@ -1338,8 +1708,9 @@ namespace kingsightapi.Services
                 };
             }
 
-            var portfolioTask = LoadLoanDetailPortfolioRowsAsync(
-                query, aliasName, fundingStatus, cancellationToken);
+            var portfolioTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadLoanDetailPortfolioRowsAsync(query, aliasName, status, cancellationToken));
             var topBarTask = LoadLoanDetailTopBarAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var reportDetailsTask = LoadLoanDetailReportDetailsAsync(
@@ -1352,14 +1723,18 @@ namespace kingsightapi.Services
                 query, aliasName, fundingStatus, cancellationToken);
             var interestOverLifeTask = LoadLoanDetailInterestOverLifeAsync(
                 query, aliasName, fundingStatus, cancellationToken);
-            var exposureByInvestorTask = LoadLoanDetailExposureByInvestorAsync(
-                query, aliasName, fundingStatus, cancellationToken);
+            var exposureByInvestorTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadLoanDetailExposureByInvestorAsync(query, aliasName, status, cancellationToken));
             var exposureCompositionTask = LoadLoanDetailExposureCompositionAsync(
                 query, aliasName, fundingStatus, cancellationToken);
             var taxTask = LoadTaxArrearsForAliasAsync(
                 query, aliasName, fundingStatus, cancellationToken);
+            var investorLoanCodesTask = LoadLoanCodesForInvestorAliasesAsync(
+                aliasName, query.InvestorAliases, cancellationToken);
 
             await Task.WhenAll(
+                investorLoanCodesTask,
                 portfolioTask,
                 topBarTask,
                 reportDetailsTask,
@@ -1371,7 +1746,17 @@ namespace kingsightapi.Services
                 exposureCompositionTask,
                 taxTask);
 
-            var portfolioRows = ApplyLoanDetailInvestorFilter(await portfolioTask, query.InvestorAliases);
+            var reportDetails = await reportDetailsTask;
+            var aliasMatchesSponsors = selectedSponsors is not { Count: > 1 }
+                || SponsorMatches(
+                    reportDetails.Sponsors,
+                    new HashSet<string>(selectedSponsors, StringComparer.OrdinalIgnoreCase));
+            var investorLoanCodes = await investorLoanCodesTask;
+            var portfolioRows = aliasMatchesSponsors
+                ? ApplyLoanDetailInvestorFilter(
+                    MergePortfolioRowsAcrossStatuses(await portfolioTask),
+                    investorLoanCodes)
+                : [];
             var loanConfirmFlags = await _ltvValidationService.GetLtvConfirmFlagsByLoanCodesAsync(
                 portfolioRows.Select(row => row.LoanId).ToArray(),
                 cancellationToken);
@@ -1400,14 +1785,17 @@ namespace kingsightapi.Services
                 .ToList();
             var ltvReviewStatus = await _ltvValidationService.GetLtvReviewStatusAsync(cancellationToken);
             var topBar = await topBarTask;
-            var reportDetails = await reportDetailsTask;
             var keyDatesRaw = await keyDatesTask;
             var propertyStats = await propertyStatsTask;
             var interestReserve = await interestReserveTask;
             var interestOverLife = await interestOverLifeTask;
-            var exposureByInvestor = ApplyLoanDetailInvestorChartFilter(
-                await exposureByInvestorTask,
-                query.InvestorAliases);
+            var exposureByInvestor = aliasMatchesSponsors
+                ? ApplyLoanDetailInvestorChartFilter(
+                    MergeChartSlicesByLabel(await exposureByInvestorTask),
+                    investorLoanCodes is null
+                        ? null
+                        : portfolioRows.Select(row => row.Investor).ToList())
+                : [];
             var exposureComposition = await exposureCompositionTask;
             var taxData = await taxTask;
 
@@ -1416,9 +1804,10 @@ namespace kingsightapi.Services
             // Property Stats Security Value comes from fn_management_detail_property_stats only
             // (do not use topbar principal_balance — that was incorrectly coalesced here).
             var securityValue = propertyStats.SecurityValue;
-            // Prefer LTV from filtered portfolio when investor filter narrows rows.
-            var overallLtv = query.InvestorAliases is { Count: > 0 }
-                && !query.InvestorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase))
+            // Prefer LTV from filtered portfolio when investor / multi-status filters narrow rows.
+            var overallLtv = multiStatus
+                || (query.InvestorAliases is { Count: > 0 }
+                    && !query.InvestorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
                 ? AveragePortfolioLtv(portfolioRows) ?? topBar.AverageLtv
                 : topBar.AverageLtv;
 
@@ -1757,10 +2146,11 @@ namespace kingsightapi.Services
                 CancellationToken cancellationToken)
         {
             // Default / maturity / interest-off / days-in-default stay on the TVF.
-            // Date of Advance: earliest actual funding post across alias loans —
-            // Initial Draw with non-zero actual principal, else first Draw with
-            // actual principal (placeholder Initial Draw rows use schedule Accrual
-            // Post Date, e.g. LN5275-C 10/01/2021 vs actual advance 04/28/2023).
+            // Date of Advance: MIN Initial Draw Accrual Post Date across alias loans.
+            // Placeholder Initial Draw rows (no actual or scheduled principal) are skipped;
+            // such loans use their first Draw with actual principal instead
+            // (e.g. LN5275-C placeholder 10/01/2021 → actual advance 04/28/2023,
+            // while LN5275's Initial Draw of 10/29/2021 carries the scheduled principal).
             var sql = $"""
                 select
                     adv.date_of_advance,
@@ -1785,7 +2175,8 @@ namespace kingsightapi.Services
                             coalesce(
                                 min(case
                                         when s.history_status = 'Initial Draw'
-                                         and isnull(s.actual_principal_amount, 0) <> 0
+                                         and (isnull(s.actual_principal_amount, 0) <> 0
+                                              or isnull(s.calc_principal_amount, 0) <> 0)
                                         then s.accrual_post_date
                                     end),
                                 min(case
@@ -2663,36 +3054,52 @@ namespace kingsightapi.Services
                 .ToList();
         }
 
+        private static List<LoanPortfolioDetailRowDto> MergePortfolioRowsAcrossStatuses(
+            IReadOnlyList<List<LoanPortfolioDetailRowDto>> perStatus)
+        {
+            if (perStatus.Count == 1)
+            {
+                return perStatus[0];
+            }
+
+            return perStatus
+                .SelectMany(rows => rows)
+                .OrderBy(row => row.LoanId, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(row => row.Rank.HasValue ? 0 : 1)
+                .ThenBy(row => row.Rank)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Portfolio rows carry the investor's full name, not its alias, so the
+        /// Investor Alias filter is applied via loan codes (null = no investor filter).
+        /// </summary>
         private static List<LoanPortfolioDetailRowDto> ApplyLoanDetailInvestorFilter(
             List<LoanPortfolioDetailRowDto> rows,
-            IReadOnlyList<string>? investorAliases)
+            IReadOnlySet<string>? investorLoanCodes)
         {
-            if (investorAliases is null or { Count: 0 }
-                || investorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            if (investorLoanCodes is null)
             {
                 return rows;
             }
 
-            var investors = new HashSet<string>(
-                investorAliases.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()),
-                StringComparer.OrdinalIgnoreCase);
             return rows
-                .Where(r => !string.IsNullOrWhiteSpace(r.Investor) && investors.Contains(r.Investor))
+                .Where(r => investorLoanCodes.Contains(r.LoanId.Trim()))
                 .ToList();
         }
 
+        /// <summary>Keeps investor slices whose name appears on the filtered portfolio (null = no filter).</summary>
         private static IReadOnlyList<ChartSliceDto> ApplyLoanDetailInvestorChartFilter(
             IReadOnlyList<ChartSliceDto> slices,
-            IReadOnlyList<string>? investorAliases)
+            IReadOnlyList<string>? investorNames)
         {
-            if (investorAliases is null or { Count: 0 }
-                || investorAliases.Any(a => a.Equals("All", StringComparison.OrdinalIgnoreCase)))
+            if (investorNames is null)
             {
                 return slices;
             }
 
             var investors = new HashSet<string>(
-                investorAliases.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()),
+                investorNames.Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a.Trim()),
                 StringComparer.OrdinalIgnoreCase);
             var filtered = slices.Where(s => investors.Contains(s.Label)).ToList();
             var total = filtered.Sum(s => s.Value);
@@ -2707,6 +3114,63 @@ namespace kingsightapi.Services
                 .ToList();
         }
 
+        /// <summary>
+        /// Loan codes under <paramref name="loanAliasName"/> held by the selected investor aliases;
+        /// null when the Investor Alias filter is All / empty.
+        /// </summary>
+        private async Task<HashSet<string>?> LoadLoanCodesForInvestorAliasesAsync(
+            string loanAliasName,
+            IReadOnlyList<string>? investorAliases,
+            CancellationToken cancellationToken)
+        {
+            if (investorAliases is null or { Count: 0 }
+                || investorAliases.Any(a => a.Trim().Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var selected = investorAliases
+                .Where(a => !string.IsNullOrWhiteSpace(a))
+                .Select(a => a.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var codes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (selected.Count == 0)
+            {
+                return null;
+            }
+
+            var paramNames = selected.Select((_, index) => $"@inv{index}").ToList();
+            var sql = $"""
+                select distinct ltrim(rtrim(v.loan_code)) as loan_code
+                from {_vwLoanAttributes} v
+                where v.loan_alias_name = @loan_alias_name
+                  and ltrim(rtrim(v.investor_alias_name)) in ({string.Join(", ", paramNames)})
+                  and nullif(ltrim(rtrim(v.loan_code)), '') is not null
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+            command.Parameters.AddWithValue("@loan_alias_name", loanAliasName);
+            for (var i = 0; i < selected.Count; i++)
+            {
+                command.Parameters.AddWithValue(paramNames[i], selected[i]);
+            }
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                var code = GetNullableString(reader, "loan_code");
+                if (!string.IsNullOrWhiteSpace(code))
+                {
+                    codes.Add(code);
+                }
+            }
+
+            return codes;
+        }
+
         private static decimal? AveragePortfolioLtv(IReadOnlyList<LoanPortfolioDetailRowDto> rows)
         {
             var ltvs = rows.Where(r => r.Ltv.HasValue).Select(r => r.Ltv!.Value).ToList();
@@ -2715,8 +3179,7 @@ namespace kingsightapi.Services
 
         private static bool HasPostSqlDashboardFilters(ManagementSummaryDashboardQuery query)
         {
-            if (!string.IsNullOrWhiteSpace(query.Sponsor)
-                && !query.Sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
+            if (ResolveSelectedSponsors(query.Sponsors) is not null)
             {
                 return true;
             }
@@ -2865,19 +3328,26 @@ namespace kingsightapi.Services
 
         /// <summary>
         /// % of Fundings =
-        ///   SUM(Principal | all active filters, as-of snapshot)
+        ///   SUM(Principal | all active filters, Funding Status &lt;&gt; Unfunded, as-of snapshot)
         ///   / SUM(Principal | Funding Status &lt;&gt; Unfunded, all other filters, as-of snapshot).
+        /// Unfunded is excluded from both sides, so Funding Status = All (or a selection that
+        /// includes Unfunded) cannot exceed the funded denominator.
         /// As-of snapshot is enforced by the warehouse TVFs via @as_of_date (Accrual Posted Date).
         /// </summary>
         private static decimal? ComputePercentOfFundings(
             IReadOnlyList<LoanAliasSummaryRowDto> filteredAliasRows,
             IReadOnlyList<LoanAliasSummaryRowDto> allStatusRowsWithOtherFilters,
-            IReadOnlyList<LoanAliasSummaryRowDto> unfundedRowsWithOtherFilters)
+            IReadOnlyList<LoanAliasSummaryRowDto> unfundedRowsWithOtherFilters,
+            bool selectionIncludesUnfunded)
         {
-            var numerator = filteredAliasRows.Sum(row => row.Principal);
+            var unfundedPrincipal = unfundedRowsWithOtherFilters.Sum(row => row.Principal);
+            var numerator = Math.Max(
+                0m,
+                filteredAliasRows.Sum(row => row.Principal)
+                    - (selectionIncludesUnfunded ? unfundedPrincipal : 0m));
             var denominator =
                 allStatusRowsWithOtherFilters.Sum(row => row.Principal)
-                - unfundedRowsWithOtherFilters.Sum(row => row.Principal);
+                - unfundedPrincipal;
 
             if (denominator <= 0m)
             {
@@ -2896,7 +3366,7 @@ namespace kingsightapi.Services
                 DefaultDateTo = query.DefaultDateTo,
                 MaturityDateFrom = query.MaturityDateFrom,
                 MaturityDateTo = query.MaturityDateTo,
-                Sponsor = query.Sponsor,
+                Sponsors = query.Sponsors,
                 RiskLevels = query.RiskLevels,
                 Statuses = null,
                 InvestorAliases = query.InvestorAliases,
@@ -2921,13 +3391,11 @@ namespace kingsightapi.Services
                 filtered = filtered.Where(r => investorMatchedAliasNames.Contains(r.LoanAlias));
             }
 
-            if (!string.IsNullOrWhiteSpace(query.Sponsor)
-                && !query.Sponsor.Equals("All", StringComparison.OrdinalIgnoreCase))
+            var sponsors = ResolveSelectedSponsors(query.Sponsors);
+            if (sponsors is not null)
             {
-                filtered = filtered.Where(r =>
-                    r.Sponsor is not null
-                    && r.Sponsor.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-                        .Any(sponsor => sponsor.Equals(query.Sponsor, StringComparison.OrdinalIgnoreCase)));
+                var selected = new HashSet<string>(sponsors, StringComparer.OrdinalIgnoreCase);
+                filtered = filtered.Where(r => SponsorMatches(r.Sponsor, selected));
             }
 
             if (query.RiskLevels is { Count: > 0 }

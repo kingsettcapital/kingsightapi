@@ -33,7 +33,7 @@ namespace kingsightapi.Entities
         public DateOnly? DefaultDateTo { get; init; }
         public DateOnly? MaturityDateFrom { get; init; }
         public DateOnly? MaturityDateTo { get; init; }
-        public string? Sponsor { get; init; }
+        public IReadOnlyList<string>? Sponsors { get; init; }
         public IReadOnlyList<string>? RiskLevels { get; init; }
         public IReadOnlyList<string>? Statuses { get; init; }
         public IReadOnlyList<string>? InvestorAliases { get; init; }
@@ -47,7 +47,7 @@ namespace kingsightapi.Entities
         public DateOnly? DefaultDateTo { get; init; }
         public DateOnly? MaturityDateFrom { get; init; }
         public DateOnly? MaturityDateTo { get; init; }
-        public string? Sponsor { get; init; }
+        public IReadOnlyList<string>? Sponsors { get; init; }
         public IReadOnlyList<string>? RiskLevels { get; init; }
         public IReadOnlyList<string>? Statuses { get; init; }
         public IReadOnlyList<string>? InvestorAliases { get; init; }
