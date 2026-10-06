@@ -20,7 +20,7 @@ try
     var result = await service.GetDashboardAsync(new ManagementSummaryDashboardQuery
     {
         AsOfDate = new DateOnly(2025, 8, 31),
-        Sponsor = "All",
+        Sponsors = ["All"],
         RiskLevels = ["ALL"],
         Statuses = ["In Default"]
     });
