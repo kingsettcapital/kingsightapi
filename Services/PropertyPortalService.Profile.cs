@@ -95,10 +95,41 @@ public sealed partial class PropertyPortalService
     }
 
     /// <summary>
+    /// <c>asset_jv_partners_count</c> from the KS ITD asset financial fact; falls back to the
+    /// ownership-hierarchy count where that column is not yet deployed.
+    /// </summary>
+    private static async Task<int> GetTotalJvPartnersAsync(SqlConnection connection, long consolidatedAssetKey)
+    {
+        const int InvalidColumnName = 207;
+        try
+        {
+            await using var command = new SqlCommand(
+                " select top 1 asset_jv_partners_count " +
+                $" from {WarehouseTables.FactAssetFinancialKsItd} " +
+                " where asset_key = @propertyKey ",
+                connection)
+            {
+                CommandType = System.Data.CommandType.Text
+            };
+            command.Parameters.AddWithValue("@propertyKey", consolidatedAssetKey);
+            var result = await command.ExecuteScalarAsync();
+            if (result is not null && result != DBNull.Value)
+            {
+                return Convert.ToInt32(result);
+            }
+        }
+        catch (SqlException ex) when (ex.Number == InvalidColumnName)
+        {
+        }
+
+        return await GetTotalJvPartnersFromOwnershipAsync(connection, consolidatedAssetKey);
+    }
+
+    /// <summary>
     /// Count of distinct JV partner <c>asset_code</c> values for a consolidated asset
     /// (share percentage strictly between 0 and 100).
     /// </summary>
-    private static async Task<int> GetTotalJvPartnersAsync(SqlConnection connection, long consolidatedAssetKey)
+    private static async Task<int> GetTotalJvPartnersFromOwnershipAsync(SqlConnection connection, long consolidatedAssetKey)
     {
         string sql =
             " select count(distinct asset_code) as jv_count " +

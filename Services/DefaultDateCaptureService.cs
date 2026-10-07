@@ -51,11 +51,7 @@ namespace kingsightapi.Services
             await EnsureSchemaAsync(cancellationToken);
 
             var statusFilter = LoanStatusFilterParser.Parse(statuses);
-            string? loanStatusKeyColumn = null;
-            if (statusFilter.HasFilter)
-            {
-                loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync(cancellationToken);
-            }
+            var loanStatusKeyColumn = await TryResolveLoanStatusKeyColumnAsync(cancellationToken);
 
             var sql = BuildListSql(loanAliasIds, statusFilter, loanStatusKeyColumn);
 
@@ -241,6 +237,7 @@ namespace kingsightapi.Services
                         r.loan_alias_name,
                         r.loan_term_default_date,
                         r.default_date,
+                        funding_status_name = {BuildFundingStatusNameSelectExpression(loanStatusKeyColumn)},
                         user_updated_by = {_auditColumns.BuildSelectUpdatedByExpression()},
                         user_updated_date = {_auditColumns.BuildSelectUpdatedDtmExpression()}
                  from {_sql.LoanAliasRelationship} r
@@ -292,6 +289,21 @@ namespace kingsightapi.Services
             sql.Append(" order by r.loan_alias_name, r.loan_code");
             return sql.ToString();
         }
+
+        private string BuildFundingStatusNameSelectExpression(string? loanStatusKeyColumn) =>
+            string.IsNullOrEmpty(loanStatusKeyColumn)
+                ? "cast('' as varchar(100))"
+                : $"""
+                   isnull((
+                       select top 1 s.status_name
+                       from {_sql.SharedDimLoan} fl
+                       inner join {_sql.DimStatus} s
+                           on s.status_key = try_cast(fl.[{loanStatusKeyColumn}] as bigint)
+                       where {SubjectiveInputSql.EqualsVarchar("r", "loan_code", "fl", "loan_code")}
+                         and {_sql.DimLoanIsCurrent("fl")}
+                       order by fl.loan_key desc
+                   ), '')
+                   """;
 
         private string BuildUpdateByLoanKeySql() =>
             $"""
@@ -358,6 +370,7 @@ namespace kingsightapi.Services
                 LoanAliasName = GetString(reader, "loan_alias_name"),
                 LoanTermDefaultDate = GetNullableDate(reader, "loan_term_default_date"),
                 DefaultDate = GetNullableDate(reader, "default_date"),
+                FundingStatusName = GetString(reader, "funding_status_name"),
                 UserUpdatedBy = TryGetOrdinal(reader, "user_updated_by", out var byOrdinal) && !reader.IsDBNull(byOrdinal)
                     ? reader.GetString(byOrdinal)
                     : string.Empty,
