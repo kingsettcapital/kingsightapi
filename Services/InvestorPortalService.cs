@@ -29,12 +29,13 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         string? sortBy,
         string? sortDir,
         int page,
-        int pageSize)
+        int pageSize,
+        string? fundCode = null)
     {
         try
         {
             return await GetInvestorsInternalAsync(
-                search, view, period, investorType, relationship, sortBy, sortDir, page, pageSize);
+                search, view, period, investorType, relationship, sortBy, sortDir, page, pageSize, fundCode);
         }
         catch (OperationCanceledException)
         {
@@ -107,7 +108,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         string? sortBy,
         string? sortDir,
         int page,
-        int pageSize)
+        int pageSize,
+        string? fundCode)
     {
         if (!PortalListSort.TryParseInvestor(sortBy, sortDir, out var orderBy, out var sortError))
         {
@@ -118,6 +120,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         var searchTerm = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
         var investorTypeTerm = string.IsNullOrWhiteSpace(investorType) ? null : investorType.Trim();
         var relationshipTerm = string.IsNullOrWhiteSpace(relationship) ? null : relationship.Trim();
+        var fundCodeTerm = string.IsNullOrWhiteSpace(fundCode) ? null : fundCode.Trim();
         var portfolioTable = PortalPortfolioListSql.PortfolioTable(view);
 
         await using var connection = new SqlConnection(_connectionString);
@@ -135,10 +138,10 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         {
             CommandType = System.Data.CommandType.Text
         };
-        AddInvestorListingParameters(countCommand, searchTerm, investorTypeTerm, relationshipTerm, period);
+        AddInvestorListingParameters(countCommand, searchTerm, investorTypeTerm, relationshipTerm, period, fundCodeTerm);
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
         var summary = await GetInvestorListSummaryAsync(
-            connection, portfolioTable, view, period, searchTerm, investorTypeTerm, relationshipTerm);
+            connection, portfolioTable, view, period, searchTerm, investorTypeTerm, relationshipTerm, fundCodeTerm);
 
         var pageSql = new StringBuilder();
         pageSql.Append(" select ");
@@ -162,7 +165,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         {
             CommandType = System.Data.CommandType.Text
         };
-        AddInvestorListingParameters(pageCommand, searchTerm, investorTypeTerm, relationshipTerm, period);
+        AddInvestorListingParameters(pageCommand, searchTerm, investorTypeTerm, relationshipTerm, period, fundCodeTerm);
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -209,7 +212,8 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         FundPeriodFilter? period,
         string? search,
         string? investorType,
-        string? relationship)
+        string? relationship,
+        string? fundCode)
     {
         var summarySql = new StringBuilder();
         summarySql.Append(" select ");
@@ -219,7 +223,7 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         AppendInvestorListingFrom(summarySql, portfolioTable, view, period);
 
         await using var command = new SqlCommand(summarySql.ToString(), connection);
-        AddInvestorListingParameters(command, search, investorType, relationship, period);
+        AddInvestorListingParameters(command, search, investorType, relationship, period, fundCode);
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
         {
@@ -253,6 +257,12 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         WarehouseSql.AppendInvestorSearchFilter(sql, "b");
         WarehouseSql.AppendInvestorTypeFilter(sql, "b");
         WarehouseSql.AppendInvestorRelationshipFilter(sql, "b");
+        // Fund filter scopes the portfolio rows, so metrics reflect the investor's holding in that fund.
+        sql.Append(" and (@fundCode is null or exists ( ");
+        sql.Append($" select 1 from {WarehouseTables.DimFund} ff ");
+        sql.Append(" where ff.fund_key = a.fund_key ");
+        sql.Append(" and lower(isnull(ff.fund_code, '')) = lower(@fundCode) ");
+        sql.Append(" )) ");
     }
 
     private static void AddInvestorListingParameters(
@@ -260,11 +270,13 @@ public sealed partial class InvestorPortalService : IInvestorPortalService
         string? search,
         string? investorType,
         string? relationship,
-        FundPeriodFilter? period)
+        FundPeriodFilter? period,
+        string? fundCode)
     {
         command.Parameters.AddWithValue("@search", (object?)search ?? DBNull.Value);
         command.Parameters.AddWithValue("@investorType", (object?)investorType ?? DBNull.Value);
         command.Parameters.AddWithValue("@relationship", (object?)relationship ?? DBNull.Value);
+        command.Parameters.AddWithValue("@fundCode", (object?)fundCode ?? DBNull.Value);
         PortalPortfolioListSql.AddPeriodParameter(command, period);
     }
 
