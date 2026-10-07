@@ -147,7 +147,10 @@ namespace kingsightapi.Services
             var multiStatus = fundingStatuses is { Count: > 1 };
             var selectedSponsors = ResolveSelectedSponsors(query.Sponsors);
             var multiSponsor = selectedSponsors is { Count: > 1 };
-            var deriveChartsFromAliasRows = multiStatus || multiSponsor;
+            // Investor membership is applied in-process, so TVF charts would ignore it.
+            var investorFilter = HasInvestorFilter(query);
+            var deriveChartsFromAliasRows = multiStatus || multiSponsor || investorFilter;
+            var investorFromExposureRows = multiSponsor || investorFilter;
             // % of Fundings denominator ignores Funding Status (except excludes Unfunded) —
             // load the all-status and Unfunded universes in parallel with the main queries.
             var queryWithoutFundingStatus = WithoutFundingStatusFilter(query);
@@ -166,15 +169,17 @@ namespace kingsightapi.Services
                 queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatuses, cancellationToken);
-            var investorTask = multiSponsor
+            var investorTask = investorFromExposureRows
                 ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
                 : LoadPerFundingStatusAsync(
                     fundingStatuses,
                     status => LoadDashboardInvestorSummaryAsync(query, status, cancellationToken));
-            var investorPortfolioTask = multiSponsor
+            // Every investor on the filtered aliases, so the summary totals the alias table's exposure.
+            var investorPortfolioTask = investorFromExposureRows
                 ? LoadPerFundingStatusAsync(
                     fundingStatuses,
-                    status => LoadDashboardInvestorExposureRowsAsync(query, status, cancellationToken))
+                    status => LoadDashboardInvestorExposureRowsAsync(
+                        WithoutInvestorFilter(query), status, cancellationToken))
                 : Task.FromResult<IReadOnlyList<List<InvestorExposureRow>>>([]);
             var exposureAnalysisTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
@@ -185,9 +190,11 @@ namespace kingsightapi.Services
             var exposureBreakdownTask = deriveChartsFromAliasRows
                 ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
                 : LoadDashboardExposureBreakdownAsync(query, fundingStatus, cancellationToken);
-            var sponsorSummaryTask = LoadPerFundingStatusAsync(
-                fundingStatuses,
-                status => LoadDashboardSponsorSummaryAsync(query, status, cancellationToken));
+            var sponsorSummaryTask = investorFilter
+                ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
+                : LoadPerFundingStatusAsync(
+                    fundingStatuses,
+                    status => LoadDashboardSponsorSummaryAsync(query, status, cancellationToken));
 
             await Task.WhenAll(
                 kpisTask,
@@ -229,7 +236,7 @@ namespace kingsightapi.Services
                 .Where(row => filteredAliasNames.Contains(row.LoanAlias))
                 .ToList();
 
-            var investorSlices = multiSponsor
+            var investorSlices = investorFromExposureRows
                 ? BuildInvestorSummaryFromExposureRows(
                     (await investorPortfolioTask).SelectMany(rows => rows),
                     filteredAliasNames)
@@ -247,9 +254,11 @@ namespace kingsightapi.Services
             var top5Exposures = deriveChartsFromAliasRows
                 ? BuildTop5FromAliasRows(aliasRows)
                 : await top5Task;
-            var sponsorSummary = FilterSponsorSummary(
-                MergeChartSlicesByLabel(await sponsorSummaryTask),
-                multiSponsor ? selectedSponsors : null);
+            var sponsorSummary = investorFilter
+                ? BuildSponsorSummaryFromAliasRows(aliasRows)
+                : FilterSponsorSummary(
+                    MergeChartSlicesByLabel(await sponsorSummaryTask),
+                    multiSponsor ? selectedSponsors : null);
             var percentOfFundings = ComputePercentOfFundings(
                 aliasRows,
                 ApplyDashboardFilters(await fundingsUniverseTask, queryWithoutFundingStatus, investorAliasNames),
@@ -280,7 +289,7 @@ namespace kingsightapi.Services
             };
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
-                FilterInvestorSummary(investorSlices, query),
+                FilterInvestorSummary(investorSlices, query, restrictToSelectedInvestors: !investorFilter),
                 PrependPrincipalSlice(
                     exposureBreakdown,
                     aliasRows.Sum(row => row.Principal),
@@ -624,6 +633,46 @@ namespace kingsightapi.Services
             && sponsorCell
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                 .Any(selected.Contains);
+
+        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromAliasRows(
+            IReadOnlyList<LoanAliasSummaryRowDto> aliasRows) =>
+            aliasRows
+                .Where(row => !string.IsNullOrWhiteSpace(row.Sponsor))
+                .GroupBy(row => row.Sponsor!.Trim(), StringComparer.OrdinalIgnoreCase)
+                .Select(group =>
+                {
+                    var ltvs = group.Where(row => row.Ltv.HasValue).Select(row => row.Ltv!.Value).ToList();
+                    return new ChartSliceDto
+                    {
+                        Label = group.Key,
+                        Value = group.Sum(row => row.TotalExposure),
+                        Count = group.Count(),
+                        AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null
+                    };
+                })
+                .OrderByDescending(slice => slice.Value)
+                .ToList();
+
+        private static bool HasInvestorFilter(ManagementSummaryDashboardQuery query) =>
+            query.InvestorAliases is { Count: > 0 }
+            && query.InvestorAliases.Any(alias => !string.IsNullOrWhiteSpace(alias))
+            && !query.InvestorAliases.Any(alias => alias.Equals("All", StringComparison.OrdinalIgnoreCase));
+
+        private static ManagementSummaryDashboardQuery WithoutInvestorFilter(
+            ManagementSummaryDashboardQuery query) =>
+            new()
+            {
+                AsOfDate = query.AsOfDate,
+                DefaultDateFrom = query.DefaultDateFrom,
+                DefaultDateTo = query.DefaultDateTo,
+                MaturityDateFrom = query.MaturityDateFrom,
+                MaturityDateTo = query.MaturityDateTo,
+                Sponsors = query.Sponsors,
+                RiskLevels = query.RiskLevels,
+                Statuses = query.Statuses,
+                InvestorAliases = null,
+                LoanAliasIds = query.LoanAliasIds,
+            };
 
         private static IReadOnlyList<ChartSliceDto> BuildTop5FromAliasRows(
             IReadOnlyList<LoanAliasSummaryRowDto> aliasRows) =>
@@ -1007,14 +1056,16 @@ namespace kingsightapi.Services
 
         private static IReadOnlyList<ChartSliceDto> FilterInvestorSummary(
             IReadOnlyList<ChartSliceDto> slices,
-            ManagementSummaryDashboardQuery query)
+            ManagementSummaryDashboardQuery query,
+            bool restrictToSelectedInvestors = true)
         {
             IEnumerable<ChartSliceDto> filtered = slices.Where(slice =>
                 !string.IsNullOrWhiteSpace(slice.Label)
                 && !slice.Label.Equals("(Unknown)", StringComparison.OrdinalIgnoreCase)
                 && !slice.Label.Equals("Unknown", StringComparison.OrdinalIgnoreCase));
 
-            if (query.InvestorAliases is { Count: > 0 }
+            if (restrictToSelectedInvestors
+                && query.InvestorAliases is { Count: > 0 }
                 && !query.InvestorAliases.Any(alias => alias.Equals("All", StringComparison.OrdinalIgnoreCase)))
             {
                 var aliases = new HashSet<string>(query.InvestorAliases, StringComparer.OrdinalIgnoreCase);
