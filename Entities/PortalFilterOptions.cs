@@ -34,6 +34,9 @@ public sealed class InvestorListFilterOptionsDto
 
     public IReadOnlyList<PortalFilterOptionDto> Relationships { get; init; } = [];
 
+    /// <summary>Value = fund_code, Label = "fund_code — fund_name".</summary>
+    public IReadOnlyList<PortalFilterOptionDto> Funds { get; init; } = [];
+
     [JsonPropertyName("calendar_years")]
     public IReadOnlyList<PortalFilterOptionDto> CalendarYears { get; init; } = [];
 

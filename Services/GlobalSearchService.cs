@@ -149,19 +149,19 @@ public sealed class GlobalSearchService : IGlobalSearchService
         SqlConnection connection,
         string search)
     {
+        // Asset detail pages are keyed by the consolidated asset (same roll-up as the Assets list),
+        // so search must return c.property_key — a property-level key opens a blank asset page.
         var sql = new StringBuilder();
         sql.Append(" select top (@fetchLimit) ");
-        sql.Append(" p.property_key, ");
-        sql.Append(" isnull(p.property_name, '') as property_name, ");
-        sql.Append(" isnull(p.property_code, '') as property_code, ");
-        sql.Append(" isnull(p.geography, '') as geography, ");
-        sql.Append(" isnull(p.asset_type, '') as asset_type ");
-        sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" where ");
-        WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
-        WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
-        sql.Append(" and lower(isnull(p.property_name, '')) like '%' + lower(@search) + '%' ");
-        sql.Append(" order by p.property_name ");
+        sql.Append(" c.property_key, ");
+        sql.Append(" isnull(c.property_name, '') as property_name, ");
+        sql.Append(" isnull(c.property_code, '') as property_code, ");
+        sql.Append(" isnull(c.geography, '') as geography, ");
+        sql.Append(" isnull(c.asset_type, '') as asset_type ");
+        WarehouseSql.AppendConsolidatedAssetFrom(sql);
+        sql.Append(" where lower(isnull(c.property_name, '')) like '%' + lower(@search) + '%' ");
+        sql.Append(" group by c.property_key, c.property_name, c.property_code, c.geography, c.asset_type ");
+        sql.Append(" order by property_name ");
 
         await using var command = new SqlCommand(sql.ToString(), connection);
         command.Parameters.AddWithValue("@search", search);

@@ -53,12 +53,15 @@ public sealed class PortalFilterService : IPortalFilterService
                 order by option_value
                 """);
 
+            var funds = await ReadInvestorFundOptionsAsync(connection);
+
             var quarterlyPeriods = await ReadQuarterlyPeriodOptionsAsync(connection);
 
             return new InvestorListFilterOptionsDto
             {
                 InvestorTypes = investorTypes,
                 Relationships = relationships,
+                Funds = funds,
                 CalendarYears = BuildCalendarYearOptions(quarterlyPeriods),
                 QuarterlyPeriods = quarterlyPeriods
             };
@@ -171,6 +174,42 @@ public sealed class PortalFilterService : IPortalFilterService
         sql.Append($" where isnull(c.{columnName}, '') <> '' ");
         sql.Append(" order by option_value ");
         return sql.ToString();
+    }
+
+    /// <summary>Current funds that have investor portfolio rows (Investors list fund filter).</summary>
+    private static async Task<IReadOnlyList<PortalFilterOptionDto>> ReadInvestorFundOptionsAsync(SqlConnection connection)
+    {
+        var sql = new StringBuilder();
+        sql.Append(" select f.fund_code, max(isnull(f.fund_name, '')) as fund_name ");
+        sql.Append($" from {WarehouseTables.DimFund} f ");
+        sql.Append(" where ");
+        WarehouseSql.AppendCurrentFundFilter(sql, "f");
+        sql.Append(" and isnull(f.fund_code, '') <> '' ");
+        sql.Append($" and exists (select 1 from {WarehouseTables.FactInvestorPortfolioLtd} a where a.fund_key = f.fund_key) ");
+        sql.Append(" group by f.fund_code ");
+        sql.Append(" order by f.fund_code ");
+
+        await using var command = new SqlCommand(sql.ToString(), connection);
+        await using var reader = await command.ExecuteReaderAsync();
+
+        var options = new List<PortalFilterOptionDto>();
+        while (await reader.ReadAsync())
+        {
+            var code = reader.GetStringOrEmpty("fund_code").Trim();
+            if (string.IsNullOrWhiteSpace(code))
+            {
+                continue;
+            }
+
+            var name = reader.GetStringOrEmpty("fund_name").Trim();
+            options.Add(new PortalFilterOptionDto
+            {
+                Value = code,
+                Label = string.IsNullOrWhiteSpace(name) ? code : $"{code} — {name}"
+            });
+        }
+
+        return options;
     }
 
     private static async Task<IReadOnlyList<PortalFilterOptionDto>> ReadDistinctOptionsAsync(

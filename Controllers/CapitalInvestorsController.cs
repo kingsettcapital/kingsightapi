@@ -47,7 +47,7 @@ public class CapitalInvestorsController : ControllerBase
         }
     }
 
-    // GET: api/CapitalInvestors?search=&view=ltd|quarterly&dateKey=&investorType=&relationship=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
+    // GET: api/CapitalInvestors?search=&view=ltd|quarterly&dateKey=&investorType=&relationship=&fundCode=&sortBy=&sortDir=asc|desc&page=1&pageSize=50
     [HttpGet]
     public async Task<ActionResult<PortalListPageResult<InvestorListItemDto, InvestorListSummaryDto>>> GetAll(
         [FromQuery] string? search,
@@ -55,6 +55,7 @@ public class CapitalInvestorsController : ControllerBase
         [FromQuery] int? dateKey,
         [FromQuery] string? investorType,
         [FromQuery] string? relationship,
+        [FromQuery] string? fundCode,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] int page = 1,
@@ -71,7 +72,7 @@ public class CapitalInvestorsController : ControllerBase
         {
             var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
             var result = await _service.GetInvestorsAsync(
-                search, resolvedView, period, investorType, relationship, sortBy, sortDir, page, pageSize);
+                search, resolvedView, period, investorType, relationship, sortBy, sortDir, page, pageSize, fundCode);
             return Ok(result);
         }
         catch (ArgumentException ex)

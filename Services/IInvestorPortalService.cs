@@ -13,7 +13,8 @@ public interface IInvestorPortalService
         string? sortBy,
         string? sortDir,
         int page,
-        int pageSize);
+        int pageSize,
+        string? fundCode = null);
     Task<InvestorProfileDto?> GetInvestorByKeyAsync(
         long investorKey,
         TimeGranularity view,
