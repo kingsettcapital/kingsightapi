@@ -779,6 +779,7 @@ public sealed partial class FundPortalService : IFundPortalService
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
+        sql.Append(" and c.property_status <> 'Sold'");
         sql.Append(" and f.fund_key = @fundKey ");
     }
 
