@@ -326,9 +326,10 @@ internal static class WarehouseSql
     public static void AppendConsolidatedAssetFrom(StringBuilder sql)
     {
         sql.Append($" from {WarehouseTables.DimProperty} p ");
-        sql.Append(" inner join ( ");
-        sql.Append(" select distinct property_key, consolidated_asset_key ");
+        sql.Append(" Inner join ( ");
+        sql.Append(" Select distinct property_key, consolidated_asset_key ");
         sql.Append($" from {WarehouseTables.DimOwnershipHierarchy} ");
+        sql.Append(" where uid not like '%f04900%' ");
         sql.Append(" ) e on p.property_key = e.property_key ");
         sql.Append($" inner join {WarehouseTables.DimProperty} c ");
         sql.Append(" on e.consolidated_asset_key = c.property_key ");
