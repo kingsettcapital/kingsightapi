@@ -150,7 +150,6 @@ namespace kingsightapi.Services
             // Investor membership is applied in-process, so TVF charts would ignore it.
             var investorFilter = HasInvestorFilter(query);
             var deriveChartsFromAliasRows = multiStatus || multiSponsor || investorFilter;
-            var investorFromExposureRows = multiSponsor || investorFilter;
             // % of Fundings denominator ignores Funding Status (except excludes Unfunded) —
             // load the all-status and Unfunded universes in parallel with the main queries.
             var queryWithoutFundingStatus = WithoutFundingStatusFilter(query);
@@ -169,27 +168,19 @@ namespace kingsightapi.Services
                 queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatuses, cancellationToken);
-            var investorTask = investorFromExposureRows
-                ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
-                : LoadPerFundingStatusAsync(
-                    fundingStatuses,
-                    status => LoadDashboardInvestorSummaryAsync(query, status, cancellationToken));
-            // Every investor on the filtered aliases, so the summary totals the alias table's exposure.
-            var investorPortfolioTask = investorFromExposureRows
-                ? LoadPerFundingStatusAsync(
-                    fundingStatuses,
-                    status => LoadDashboardInvestorExposureRowsAsync(
-                        WithoutInvestorFilter(query), status, cancellationToken))
-                : Task.FromResult<IReadOnlyList<List<InvestorExposureRow>>>([]);
+            // Loan-grain exposure (investor filter applied in-process) so the investor and sponsor
+            // summaries total the selected investors' exposure, labelled by investor alias.
+            var investorPortfolioTask = LoadPerFundingStatusAsync(
+                fundingStatuses,
+                status => LoadDashboardInvestorExposureRowsAsync(
+                    WithoutInvestorFilter(query), status, cancellationToken));
+            var investorAliasByLoanCodeTask = LoadInvestorAliasByLoanCodeAsync(cancellationToken);
             var exposureAnalysisTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
                 status => LoadDashboardExposureAnalysisAsync(query, status, cancellationToken));
             var top5Task = deriveChartsFromAliasRows
                 ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
                 : LoadDashboardTop5ExposuresAsync(query, fundingStatus, cancellationToken);
-            var exposureBreakdownTask = deriveChartsFromAliasRows
-                ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
-                : LoadDashboardExposureBreakdownAsync(query, fundingStatus, cancellationToken);
             var sponsorSummaryTask = investorFilter
                 ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
                 : LoadPerFundingStatusAsync(
@@ -203,11 +194,10 @@ namespace kingsightapi.Services
                 unfundedUniverseTask,
                 watchlistTask,
                 filterOptionsTask,
-                investorTask,
                 investorPortfolioTask,
+                investorAliasByLoanCodeTask,
                 exposureAnalysisTask,
                 top5Task,
-                exposureBreakdownTask,
                 sponsorSummaryTask);
 
             var kpisAndBreakdown = MergeKpisAcrossStatuses(await kpisTask);
@@ -236,11 +226,12 @@ namespace kingsightapi.Services
                 .Where(row => filteredAliasNames.Contains(row.LoanAlias))
                 .ToList();
 
-            var investorSlices = investorFromExposureRows
-                ? BuildInvestorSummaryFromExposureRows(
-                    (await investorPortfolioTask).SelectMany(rows => rows),
-                    filteredAliasNames)
-                : MergeChartSlicesByLabel(await investorTask);
+            var investorExposureRows = ResolveInvestorExposureRows(
+                (await investorPortfolioTask).SelectMany(rows => rows),
+                await investorAliasByLoanCodeTask,
+                filteredAliasNames,
+                query.InvestorAliases);
+            var investorSlices = BuildInvestorSummaryFromExposureRows(investorExposureRows);
 
             var kpis = kpisAndBreakdown.Kpis;
             var outstanding = kpisAndBreakdown.OutstandingInterest;
@@ -248,14 +239,13 @@ namespace kingsightapi.Services
             // Always align header balance / LTV / outstanding interest with the alias table
             // on screen (SQL KPI query can disagree or return zeros while alias rows have amounts).
             var aliasMetrics = BuildMetricsFromAliasRows(aliasRows);
-            var exposureBreakdown = deriveChartsFromAliasRows
-                ? aliasMetrics.ExposureBreakdown
-                : await exposureBreakdownTask;
+            // The breakdown TVF has no interest adjustment column; alias rows carry Int. Adj.
+            var exposureBreakdown = aliasMetrics.ExposureBreakdown;
             var top5Exposures = deriveChartsFromAliasRows
                 ? BuildTop5FromAliasRows(aliasRows)
                 : await top5Task;
             var sponsorSummary = investorFilter
-                ? BuildSponsorSummaryFromAliasRows(aliasRows)
+                ? BuildSponsorSummaryFromInvestorRows(investorExposureRows, aliasRows)
                 : FilterSponsorSummary(
                     MergeChartSlicesByLabel(await sponsorSummaryTask),
                     multiSponsor ? selectedSponsors : null);
@@ -289,7 +279,7 @@ namespace kingsightapi.Services
             };
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
-                FilterInvestorSummary(investorSlices, query, restrictToSelectedInvestors: !investorFilter),
+                FilterInvestorSummary(investorSlices, query),
                 PrependPrincipalSlice(
                     exposureBreakdown,
                     aliasRows.Sum(row => row.Principal),
@@ -634,24 +624,38 @@ namespace kingsightapi.Services
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                 .Any(selected.Contains);
 
-        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromAliasRows(
-            IReadOnlyList<LoanAliasSummaryRowDto> aliasRows) =>
-            aliasRows
-                .Where(row => !string.IsNullOrWhiteSpace(row.Sponsor))
-                .GroupBy(row => row.Sponsor!.Trim(), StringComparer.OrdinalIgnoreCase)
+        /// <summary>Sponsor exposure limited to the selected investors' loans (sponsor taken from the loan alias).</summary>
+        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromInvestorRows(
+            IReadOnlyList<InvestorExposureRow> investorRows,
+            IReadOnlyList<LoanAliasSummaryRowDto> aliasRows)
+        {
+            var aliasByName = aliasRows
+                .GroupBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+            return investorRows
+                .Select(row => (Row: row, Alias: aliasByName.GetValueOrDefault(row.LoanAlias)))
+                .Where(item => !string.IsNullOrWhiteSpace(item.Alias?.Sponsor))
+                .GroupBy(item => item.Alias!.Sponsor!.Trim(), StringComparer.OrdinalIgnoreCase)
                 .Select(group =>
                 {
-                    var ltvs = group.Where(row => row.Ltv.HasValue).Select(row => row.Ltv!.Value).ToList();
+                    var aliases = group
+                        .Select(item => item.Alias!)
+                        .DistinctBy(alias => alias.LoanAlias, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    var ltvs = aliases.Where(alias => alias.Ltv.HasValue).Select(alias => alias.Ltv!.Value).ToList();
                     return new ChartSliceDto
                     {
                         Label = group.Key,
-                        Value = group.Sum(row => row.TotalExposure),
-                        Count = group.Count(),
+                        Value = group.Sum(item => item.Row.Exposure),
+                        Count = aliases.Count,
                         AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null
                     };
                 })
+                .Where(slice => slice.Value > 0m)
                 .OrderByDescending(slice => slice.Value)
                 .ToList();
+        }
 
         private static bool HasInvestorFilter(ManagementSummaryDashboardQuery query) =>
             query.InvestorAliases is { Count: > 0 }
@@ -687,7 +691,12 @@ namespace kingsightapi.Services
                 })
                 .ToList();
 
-        private sealed record InvestorExposureRow(string LoanAlias, string LoanCode, string Investor, decimal Exposure);
+        private sealed record InvestorExposureRow(
+            string LoanAlias,
+            string LoanCode,
+            string Investor,
+            decimal Exposure,
+            string? AggregateFlag);
 
         /// <summary>
         /// Loan-grain investor exposure (no alias scope) so the investor summary can follow
@@ -703,7 +712,8 @@ namespace kingsightapi.Services
                     p.loan_alias_name,
                     p.loan_code,
                     p.investor_name,
-                    p.exposure
+                    p.exposure,
+                    p.aggregate_flag
                 from {_fnManagementDetailsLoanPortfolio}(
                     @as_of_date,
                     @default_date_from,
@@ -729,18 +739,75 @@ namespace kingsightapi.Services
                     GetNullableString(reader, "loan_alias_name") ?? string.Empty,
                     GetNullableString(reader, "loan_code") ?? string.Empty,
                     GetNullableString(reader, "investor_name") ?? string.Empty,
-                    GetNullableDecimal(reader, "exposure") ?? 0m));
+                    GetNullableDecimal(reader, "exposure") ?? 0m,
+                    GetNullableString(reader, "aggregate_flag")));
             }
 
             return rows;
         }
 
-        private static IReadOnlyList<ChartSliceDto> BuildInvestorSummaryFromExposureRows(
+        private async Task<Dictionary<string, string>> LoadInvestorAliasByLoanCodeAsync(
+            CancellationToken cancellationToken)
+        {
+            var sql = $"""
+                select distinct
+                    loan_code = ltrim(rtrim(v.loan_code)),
+                    investor_alias_name = ltrim(rtrim(v.investor_alias_name))
+                from {_vwLoanAttributes} v
+                where nullif(ltrim(rtrim(v.loan_code)), '') is not null
+                  and nullif(ltrim(rtrim(v.investor_alias_name)), '') is not null
+                """;
+
+            await using var connection = new SqlConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = new SqlCommand(sql, connection);
+
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                map.TryAdd(GetString(reader, "loan_code"), GetString(reader, "investor_alias_name"));
+            }
+
+            return map;
+        }
+
+        /// <summary>
+        /// Loan rows on the filtered aliases, relabelled by investor alias and limited to the
+        /// selected investor aliases. Only aggregate rows count, matching the report TOTALS.
+        /// </summary>
+        private static List<InvestorExposureRow> ResolveInvestorExposureRows(
             IEnumerable<InvestorExposureRow> rows,
-            IReadOnlySet<string> aliasNames) =>
+            IReadOnlyDictionary<string, string> investorAliasByLoanCode,
+            IReadOnlySet<string> aliasNames,
+            IReadOnlyList<string>? selectedInvestorAliases)
+        {
+            var selected = selectedInvestorAliases is { Count: > 0 }
+                && !selectedInvestorAliases.Any(alias => alias.Trim().Equals("All", StringComparison.OrdinalIgnoreCase))
+                    ? new HashSet<string>(
+                        selectedInvestorAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()),
+                        StringComparer.OrdinalIgnoreCase)
+                    : null;
+
+            return rows
+                .Where(row => aliasNames.Contains(row.LoanAlias))
+                .Where(row => string.IsNullOrWhiteSpace(row.AggregateFlag)
+                    || row.AggregateFlag.Trim().Equals("Y", StringComparison.OrdinalIgnoreCase))
+                .Select(row => row with
+                {
+                    Investor = investorAliasByLoanCode.TryGetValue(row.LoanCode.Trim(), out var investorAlias)
+                        ? investorAlias
+                        : row.Investor.Trim()
+                })
+                .Where(row => !string.IsNullOrWhiteSpace(row.Investor)
+                    && (selected is null || selected.Contains(row.Investor)))
+                .ToList();
+        }
+
+        private static IReadOnlyList<ChartSliceDto> BuildInvestorSummaryFromExposureRows(
+            IEnumerable<InvestorExposureRow> rows) =>
             rows
-                .Where(row => aliasNames.Contains(row.LoanAlias) && !string.IsNullOrWhiteSpace(row.Investor))
-                .GroupBy(row => row.Investor.Trim(), StringComparer.OrdinalIgnoreCase)
+                .GroupBy(row => row.Investor, StringComparer.OrdinalIgnoreCase)
                 .Select(group => new ChartSliceDto
                 {
                     Label = group.Key,
@@ -970,6 +1037,7 @@ namespace kingsightapi.Services
                 })
                 .ToList();
 
+            sponsorSummary = sponsorSummary.Where(slice => slice.Value > 0m).ToList();
             var sponsorTotal = sponsorSummary.Sum(slice => slice.Value);
             sponsorSummary = sponsorSummary
                 .Select(slice => new ChartSliceDto
@@ -3354,10 +3422,11 @@ namespace kingsightapi.Services
                 TotalLateInterest = lateInt
             };
 
+            // Int. Adj merged into O/S Int — pie charts cannot represent negative slices.
             var components = new (string Label, decimal Value)[]
             {
                 ("Principal", principal),
-                ("Outstanding Interest", osInt),
+                ("Outstanding Interest", osInt + aliasRows.Sum(r => r.IntAdv)),
                 ("Accrued", accrued),
                 ("Late Interest", lateInt),
                 ("Tax Arrears", taxIns),
