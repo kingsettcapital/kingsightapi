@@ -181,16 +181,18 @@ public class FundsController : ControllerBase
         }
     }
 
-    // GET: api/funds/{fundKey}/underlying-assets?page=1&pageSize=50
+    // GET: api/funds/{fundKey}/underlying-assets?page=1&pageSize=50&dateKey= (dateKey = quarterly period)
     [HttpGet("{fundKey:int}/underlying-assets")]
     public async Task<ActionResult<PagedResult<FundAssetDto>>> GetUnderlyingAssets(
         int fundKey,
         [FromQuery] int page = 1,
-        [FromQuery] int pageSize = 50)
+        [FromQuery] int pageSize = 50,
+        [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetFundUnderlyingAssetsAsync(fundKey, page, pageSize);
+            var result = await _service.GetFundUnderlyingAssetsAsync(
+                fundKey, page, pageSize, dateKey is > 0 ? dateKey : null);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -908,11 +910,11 @@ public class FundsController : ControllerBase
 
     // GET: api/funds/{fundKey}/asset-overview
     [HttpGet("{fundKey:int}/asset-overview")]
-    public async Task<ActionResult<FundAssetOverviewDto?>> GetAssetOverview(int fundKey)
+    public async Task<ActionResult<FundAssetOverviewDto?>> GetAssetOverview(int fundKey, [FromQuery] int? dateKey)
     {
         try
         {
-            var result = await _service.GetFundAssetOverviewAsync(fundKey);
+            var result = await _service.GetFundAssetOverviewAsync(fundKey, dateKey is > 0 ? dateKey : null);
             return Ok(result);
         }
         catch (OperationCanceledException)
