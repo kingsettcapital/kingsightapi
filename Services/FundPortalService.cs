@@ -78,11 +78,11 @@ public sealed partial class FundPortalService : IFundPortalService
         }
     }
 
-    public async Task<FundProfileDto?> GetFundByKeyAsync(int fundKey)
+    public async Task<FundProfileDto?> GetFundByKeyAsync(int fundKey, FundPeriodFilter? period = null)
     {
         try
         {
-            return await GetFundByKeyInternalAsync(fundKey);
+            return await GetFundByKeyInternalAsync(fundKey, period);
         }
         catch (OperationCanceledException)
         {

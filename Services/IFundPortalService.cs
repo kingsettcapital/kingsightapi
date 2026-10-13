@@ -20,7 +20,8 @@ public interface IFundPortalService
         string? search = null,
         string? fundType = null,
         string? strategy = null);
-    Task<FundProfileDto?> GetFundByKeyAsync(int fundKey);
+    /// <param name="period">When set (quarterly dateKey), header metrics come from the quarterly portfolio fact; otherwise ITD.</param>
+    Task<FundProfileDto?> GetFundByKeyAsync(int fundKey, FundPeriodFilter? period = null);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
     Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize);
     Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
