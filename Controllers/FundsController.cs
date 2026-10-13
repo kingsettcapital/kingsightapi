@@ -159,12 +159,14 @@ public class FundsController : ControllerBase
     }
 
     // GET: api/funds/{fundKey}
+    // GET: api/funds/{fundKey}?dateKey= (dateKey = quarterly period; omit for ITD)
     [HttpGet("{fundKey:int}")]
-    public async Task<ActionResult<FundProfileDto>> GetByKey(int fundKey)
+    public async Task<ActionResult<FundProfileDto>> GetByKey(int fundKey, [FromQuery] int? dateKey)
     {
         try
         {
-            var result = await _service.GetFundByKeyAsync(fundKey);
+            var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+            var result = await _service.GetFundByKeyAsync(fundKey, period);
             return result is null ? NotFound() : Ok(result);
         }
         catch (OperationCanceledException)
