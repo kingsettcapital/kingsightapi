@@ -6,11 +6,13 @@ namespace kingsightapi.Services;
 
 public sealed partial class PropertyPortalService
 {
-    public async Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsAsync(long consolidatedPropertyKey)
+    public async Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsAsync(
+        long consolidatedPropertyKey,
+        int? dateKey = null)
     {
         try
         {
-            return await GetPropertyDetailsInternalAsync(consolidatedPropertyKey);
+            return await GetPropertyDetailsInternalAsync(consolidatedPropertyKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -30,8 +32,10 @@ public sealed partial class PropertyPortalService
     }
 
     private async Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsInternalAsync(
-        long consolidatedPropertyKey)
+        long consolidatedPropertyKey,
+        int? dateKey)
     {
+        var quarterly = dateKey is > 0;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" isnull(a.property_code, '') as property_code, ");
@@ -58,6 +62,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" where a.consolidated_asset_key = @propertyKey ");
         sql.Append(" and a.property_code is not null ");
         sql.Append(" and a.asset_code is not null ");
+        WarehouseSql.AppendLatestAssetMetricsDateFilter(sql, "c", quarterly);
         sql.Append(" order by a.property_name, a.property_code ");
 
         await using var connection = new SqlConnection(_connectionString);
@@ -68,6 +73,10 @@ public sealed partial class PropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@propertyKey", consolidatedPropertyKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
 
         var items = new List<AssetPropertyDetailRowDto>();
         await using var reader = await command.ExecuteReaderAsync();

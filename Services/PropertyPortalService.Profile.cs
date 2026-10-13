@@ -6,8 +6,9 @@ namespace kingsightapi.Services;
 
 public sealed partial class PropertyPortalService
 {
-    private async Task<PropertyProfileDto?> GetPropertyByKeyInternalAsync(long propertyKey)
+    private async Task<PropertyProfileDto?> GetPropertyByKeyInternalAsync(long propertyKey, int? dateKey)
     {
+        var quarterly = dateKey is > 0;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" c.property_key, ");
@@ -26,7 +27,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" sum(metrics.committed_area_sqft) as committed_area_sqft, ");
         sql.Append(" sum(metrics.vacant_area_sqft) as vacant_area_sqft ");
         WarehouseSql.AppendConsolidatedAssetFrom(sql);
-        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p", "metrics");
+        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p", "metrics", includeLeasingColumns: false, restrictToQuarterFromDateKey: quarterly);
         sql.Append(" where c.property_key = @propertyKey ");
         WarehouseSql.AppendConsolidatedAssetGroupBy(sql);
 
@@ -38,6 +39,10 @@ public sealed partial class PropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@propertyKey", propertyKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
 
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())

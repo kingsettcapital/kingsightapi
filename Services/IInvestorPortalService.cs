@@ -62,7 +62,7 @@ public interface IInvestorPortalService
         int page,
         int pageSize);
 
-    Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey);
+    Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey, int? dateKey = null);
 
     Task<TransactionFilterOptionsDto> GetInvestorCapitalActivitiesFiltersAsync(
         long investorKey,

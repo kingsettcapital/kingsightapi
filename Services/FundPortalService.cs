@@ -646,11 +646,11 @@ public sealed partial class FundPortalService : IFundPortalService
         };
     }
 
-    public async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize)
+    public async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize, int? dateKey = null)
     {
         try
         {
-            return await GetFundUnderlyingAssetsInternalAsync(fundKey, page, pageSize);
+            return await GetFundUnderlyingAssetsInternalAsync(fundKey, page, pageSize, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -664,14 +664,15 @@ public sealed partial class FundPortalService : IFundPortalService
         }
     }
 
-    private async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsInternalAsync(int fundKey, int page, int pageSize)
+    private async Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsInternalAsync(int fundKey, int page, int pageSize, int? dateKey)
     {
         var (normalizedPage, normalizedPageSize, offset) = Pagination.Normalize(page, pageSize);
+        var quarterly = dateKey is > 0;
 
         var countSql = new StringBuilder();
         countSql.Append(" select count(*) from ( ");
         countSql.Append(" select c.property_key ");
-        AppendFundAssetHoldingsFrom(countSql);
+        AppendFundAssetHoldingsFrom(countSql, quarterly);
         countSql.Append(" group by c.property_key ");
         countSql.Append(" ) consolidated_assets ");
 
@@ -689,7 +690,7 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" c.property_disposition, ");
         pageSql.Append(" sum(metrics.gross_leasable_area_sqft) as gla_sf, ");
         pageSql.Append(" sum(metrics.occupied_area_sqft) as occupied_sf ");
-        AppendFundAssetHoldingsFrom(pageSql);
+        AppendFundAssetHoldingsFrom(pageSql, quarterly);
         pageSql.Append(" group by ");
         pageSql.Append(" c.property_key, ");
         pageSql.Append(" isnull(c.property_name, ''), ");
@@ -712,6 +713,10 @@ public sealed partial class FundPortalService : IFundPortalService
             CommandType = System.Data.CommandType.Text
         };
         countCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        if (quarterly)
+        {
+            countCommand.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
         var totalCount = Convert.ToInt32(await countCommand.ExecuteScalarAsync());
 
         await using var pageCommand = new SqlCommand(pageSql.ToString(), connection)
@@ -719,6 +724,10 @@ public sealed partial class FundPortalService : IFundPortalService
             CommandType = System.Data.CommandType.Text
         };
         pageCommand.Parameters.AddWithValue("@fundKey", fundKey);
+        if (quarterly)
+        {
+            pageCommand.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
         pageCommand.Parameters.AddWithValue("@offset", offset);
         pageCommand.Parameters.AddWithValue("@pageSize", normalizedPageSize);
 
@@ -768,18 +777,20 @@ public sealed partial class FundPortalService : IFundPortalService
     /// Asset Holdings: leaf 000 properties → ownership hierarchy → consolidated asset (c),
     /// metrics summed from leaf latest <c>fact_asset_metrics</c>, scoped by consolidated yardi fund.
     /// </summary>
-    private static void AppendFundAssetHoldingsFrom(StringBuilder sql)
+    private static void AppendFundAssetHoldingsFrom(StringBuilder sql, bool restrictMetricsToQuarter = false)
     {
         WarehouseSql.AppendConsolidatedAssetFrom(sql);
         sql.Append($" inner join {WarehouseTables.DimFund} f ");
         sql.Append(" on isnull(c.fund, '') = isnull(f.yardi_fund_code, '') ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
-        WarehouseSql.AppendLatestAssetMetricsApply(sql, "p");
+        WarehouseSql.AppendLatestAssetMetricsApply(
+            sql, "p", "metrics", includeLeasingColumns: false, restrictToQuarterFromDateKey: restrictMetricsToQuarter);
         sql.Append(" where ");
         WarehouseSql.AppendCurrentPropertyFilter(sql, "p");
         WarehouseSql.AppendPropertyFundLevel000Filter(sql, "p");
         sql.Append(" and c.property_status <> 'Sold'");
+        sql.Append(" and isnull(p.rent_roll_status, 'N/A') <> 'Development' ");
         sql.Append(" and f.fund_key = @fundKey ");
     }
 

@@ -6,11 +6,13 @@ namespace kingsightapi.Services;
 
 public sealed partial class PropertyPortalService
 {
-    public async Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryAsync(long consolidatedPropertyKey)
+    public async Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryAsync(
+        long consolidatedPropertyKey,
+        int? dateKey = null)
     {
         try
         {
-            return await GetAssetTypeSummaryInternalAsync(consolidatedPropertyKey);
+            return await GetAssetTypeSummaryInternalAsync(consolidatedPropertyKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -30,8 +32,10 @@ public sealed partial class PropertyPortalService
     }
 
     private async Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryInternalAsync(
-        long consolidatedPropertyKey)
+        long consolidatedPropertyKey,
+        int? dateKey)
     {
+        var quarterly = dateKey is > 0;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" a.consolidated_asset_key, ");
@@ -51,6 +55,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" and a.property_code is not null ");
         sql.Append(" and a.asset_code is not null ");
         sql.Append(" and a.consolidated_asset_code is not null ");
+        WarehouseSql.AppendLatestAssetMetricsDateFilter(sql, "c", quarterly);
         sql.Append(" group by ");
         sql.Append(" a.consolidated_asset_key, ");
         sql.Append(" isnull(a.consolidated_asset_code, ''), ");
@@ -66,6 +71,10 @@ public sealed partial class PropertyPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@propertyKey", consolidatedPropertyKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
 
         var items = new List<AssetTypeSummaryRowDto>();
         await using var reader = await command.ExecuteReaderAsync();
