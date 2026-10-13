@@ -416,4 +416,29 @@ internal static class WarehouseSql
         sql.Append(" order by date_key desc ");
         sql.Append($" ) {applyAlias} ");
     }
+
+    /// <summary>
+    /// Restricts a <c>fact_asset_metrics</c> row to the property's latest snapshot; when
+    /// <paramref name="restrictToQuarterFromDateKey"/> is true, the latest snapshot within the
+    /// <c>quarter_year</c> of <c>@dateKey</c> (requires <c>@dateKey</c> parameter).
+    /// </summary>
+    public static void AppendLatestAssetMetricsDateFilter(
+        StringBuilder sql,
+        string metricsAlias,
+        bool restrictToQuarterFromDateKey = false)
+    {
+        sql.Append($" and {metricsAlias}.date_key = ( ");
+        sql.Append($" select max(lm.date_key) from {WarehouseTables.FactAssetMetrics} lm ");
+        sql.Append($" where lm.property_key = {metricsAlias}.property_key ");
+        if (restrictToQuarterFromDateKey)
+        {
+            sql.Append(" and exists ( ");
+            sql.Append($" select 1 from {WarehouseTables.DimDate} lmd ");
+            sql.Append(" where lmd.date_key = lm.date_key ");
+            sql.Append($" and lmd.quarter_year = (select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey) ");
+            sql.Append(" ) ");
+        }
+
+        sql.Append(" ) ");
+    }
 }

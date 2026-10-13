@@ -23,7 +23,8 @@ public interface IFundPortalService
     /// <param name="period">When set (quarterly dateKey), header metrics come from the quarterly portfolio fact; otherwise ITD.</param>
     Task<FundProfileDto?> GetFundByKeyAsync(int fundKey, FundPeriodFilter? period = null);
     Task<PagedResult<FundInvestorDto>> GetFundInvestorsAsync(int fundKey, string? search, int page, int pageSize);
-    Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize);
+    /// <param name="dateKey">Quarterly period; metrics use the latest date in that quarter. Omit for latest.</param>
+    Task<PagedResult<FundAssetDto>> GetFundUnderlyingAssetsAsync(int fundKey, int page, int pageSize, int? dateKey = null);
     Task<PagedResult<FundPeriodDto>> GetFundPeriodsAsync(
         int fundKey,
         TimeGranularity view,
@@ -156,5 +157,6 @@ public interface IFundPortalService
         FundPeriodFilter? period,
         string? periodLabel = null);
 
-    Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey);
+    /// <param name="dateKey">Quarterly period; metrics use the latest date in that quarter. Omit for latest.</param>
+    Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey, int? dateKey = null);
 }
