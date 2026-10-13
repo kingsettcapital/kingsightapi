@@ -7,8 +7,9 @@ namespace kingsightapi.Services;
 
 public sealed partial class FundPortalService
 {
-    private async Task<FundProfileDto?> GetFundByKeyInternalAsync(int fundKey)
+    private async Task<FundProfileDto?> GetFundByKeyInternalAsync(int fundKey, FundPeriodFilter? period = null)
     {
+        var quarterly = period?.HasDateKey == true;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" f.fund_key, ");
@@ -40,8 +41,14 @@ public sealed partial class FundPortalService
         sql.Append(" sum(isnull(reserved_amount, 0)) as reserved_uncalled, ");
         sql.Append(" sum(isnull(unfunded_amount, 0)) as unfunded, ");
         sql.Append(" sum(isnull(released_capital_amount, 0)) as released_capital ");
-        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} ");
-        sql.Append(" where fund_key = f.fund_key ");
+        sql.Append(quarterly
+            ? $" from {WarehouseTables.FactInvestorPortfolioQuarterly} p "
+            : $" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
+        sql.Append(" where p.fund_key = f.fund_key ");
+        if (quarterly)
+        {
+            PortalPortfolioListSql.AppendPortfolioFactQuarterlyPeriodFilter(sql, period, "p");
+        }
         sql.Append(" ) port ");
         sql.Append(" outer apply ( ");
         sql.Append(" select count(*) as assets_count from ( ");
@@ -76,6 +83,10 @@ public sealed partial class FundPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@fundKey", fundKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", period!.DateKey!.Value);
+        }
 
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
