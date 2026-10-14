@@ -75,7 +75,9 @@ public sealed partial class FundPortalService
         sql.Append(" group by date_key ");
         sql.Append(" order by date_key desc ");
         sql.Append(" ) metrics ");
-        sql.Append(" where f.fund_key = @fundKey ");
+        sql.Append(" where c.property_status <> 'Sold' ");
+        sql.Append(" and isnull(p.rent_roll_status, 'N/A') <> 'Development' ");
+        sql.Append(" and f.fund_key = @fundKey ");
         sql.Append(" group by ");
         sql.Append(" f.fund_key, ");
         sql.Append(" isnull(c.fund, '') ");

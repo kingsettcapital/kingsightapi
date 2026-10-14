@@ -413,6 +413,7 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
     {
         // Match consolidated Assets SQL (no fund_level / asset_type-required filters).
         sql.Append(" where 1 = 1 and isnull(p.property_status, '') <> 'sold' ");
+        sql.Append(" and isnull(p.rent_roll_status, 'N/A') <> 'Development' ");
         WarehouseSql.AppendPropertySearchFilter(sql, "c");
         WarehouseSql.AppendPropertyAssetTypeFilter(sql, "c");
         WarehouseSql.AppendPropertyInvestmentTypeFilter(sql, "c");
