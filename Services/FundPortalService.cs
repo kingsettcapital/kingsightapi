@@ -689,7 +689,7 @@ public sealed partial class FundPortalService : IFundPortalService
         pageSql.Append(" c.property_acquisition, ");
         pageSql.Append(" c.property_disposition, ");
         pageSql.Append(" sum(metrics.gross_leasable_area_sqft) as gla_sf, ");
-        pageSql.Append(" sum(metrics.occupied_area_sqft) as occupied_sf ");
+        pageSql.Append(" sum(metrics.committed_area_sqft) as committed_sf ");
         AppendFundAssetHoldingsFrom(pageSql, quarterly);
         pageSql.Append(" group by ");
         pageSql.Append(" c.property_key, ");
@@ -737,11 +737,11 @@ public sealed partial class FundPortalService : IFundPortalService
             while (await reader.ReadAsync())
             {
                 var glaSf = reader.GetNullableDecimal("gla_sf");
-                var occupiedSf = reader.GetNullableDecimal("occupied_sf");
+                var committedSf = reader.GetNullableDecimal("committed_sf");
                 decimal? occupancyPct = null;
-                if (glaSf is > 0m && occupiedSf.HasValue)
+                if (glaSf is > 0m && committedSf.HasValue)
                 {
-                    occupancyPct = Math.Round(occupiedSf.Value / glaSf.Value * 100m, 4, MidpointRounding.AwayFromZero);
+                    occupancyPct = Math.Round(committedSf.Value / glaSf.Value * 100m, 4, MidpointRounding.AwayFromZero);
                 }
 
                 items.Add(new FundAssetDto
