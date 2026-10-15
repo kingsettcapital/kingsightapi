@@ -62,8 +62,8 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
         var columns = await GetColumnCatalogAsync(resolvedProduct);
         var groupOrder = resolvedProduct == DataExplorerProducts.Asset
-            ? new[] { DataExplorerGroups.Asset, DataExplorerGroups.Fund, DataExplorerGroups.Investors }
-            : new[] { DataExplorerGroups.Investors, DataExplorerGroups.Fund, DataExplorerGroups.Capital };
+            ? new[] { DataExplorerGroups.Asset, DataExplorerGroups.Period, DataExplorerGroups.Fund, DataExplorerGroups.Investors }
+            : new[] { DataExplorerGroups.Investors, DataExplorerGroups.Fund, DataExplorerGroups.Capital, DataExplorerGroups.Period };
 
         return groupOrder
             .Select(group => new DataExplorerColumnGroupDto
@@ -462,8 +462,20 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
     // --- presentation helpers ------------------------------------------------------------------
 
+    private static readonly HashSet<string> PeriodColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "quarter_year",
+        "year",
+        "date"
+    };
+
     private static string ClassifyGroup(string columnName)
     {
+        if (PeriodColumns.Contains(columnName))
+        {
+            return DataExplorerGroups.Period;
+        }
+
         var lower = columnName.ToLowerInvariant();
 
         if (lower.Contains("investor") || lower.Contains("relationship") || lower.Contains("contact") || lower.Contains("client"))
@@ -481,6 +493,11 @@ public sealed partial class DataExplorerService : IDataExplorerService
 
     private static string ClassifyAssetGroup(string columnName)
     {
+        if (PeriodColumns.Contains(columnName))
+        {
+            return DataExplorerGroups.Period;
+        }
+
         var lower = columnName.ToLowerInvariant();
 
         if (lower.Contains("investor") || lower.Contains("relationship") || lower.Contains("contact") || lower.Contains("client"))
