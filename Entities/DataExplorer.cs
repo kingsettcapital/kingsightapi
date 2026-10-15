@@ -13,6 +13,7 @@ public static class DataExplorerGroups
     public const string Fund = "Fund";
     public const string Capital = "Capital";
     public const string Asset = "Asset";
+    public const string Period = "Period";
 }
 
 /// <summary>Data Explorer product dropdown values.</summary>
