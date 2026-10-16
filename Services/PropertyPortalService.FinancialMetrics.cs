@@ -52,9 +52,8 @@ public sealed partial class PropertyPortalService
         var periodLabel = await AssetPortalPeriodSql.ResolvePeriodLabelAsync(
             connection, period, view, dateKey);
 
-        // select * so budgeted/forecasted FFO are picked up once the warehouse TVFs expose them.
+        // Explicit columns (debt/LTV abs, equity/NAV sign) match MapAssetFinancialMetrics; optional FFO via GetOptionalDecimal when TVFs add columns.
         var sql = new StringBuilder();
-<<<<<<< HEAD
         sql.Append(" select top 1 ");
         sql.Append(" isnull(fund_code, '') as fund_code, ");
         sql.Append(" asset_key, ");
@@ -85,9 +84,6 @@ public sealed partial class PropertyPortalService
         sql.Append(" current_cost_book_value, ");
         sql.Append(" budgeted_noi_current_year, ");
         sql.Append(" forecasted_noi_current_year ");
-=======
-        sql.Append(" select top 1 * ");
->>>>>>> bda25b313d72a5405cb21df32b639dead75023eb
         sql.Append($" from {fn}(@assetKey, @period) ");
         sql.Append(" order by as_of_date desc, isnull(fund_code, '') ");
 
