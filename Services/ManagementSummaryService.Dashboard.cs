@@ -168,8 +168,8 @@ namespace kingsightapi.Services
                 queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatuses, cancellationToken);
-            // Loan-grain exposure (investor filter applied in-process) so the investor and sponsor
-            // summaries total the selected investors' exposure, labelled by investor alias.
+            // Loan-grain exposure for every investor on the filtered aliases, labelled by investor
+            // alias, so the investor summary totals the table's Total Exposure.
             var investorPortfolioTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
                 status => LoadDashboardInvestorExposureRowsAsync(
@@ -229,8 +229,7 @@ namespace kingsightapi.Services
             var investorExposureRows = ResolveInvestorExposureRows(
                 (await investorPortfolioTask).SelectMany(rows => rows),
                 await investorAliasByLoanCodeTask,
-                filteredAliasNames,
-                query.InvestorAliases);
+                filteredAliasNames);
             var investorSlices = BuildInvestorSummaryFromExposureRows(investorExposureRows);
 
             var kpis = kpisAndBreakdown.Kpis;
@@ -245,7 +244,7 @@ namespace kingsightapi.Services
                 ? BuildTop5FromAliasRows(aliasRows)
                 : await top5Task;
             var sponsorSummary = investorFilter
-                ? BuildSponsorSummaryFromInvestorRows(investorExposureRows, aliasRows)
+                ? BuildSponsorSummaryFromAliasRows(aliasRows)
                 : FilterSponsorSummary(
                     MergeChartSlicesByLabel(await sponsorSummaryTask),
                     multiSponsor ? selectedSponsors : null);
@@ -279,7 +278,7 @@ namespace kingsightapi.Services
             };
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
-                FilterInvestorSummary(investorSlices, query),
+                FilterInvestorSummary(investorSlices, query, restrictToSelectedInvestors: false),
                 PrependPrincipalSlice(
                     exposureBreakdown,
                     aliasRows.Sum(row => row.Principal),
@@ -624,37 +623,55 @@ namespace kingsightapi.Services
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
                 .Any(selected.Contains);
 
-        /// <summary>Sponsor exposure limited to the selected investors' loans (sponsor taken from the loan alias).</summary>
-        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromInvestorRows(
-            IReadOnlyList<InvestorExposureRow> investorRows,
+        /// <summary>Sponsor exposure over the filtered aliases, so the chart totals the table's Total Exposure.</summary>
+        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromAliasRows(
             IReadOnlyList<LoanAliasSummaryRowDto> aliasRows)
         {
-            var aliasByName = aliasRows
-                .GroupBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
-
-            return investorRows
-                .Select(row => (Row: row, Alias: aliasByName.GetValueOrDefault(row.LoanAlias)))
-                .Where(item => !string.IsNullOrWhiteSpace(item.Alias?.Sponsor))
-                .GroupBy(item => item.Alias!.Sponsor!.Trim(), StringComparer.OrdinalIgnoreCase)
+            var slices = aliasRows
+                .Select(row => (Row: row, Sponsor: NormalizeSponsorLabel(row.Sponsor)))
+                .GroupBy(item => item.Sponsor, StringComparer.OrdinalIgnoreCase)
                 .Select(group =>
                 {
-                    var aliases = group
-                        .Select(item => item.Alias!)
-                        .DistinctBy(alias => alias.LoanAlias, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    var ltvs = aliases.Where(alias => alias.Ltv.HasValue).Select(alias => alias.Ltv!.Value).ToList();
+                    var ltvs = group.Where(item => item.Row.Ltv.HasValue).Select(item => item.Row.Ltv!.Value).ToList();
                     return new ChartSliceDto
                     {
                         Label = group.Key,
-                        Value = group.Sum(item => item.Row.Exposure),
-                        Count = aliases.Count,
+                        Value = group.Sum(item => item.Row.TotalExposure),
+                        Count = group.Count(),
                         AverageLtv = ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null
                     };
                 })
                 .Where(slice => slice.Value > 0m)
+                .ToList();
+
+            var total = slices.Sum(slice => slice.Value);
+            return slices
+                .Select(slice => new ChartSliceDto
+                {
+                    Label = slice.Label,
+                    Value = slice.Value,
+                    Count = slice.Count,
+                    AverageLtv = slice.AverageLtv,
+                    SharePercent = total > 0 ? Math.Round(slice.Value / total * 100m, 2) : null
+                })
                 .OrderByDescending(slice => slice.Value)
                 .ToList();
+        }
+
+        private static readonly HashSet<string> SponsorPlaceholders =
+            new(["NA", "N/A", "NULL", "-", "Unknown", "(Unknown)"], StringComparer.OrdinalIgnoreCase);
+
+        private const string NoSponsorLabel = "No Sponsor";
+
+        /// <summary>Drops placeholder names (e.g. "NA") and duplicates from a comma-separated sponsor cell.</summary>
+        private static string NormalizeSponsorLabel(string? sponsorCell)
+        {
+            var names = (sponsorCell ?? string.Empty)
+                .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                .Where(name => !SponsorPlaceholders.Contains(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return names.Count == 0 ? NoSponsorLabel : string.Join(", ", names);
         }
 
         private static bool HasInvestorFilter(ManagementSummaryDashboardQuery query) =>
@@ -773,22 +790,14 @@ namespace kingsightapi.Services
         }
 
         /// <summary>
-        /// Loan rows on the filtered aliases, relabelled by investor alias and limited to the
-        /// selected investor aliases. Only aggregate rows count, matching the report TOTALS.
+        /// Loan rows on the filtered aliases (all investors), relabelled by investor alias.
+        /// Only aggregate rows count, matching the report TOTALS.
         /// </summary>
         private static List<InvestorExposureRow> ResolveInvestorExposureRows(
             IEnumerable<InvestorExposureRow> rows,
             IReadOnlyDictionary<string, string> investorAliasByLoanCode,
-            IReadOnlySet<string> aliasNames,
-            IReadOnlyList<string>? selectedInvestorAliases)
+            IReadOnlySet<string> aliasNames)
         {
-            var selected = selectedInvestorAliases is { Count: > 0 }
-                && !selectedInvestorAliases.Any(alias => alias.Trim().Equals("All", StringComparison.OrdinalIgnoreCase))
-                    ? new HashSet<string>(
-                        selectedInvestorAliases.Where(alias => !string.IsNullOrWhiteSpace(alias)).Select(alias => alias.Trim()),
-                        StringComparer.OrdinalIgnoreCase)
-                    : null;
-
             return rows
                 .Where(row => aliasNames.Contains(row.LoanAlias))
                 .Where(row => string.IsNullOrWhiteSpace(row.AggregateFlag)
@@ -799,8 +808,7 @@ namespace kingsightapi.Services
                         ? investorAlias
                         : row.Investor.Trim()
                 })
-                .Where(row => !string.IsNullOrWhiteSpace(row.Investor)
-                    && (selected is null || selected.Contains(row.Investor)))
+                .Where(row => !string.IsNullOrWhiteSpace(row.Investor))
                 .ToList();
         }
 
