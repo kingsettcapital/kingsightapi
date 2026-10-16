@@ -54,7 +54,40 @@ public sealed partial class PropertyPortalService
 
         // select * so budgeted/forecasted FFO are picked up once the warehouse TVFs expose them.
         var sql = new StringBuilder();
+<<<<<<< HEAD
+        sql.Append(" select top 1 ");
+        sql.Append(" isnull(fund_code, '') as fund_code, ");
+        sql.Append(" asset_key, ");
+        sql.Append(" isnull(asset_code, '') as asset_code, ");
+        sql.Append(" isnull(asset_name, '') as asset_name, ");
+        sql.Append(" as_of_date, ");
+        sql.Append(" isnull(quarter_year, '') as quarter_year, ");
+        sql.Append(" asset_ks_ownership_pct, ");
+        sql.Append(" isnull(asset_jv_partner, '') as asset_jv_partner, ");
+        sql.Append(" asset_jv_pct, ");
+        sql.Append(" asset_cash_at_quarter_end, ");
+        sql.Append(" asset_total_asset_value, ");
+        sql.Append(" abs(asset_debt) as asset_debt, ");
+        sql.Append(" asset_equity * -1 as asset_equity, ");
+        sql.Append(" asset_noi, ");
+        sql.Append(" asset_prior_year_same_period, ");
+        sql.Append(" asset_prior_year_end_noi, ");
+        sql.Append(" asset_ffo, ");
+        sql.Append(" asset_capex, ");
+        sql.Append(" asset_nav_amount*-1 as asset_nav_amount, ");
+        sql.Append(" asset_gross_market_value, ");
+        sql.Append(" asset_gav_amount, ");
+        sql.Append(" asset_net_income, ");
+        sql.Append(" abs(asset_ltv) as asset_ltv, ");
+        sql.Append(" asset_capex_pct_noi, ");
+        sql.Append(" total_noi_growth_amount, ");
+        sql.Append(" total_noi_growth_pct, ");
+        sql.Append(" current_cost_book_value, ");
+        sql.Append(" budgeted_noi_current_year, ");
+        sql.Append(" forecasted_noi_current_year ");
+=======
         sql.Append(" select top 1 * ");
+>>>>>>> bda25b313d72a5405cb21df32b639dead75023eb
         sql.Append($" from {fn}(@assetKey, @period) ");
         sql.Append(" order by as_of_date desc, isnull(fund_code, '') ");
 
