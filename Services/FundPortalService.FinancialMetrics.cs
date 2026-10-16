@@ -62,7 +62,7 @@ public sealed partial class FundPortalService
         sql.Append(" fund_equity*-1 as fund_equity, ");
         sql.Append(" fund_noi, ");
         sql.Append(" fund_ffo, ");
-        sql.Append(" fund_capex, ");
+        sql.Append(" fund_capex*-1 as fund_capex, ");
         sql.Append(" fund_nav_amount*-1 as fund_nav_amount, ");
         sql.Append(" fund_net_income, ");
         sql.Append(" fund_gross_market_value, ");

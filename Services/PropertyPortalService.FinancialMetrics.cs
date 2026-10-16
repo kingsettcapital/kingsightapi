@@ -72,7 +72,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" asset_prior_year_same_period, ");
         sql.Append(" asset_prior_year_end_noi, ");
         sql.Append(" asset_ffo, ");
-        sql.Append(" asset_capex, ");
+        sql.Append(" asset_capex *-1 as asset_capex, ");
         sql.Append(" asset_nav_amount*-1 as asset_nav_amount, ");
         sql.Append(" asset_gross_market_value, ");
         sql.Append(" asset_gav_amount, ");
