@@ -78,7 +78,7 @@ public sealed partial class PropertyPortalService
         sql.Append(" asset_gav_amount, ");
         sql.Append(" asset_net_income, ");
         sql.Append(" abs(asset_ltv) as asset_ltv, ");
-        sql.Append(" asset_capex_pct_noi, ");
+        sql.Append(" asset_capex_pct_noi*-1 as asset_capex_pct_noi, ");
         sql.Append(" total_noi_growth_amount, ");
         sql.Append(" total_noi_growth_pct, ");
         sql.Append(" current_cost_book_value, ");
