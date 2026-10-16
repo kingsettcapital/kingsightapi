@@ -52,7 +52,9 @@ public sealed partial class PropertyPortalService
         var periodLabel = await AssetPortalPeriodSql.ResolvePeriodLabelAsync(
             connection, period, view, dateKey);
 
+        // select * so budgeted/forecasted FFO are picked up once the warehouse TVFs expose them.
         var sql = new StringBuilder();
+<<<<<<< HEAD
         sql.Append(" select top 1 ");
         sql.Append(" isnull(fund_code, '') as fund_code, ");
         sql.Append(" asset_key, ");
@@ -83,6 +85,9 @@ public sealed partial class PropertyPortalService
         sql.Append(" current_cost_book_value, ");
         sql.Append(" budgeted_noi_current_year, ");
         sql.Append(" forecasted_noi_current_year ");
+=======
+        sql.Append(" select top 1 * ");
+>>>>>>> bda25b313d72a5405cb21df32b639dead75023eb
         sql.Append($" from {fn}(@assetKey, @period) ");
         sql.Append(" order by as_of_date desc, isnull(fund_code, '') ");
 
@@ -143,8 +148,21 @@ public sealed partial class PropertyPortalService
             CostBasisAmount = null,
             BudgetedNoiCurrentYear = reader.GetNullableDecimal("budgeted_noi_current_year"),
             ForecastedNoiCurrentYear = reader.GetNullableDecimal("forecasted_noi_current_year"),
-            BudgetedFfo = null,
-            ForecastedFfo = null,
+            BudgetedFfo = GetOptionalDecimal(reader, "budgeted_ffo_current_year"),
+            ForecastedFfo = GetOptionalDecimal(reader, "forecasted_ffo_current_year"),
         };
+    }
+
+    private static decimal? GetOptionalDecimal(SqlDataReader reader, string column)
+    {
+        for (var i = 0; i < reader.FieldCount; i++)
+        {
+            if (string.Equals(reader.GetName(i), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return reader.GetNullableDecimal(column);
+            }
+        }
+
+        return null;
     }
 }

@@ -7,11 +7,11 @@ namespace kingsightapi.Services;
 
 public sealed partial class InvestorPortalService
 {
-    public async Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey)
+    public async Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsAsync(long investorKey, int? dateKey = null)
     {
         try
         {
-            return await GetInvestorFundHoldingsInternalAsync(investorKey);
+            return await GetInvestorFundHoldingsInternalAsync(investorKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -141,8 +141,10 @@ public sealed partial class InvestorPortalService
         return new TransactionFilterOptionsDto { Items = items };
     }
 
-    private async Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsInternalAsync(long investorKey)
+    private async Task<InvestorFundHoldingsResultDto> GetInvestorFundHoldingsInternalAsync(long investorKey, int? dateKey)
     {
+        var period = dateKey is > 0 ? new FundPeriodFilter { DateKey = dateKey } : null;
+        var quarterly = period?.HasDateKey == true;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" max(p.date_key) as date_key, ");
@@ -157,7 +159,9 @@ public sealed partial class InvestorPortalService
         sql.Append(" sum(isnull(p.preferred_return_amount, 0)) ");
         sql.Append(" + sum(isnull(p.sales_gain_amount, 0)) ");
         sql.Append(" + sum(isnull(p.excess_cash_amount, 0)) as distributed_amount ");
-        sql.Append($" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
+        sql.Append(quarterly
+            ? $" from {WarehouseTables.FactInvestorPortfolioQuarterly} p "
+            : $" from {WarehouseTables.FactInvestorPortfolioLtd} p ");
         sql.Append($" inner join {WarehouseTables.DimFund} f on f.fund_key = p.fund_key ");
         sql.Append(" and ");
         WarehouseSql.AppendCurrentFundFilter(sql, "f");
@@ -172,10 +176,17 @@ public sealed partial class InvestorPortalService
         sql.Append(" group by fi.fund_key ");
         sql.Append(" ) as since_dates on since_dates.fund_key = f.fund_key ");
         sql.Append(" where p.investor_key = @investorKey ");
-        sql.Append(" and p.date_key = ( ");
-        sql.Append($" select max(date_key) from {WarehouseTables.FactInvestorPortfolioLtd} ");
-        sql.Append(" where investor_key = @investorKey ");
-        sql.Append(" ) ");
+        if (quarterly)
+        {
+            PortalPortfolioListSql.AppendPortfolioFactQuarterlyPeriodFilter(sql, period, "p");
+        }
+        else
+        {
+            sql.Append(" and p.date_key = ( ");
+            sql.Append($" select max(date_key) from {WarehouseTables.FactInvestorPortfolioLtd} ");
+            sql.Append(" where investor_key = @investorKey ");
+            sql.Append(" ) ");
+        }
         sql.Append(" group by f.fund_key ");
         sql.Append(" order by fund_name ");
 
@@ -187,15 +198,19 @@ public sealed partial class InvestorPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@investorKey", investorKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", period!.DateKey!.Value);
+        }
 
-        int? dateKey = null;
+        int? resultDateKey = null;
         var items = new List<InvestorFundHoldingDto>();
 
         await using (var reader = await command.ExecuteReaderAsync())
         {
             while (await reader.ReadAsync())
             {
-                dateKey ??= reader.GetNullableInt32("date_key");
+                resultDateKey ??= reader.GetNullableInt32("date_key");
 
                 items.Add(new InvestorFundHoldingDto
                 {
@@ -213,7 +228,7 @@ public sealed partial class InvestorPortalService
 
         return new InvestorFundHoldingsResultDto
         {
-            DateKey = dateKey,
+            DateKey = resultDateKey,
             Items = items
         };
     }

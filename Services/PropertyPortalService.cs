@@ -20,12 +20,12 @@ public interface IPropertyPortalService
         string? fundCode,
         TimeGranularity view = TimeGranularity.Ltd,
         int? dateKey = null);
-    Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey);
-    Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey);
+    Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey, int? dateKey = null);
+    Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey, int? dateKey = null);
     Task<IReadOnlyList<PropertyInvestmentDto>> GetPropertyInvestmentsAsync(long propertyKey);
     Task<IReadOnlyList<PropertyFundHoldingDto>> GetPropertyFundHoldingsAsync(long propertyKey);
-    Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsAsync(long consolidatedPropertyKey);
-    Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryAsync(long consolidatedPropertyKey);
+    Task<IReadOnlyList<AssetPropertyDetailRowDto>> GetPropertyDetailsAsync(long consolidatedPropertyKey, int? dateKey = null);
+    Task<IReadOnlyList<AssetTypeSummaryRowDto>> GetAssetTypeSummaryAsync(long consolidatedPropertyKey, int? dateKey = null);
     Task<AssetFinancialMetricsDto?> GetAssetFinancialMetricsAsync(
         long assetKey,
         TimeGranularity view,
@@ -96,11 +96,11 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         }
     }
 
-    public async Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey)
+    public async Task<PropertyProfileDto?> GetPropertyByKeyAsync(long propertyKey, int? dateKey = null)
     {
         try
         {
-            return await GetPropertyByKeyInternalAsync(propertyKey);
+            return await GetPropertyByKeyInternalAsync(propertyKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -114,11 +114,11 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
         }
     }
 
-    public async Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey)
+    public async Task<AssetLeasingSummaryDto?> GetPropertyLeasingSummaryAsync(long propertyKey, int? dateKey = null)
     {
         try
         {
-            return await GetPropertyLeasingSummaryInternalAsync(propertyKey);
+            return await GetPropertyLeasingSummaryInternalAsync(propertyKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -413,6 +413,7 @@ public sealed partial class PropertyPortalService : IPropertyPortalService
     {
         // Match consolidated Assets SQL (no fund_level / asset_type-required filters).
         sql.Append(" where 1 = 1 and isnull(p.property_status, '') <> 'sold' ");
+        sql.Append(" and isnull(p.rent_roll_status, 'N/A') <> 'Development' ");
         WarehouseSql.AppendPropertySearchFilter(sql, "c");
         WarehouseSql.AppendPropertyAssetTypeFilter(sql, "c");
         WarehouseSql.AppendPropertyInvestmentTypeFilter(sql, "c");

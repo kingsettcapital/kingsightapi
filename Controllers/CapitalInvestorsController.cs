@@ -306,11 +306,13 @@ public class CapitalInvestorsController : ControllerBase
 
     // GET: api/CapitalInvestors/{investorKey}/fund-holdings
     [HttpGet("{investorKey:long}/fund-holdings")]
-    public async Task<ActionResult<InvestorFundHoldingsResultDto>> GetFundHoldings(long investorKey)
+    public async Task<ActionResult<InvestorFundHoldingsResultDto>> GetFundHoldings(
+        long investorKey,
+        [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetInvestorFundHoldingsAsync(investorKey);
+            var result = await _service.GetInvestorFundHoldingsAsync(investorKey, dateKey);
             return Ok(result);
         }
         catch (OperationCanceledException)

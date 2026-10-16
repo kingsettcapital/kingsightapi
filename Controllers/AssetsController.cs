@@ -101,11 +101,11 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}
     [HttpGet("{propertyKey:long}")]
-    public async Task<ActionResult<PropertyProfileDto>> GetByKey(long propertyKey)
+    public async Task<ActionResult<PropertyProfileDto>> GetByKey(long propertyKey, [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetPropertyByKeyAsync(propertyKey);
+            var result = await _service.GetPropertyByKeyAsync(propertyKey, dateKey);
             return result is null ? NotFound() : Ok(result);
         }
         catch (OperationCanceledException)
@@ -122,11 +122,11 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}/leasing-summary
     [HttpGet("{propertyKey:long}/leasing-summary")]
-    public async Task<ActionResult<AssetLeasingSummaryDto>> GetLeasingSummary(long propertyKey)
+    public async Task<ActionResult<AssetLeasingSummaryDto>> GetLeasingSummary(long propertyKey, [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetPropertyLeasingSummaryAsync(propertyKey);
+            var result = await _service.GetPropertyLeasingSummaryAsync(propertyKey, dateKey);
             return result is null ? NotFound() : Ok(result);
         }
         catch (OperationCanceledException)
@@ -164,11 +164,11 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}/property-details
     [HttpGet("{propertyKey:long}/property-details")]
-    public async Task<ActionResult<IReadOnlyList<AssetPropertyDetailRowDto>>> GetPropertyDetails(long propertyKey)
+    public async Task<ActionResult<IReadOnlyList<AssetPropertyDetailRowDto>>> GetPropertyDetails(long propertyKey, [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetPropertyDetailsAsync(propertyKey);
+            var result = await _service.GetPropertyDetailsAsync(propertyKey, dateKey);
             return Ok(result);
         }
         catch (OperationCanceledException)
@@ -189,11 +189,11 @@ public class AssetsController : ControllerBase
 
     // GET: api/assets/{propertyKey}/asset-type-summary
     [HttpGet("{propertyKey:long}/asset-type-summary")]
-    public async Task<ActionResult<IReadOnlyList<AssetTypeSummaryRowDto>>> GetAssetTypeSummary(long propertyKey)
+    public async Task<ActionResult<IReadOnlyList<AssetTypeSummaryRowDto>>> GetAssetTypeSummary(long propertyKey, [FromQuery] int? dateKey = null)
     {
         try
         {
-            var result = await _service.GetAssetTypeSummaryAsync(propertyKey);
+            var result = await _service.GetAssetTypeSummaryAsync(propertyKey, dateKey);
             return Ok(result);
         }
         catch (OperationCanceledException)

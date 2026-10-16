@@ -6,11 +6,11 @@ namespace kingsightapi.Services;
 
 public sealed partial class FundPortalService
 {
-    public async Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey)
+    public async Task<FundAssetOverviewDto?> GetFundAssetOverviewAsync(int fundKey, int? dateKey = null)
     {
         try
         {
-            return await GetFundAssetOverviewInternalAsync(fundKey);
+            return await GetFundAssetOverviewInternalAsync(fundKey, dateKey);
         }
         catch (OperationCanceledException)
         {
@@ -24,8 +24,9 @@ public sealed partial class FundPortalService
         }
     }
 
-    private async Task<FundAssetOverviewDto?> GetFundAssetOverviewInternalAsync(int fundKey)
+    private async Task<FundAssetOverviewDto?> GetFundAssetOverviewInternalAsync(int fundKey, int? dateKey)
     {
+        var quarterly = dateKey is > 0;
         var sql = new StringBuilder();
         sql.Append(" select ");
         sql.Append(" f.fund_key, ");
@@ -63,10 +64,20 @@ public sealed partial class FundPortalService
         sql.Append(" weighted_avg_lease_term_rent_months = 0 ");
         sql.Append($" from {WarehouseTables.FactAssetMetrics} m ");
         sql.Append(" where m.property_key = p.property_key ");
+        if (quarterly)
+        {
+            sql.Append(" and exists ( ");
+            sql.Append($" select 1 from {WarehouseTables.DimDate} md ");
+            sql.Append(" where md.date_key = m.date_key ");
+            sql.Append($" and md.quarter_year = (select quarter_year from {WarehouseTables.DimDate} where date_key = @dateKey) ");
+            sql.Append(" ) ");
+        }
         sql.Append(" group by date_key ");
         sql.Append(" order by date_key desc ");
         sql.Append(" ) metrics ");
-        sql.Append(" where f.fund_key = @fundKey ");
+        sql.Append(" where c.property_status <> 'Sold' ");
+        sql.Append(" and isnull(p.rent_roll_status, 'N/A') <> 'Development' ");
+        sql.Append(" and f.fund_key = @fundKey ");
         sql.Append(" group by ");
         sql.Append(" f.fund_key, ");
         sql.Append(" isnull(c.fund, '') ");
@@ -79,6 +90,10 @@ public sealed partial class FundPortalService
             CommandType = System.Data.CommandType.Text
         };
         command.Parameters.AddWithValue("@fundKey", fundKey);
+        if (quarterly)
+        {
+            command.Parameters.AddWithValue("@dateKey", dateKey!.Value);
+        }
 
         await using var reader = await command.ExecuteReaderAsync();
         if (!await reader.ReadAsync())
