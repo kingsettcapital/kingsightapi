@@ -44,6 +44,8 @@ namespace kingsightapi.Services
         private bool? _tableAvailable;
         private bool _schemaProbed;
         private bool _hasTaxArrearKeyColumn;
+        private bool _hasDescriptionColumn;
+        private bool _hasLoanAliasColumn;
         private SubjectiveInputRelationshipAuditColumns _auditColumns = new();
 
         public TaxArrearsService(
@@ -591,14 +593,46 @@ namespace kingsightapi.Services
                 values.Insert(0, "@tax_arrear_key");
             }
 
+            if (_hasDescriptionColumn)
+            {
+                columns.Add("description");
+                values.Add(RelationshipLookupSql("loan_description"));
+            }
+
+            if (_hasLoanAliasColumn)
+            {
+                columns.Add("loan_alias");
+                values.Add(RelationshipLookupSql("loan_alias_name"));
+            }
+
             var auditInsert = _auditColumns.BuildInsertColumnList();
             columns.AddRange(auditInsert.Columns);
             values.AddRange(auditInsert.Values);
 
             return $"""
                 insert into {_tblTaxArrears} ({string.Join(", ", columns)})
-                values ({string.Join(", ", values)})
+                select {string.Join(", ", values)}
                 """;
+        }
+
+        /// <summary>Description / loan alias for @loan_code, as shown on the Tax Arrears screen.</summary>
+        private string RelationshipLookupSql(string column) =>
+            $"(select top (1) r.{column} from {_tblLoanAliasRelationship} r where r.loan_code = @loan_code order by r.loan_alias_name)";
+
+        private string BuildDescriptionAndAliasSetClause()
+        {
+            var set = new StringBuilder();
+            if (_hasDescriptionColumn)
+            {
+                set.Append($",\n                    description = coalesce(nullif(description, ''), {RelationshipLookupSql("loan_description")})");
+            }
+
+            if (_hasLoanAliasColumn)
+            {
+                set.Append($",\n                    loan_alias = coalesce(nullif(loan_alias, ''), {RelationshipLookupSql("loan_alias_name")})");
+            }
+
+            return set.ToString();
         }
 
         private string BuildUpdateByLoanCodeSql() =>
@@ -607,7 +641,7 @@ namespace kingsightapi.Services
                 set tax_memo_date = @tax_memo_date,
                     tax_arrears = @tax_arrears,
                     tax_year = @tax_year,
-                    tax_notes = @notes{_auditColumns.BuildUpdateSetClause()}
+                    tax_notes = @notes{BuildDescriptionAndAliasSetClause()}{_auditColumns.BuildUpdateSetClause()}
                 where loan_code = @loan_code
                   and (
                         (@original_tax_memo_date is null and tax_memo_date is null)
@@ -626,6 +660,8 @@ namespace kingsightapi.Services
             await EnsureTableAvailableAsync(cancellationToken);
 
             _hasTaxArrearKeyColumn = await ColumnExistsAsync("tax_arrear_key", cancellationToken);
+            _hasDescriptionColumn = await ColumnExistsAsync("description", cancellationToken);
+            _hasLoanAliasColumn = await ColumnExistsAsync("loan_alias", cancellationToken);
             _logger.LogInformation(
                 "Tax arrears schema probe complete. table={Table}, hasTaxArrearKey={HasKey}",
                 _tblTaxArrears,

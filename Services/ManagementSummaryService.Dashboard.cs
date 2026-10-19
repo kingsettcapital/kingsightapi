@@ -152,40 +152,44 @@ namespace kingsightapi.Services
             var deriveChartsFromAliasRows = multiStatus || multiSponsor || investorFilter;
             // % of Fundings denominator ignores Funding Status (except excludes Unfunded) —
             // load the all-status and Unfunded universes in parallel with the main queries.
-            var queryWithoutFundingStatus = WithoutFundingStatusFilter(query);
+            // TVFs never receive the investor: the alias / exposure-analysis TVFs drop every alias
+            // when filtered to a non-MLP/SMF investor, and only take one value. Instead the alias and
+            // exposure-analysis amounts are summed over the selected investors' loans in our SQL.
+            var sqlQuery = WithoutInvestorFilter(query);
+            var selectedInvestors = ResolveSelectedInvestorAliases(query.InvestorAliases);
+            var queryWithoutFundingStatus = WithoutFundingStatusFilter(sqlQuery);
 
             // Keep Fabric round-trips minimal: only queries that cannot be derived from alias rows.
             // LTV risk / top 5 / sponsor / exposure breakdown are computed in-memory from alias data.
             var kpisTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
-                status => LoadDashboardKpisAndBreakdownAsync(query, status, cancellationToken));
+                status => LoadDashboardKpisAndBreakdownAsync(sqlQuery, status, cancellationToken));
             var aliasTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
-                status => LoadDashboardAliasRowsAsync(query, status, cancellationToken));
+                status => LoadDashboardAliasRowsAsync(sqlQuery, status, cancellationToken, selectedInvestors));
             var fundingsUniverseTask = LoadDashboardAliasRowsAsync(
-                queryWithoutFundingStatus, null, cancellationToken);
+                queryWithoutFundingStatus, null, cancellationToken, selectedInvestors);
             var unfundedUniverseTask = LoadDashboardAliasRowsAsync(
-                queryWithoutFundingStatus, "UNFUNDED", cancellationToken);
+                queryWithoutFundingStatus, "UNFUNDED", cancellationToken, selectedInvestors);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
             var filterOptionsTask = LoadMortgageViewFilterOptionsAsync(fundingStatuses, cancellationToken);
-            // Loan-grain exposure for every investor on the filtered aliases, labelled by investor
-            // alias, so the investor summary totals the table's Total Exposure.
+            // Loan-grain exposure labelled by investor alias, limited in-process to the selected
+            // investors so the investor summary totals the table's Total Exposure.
             var investorPortfolioTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
-                status => LoadDashboardInvestorExposureRowsAsync(
-                    WithoutInvestorFilter(query), status, cancellationToken));
+                status => LoadDashboardInvestorExposureRowsAsync(sqlQuery, status, cancellationToken));
             var investorAliasByLoanCodeTask = LoadInvestorAliasByLoanCodeAsync(cancellationToken);
             var exposureAnalysisTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
-                status => LoadDashboardExposureAnalysisAsync(query, status, cancellationToken));
+                status => LoadDashboardExposureAnalysisAsync(sqlQuery, status, cancellationToken, selectedInvestors));
             var top5Task = deriveChartsFromAliasRows
                 ? Task.FromResult<IReadOnlyList<ChartSliceDto>>([])
-                : LoadDashboardTop5ExposuresAsync(query, fundingStatus, cancellationToken);
+                : LoadDashboardTop5ExposuresAsync(sqlQuery, fundingStatus, cancellationToken);
             var sponsorSummaryTask = investorFilter
                 ? Task.FromResult<IReadOnlyList<IReadOnlyList<ChartSliceDto>>>([])
                 : LoadPerFundingStatusAsync(
                     fundingStatuses,
-                    status => LoadDashboardSponsorSummaryAsync(query, status, cancellationToken));
+                    status => LoadDashboardSponsorSummaryAsync(sqlQuery, status, cancellationToken));
 
             await Task.WhenAll(
                 kpisTask,
@@ -229,7 +233,8 @@ namespace kingsightapi.Services
             var investorExposureRows = ResolveInvestorExposureRows(
                 (await investorPortfolioTask).SelectMany(rows => rows),
                 await investorAliasByLoanCodeTask,
-                filteredAliasNames);
+                filteredAliasNames,
+                selectedInvestors);
             var investorSlices = BuildInvestorSummaryFromExposureRows(investorExposureRows);
 
             var kpis = kpisAndBreakdown.Kpis;
@@ -278,7 +283,7 @@ namespace kingsightapi.Services
             };
             var charts = BuildDashboardChartsFromAliasRows(
                 aliasRows,
-                FilterInvestorSummary(investorSlices, query, restrictToSelectedInvestors: false),
+                FilterInvestorSummary(investorSlices, query),
                 PrependPrincipalSlice(
                     exposureBreakdown,
                     aliasRows.Sum(row => row.Principal),
@@ -624,7 +629,7 @@ namespace kingsightapi.Services
                 .Any(selected.Contains);
 
         /// <summary>Sponsor exposure over the filtered aliases, so the chart totals the table's Total Exposure.</summary>
-        private static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromAliasRows(
+        internal static IReadOnlyList<ChartSliceDto> BuildSponsorSummaryFromAliasRows(
             IReadOnlyList<LoanAliasSummaryRowDto> aliasRows)
         {
             var slices = aliasRows
@@ -664,7 +669,7 @@ namespace kingsightapi.Services
         private const string NoSponsorLabel = "No Sponsor";
 
         /// <summary>Drops placeholder names (e.g. "NA") and duplicates from a comma-separated sponsor cell.</summary>
-        private static string NormalizeSponsorLabel(string? sponsorCell)
+        internal static string NormalizeSponsorLabel(string? sponsorCell)
         {
             var names = (sponsorCell ?? string.Empty)
                 .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
@@ -679,7 +684,7 @@ namespace kingsightapi.Services
             && query.InvestorAliases.Any(alias => !string.IsNullOrWhiteSpace(alias))
             && !query.InvestorAliases.Any(alias => alias.Equals("All", StringComparison.OrdinalIgnoreCase));
 
-        private static ManagementSummaryDashboardQuery WithoutInvestorFilter(
+        internal static ManagementSummaryDashboardQuery WithoutInvestorFilter(
             ManagementSummaryDashboardQuery query) =>
             new()
             {
@@ -708,7 +713,7 @@ namespace kingsightapi.Services
                 })
                 .ToList();
 
-        private sealed record InvestorExposureRow(
+        internal sealed record InvestorExposureRow(
             string LoanAlias,
             string LoanCode,
             string Investor,
@@ -790,14 +795,19 @@ namespace kingsightapi.Services
         }
 
         /// <summary>
-        /// Loan rows on the filtered aliases (all investors), relabelled by investor alias.
-        /// Only aggregate rows count, matching the report TOTALS.
+        /// Loan rows on the filtered aliases, relabelled by investor alias and limited to the
+        /// selected investor aliases (all when null). Only aggregate rows count, matching the report TOTALS.
         /// </summary>
-        private static List<InvestorExposureRow> ResolveInvestorExposureRows(
+        internal static List<InvestorExposureRow> ResolveInvestorExposureRows(
             IEnumerable<InvestorExposureRow> rows,
             IReadOnlyDictionary<string, string> investorAliasByLoanCode,
-            IReadOnlySet<string> aliasNames)
+            IReadOnlySet<string> aliasNames,
+            IReadOnlyList<string>? selectedInvestorAliases = null)
         {
+            var selected = selectedInvestorAliases is null
+                ? null
+                : new HashSet<string>(selectedInvestorAliases, StringComparer.OrdinalIgnoreCase);
+
             return rows
                 .Where(row => aliasNames.Contains(row.LoanAlias))
                 .Where(row => string.IsNullOrWhiteSpace(row.AggregateFlag)
@@ -808,11 +818,12 @@ namespace kingsightapi.Services
                         ? investorAlias
                         : row.Investor.Trim()
                 })
-                .Where(row => !string.IsNullOrWhiteSpace(row.Investor))
+                .Where(row => !string.IsNullOrWhiteSpace(row.Investor)
+                    && (selected is null || selected.Contains(row.Investor)))
                 .ToList();
         }
 
-        private static IReadOnlyList<ChartSliceDto> BuildInvestorSummaryFromExposureRows(
+        internal static IReadOnlyList<ChartSliceDto> BuildInvestorSummaryFromExposureRows(
             IEnumerable<InvestorExposureRow> rows) =>
             rows
                 .GroupBy(row => row.Investor, StringComparer.OrdinalIgnoreCase)
@@ -1172,12 +1183,198 @@ namespace kingsightapi.Services
             return (combined.Kpis, combined.OutstandingInterest);
         }
 
+        internal static IReadOnlyList<string>? ResolveSelectedInvestorAliases(IReadOnlyList<string>? investorAliases)
+        {
+            if (investorAliases is null
+                || investorAliases.Any(alias => alias.Trim().Equals("All", StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+
+            var selected = investorAliases
+                .Where(alias => !string.IsNullOrWhiteSpace(alias))
+                .Select(alias => alias.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return selected.Count == 0 ? null : selected;
+        }
+
+        private static void AddInvestorAliasListParameters(SqlCommand command, IReadOnlyList<string>? investorAliases)
+        {
+            if (investorAliases is null)
+            {
+                return;
+            }
+
+            for (var i = 0; i < investorAliases.Count; i++)
+            {
+                command.Parameters.Add($"@inv{i}", SqlDbType.NVarChar, 255).Value = investorAliases[i];
+            }
+        }
+
+        private static string InvestorAliasInList(int count) =>
+            string.Join(", ", Enumerable.Range(0, count).Select(i => $"@inv{i}"));
+
+        // Same filters as the warehouse TVFs, minus @investor_alias (applied below at loan grain).
+        private const string LoanAttributeFilterPredicate = """
+                    (@funding_status IS NULL OR @funding_status = 'All' OR v.funding_status_description = @funding_status)
+                    AND (@sponsor IS NULL OR @sponsor = 'All' OR v.sponsor = @sponsor)
+                    AND (@maturity_date_from IS NULL OR v.maturity_date >= @maturity_date_from)
+                    AND (@maturity_date_to   IS NULL OR v.maturity_date <= @maturity_date_to)
+                    AND (@default_date_from IS NULL OR v.loan_default_date >= @default_date_from)
+                    AND (@default_date_to   IS NULL OR v.loan_default_date <= @default_date_to)
+            """;
+
+        /// <summary>
+        /// fn_management_summary_loan_alias with amounts summed only over the selected investors'
+        /// loans. Alias attributes (sponsor, status, exit, LTV) still come from every loan on the
+        /// alias — the TVF's MLP/SMF LTV join otherwise drops aliases when filtering to e.g. TDAM.
+        /// </summary>
+        private string BuildInvestorLoanAliasSql(int investorCount) => $"""
+            WITH alias_v AS (
+                SELECT v.*
+                FROM {_vwLoanAttributes} v
+                WHERE
+            {LoanAttributeFilterPredicate}
+            ),
+            investor_v AS (
+                SELECT * FROM alias_v WHERE LTRIM(RTRIM(investor_alias_name)) IN ({InvestorAliasInList(investorCount)})
+            ),
+            distinct_interest_status AS (
+                SELECT DISTINCT loan_alias_name,
+                    CASE WHEN investor_alias_name IN ('SMF', 'MLP') THEN interest_status ELSE NULL END AS interest_status
+                FROM alias_v
+            ),
+            distinct_sponsor AS (
+                SELECT DISTINCT loan_alias_name, TRIM(sponsor) AS sponsor FROM alias_v
+            ),
+            distinct_exit AS (
+                SELECT DISTINCT loan_alias_name, exit_plan FROM alias_v
+            ),
+            ranked_ltv AS (
+                SELECT loan_alias_name, ltv,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY loan_alias_name
+                        ORDER BY
+                            CASE WHEN ranking IS NULL THEN 1 ELSE 0 END, ranking DESC,
+                            CASE WHEN ltv IS NULL THEN 1 ELSE 0 END, ltv DESC) AS rn
+                FROM alias_v
+                WHERE investor_alias_name IN ('MLP', 'SMF')
+            ),
+            alias_name_ltv AS (
+                SELECT loan_alias_name, ltv FROM ranked_ltv WHERE rn = 1
+            ),
+            alias_attrs AS (
+                SELECT loan_alias_name,
+                    MIN(CASE WHEN default_date IS NULL THEN loan_term_default_date ELSE default_date END) AS default_date,
+                    MIN(maturity_date) AS maturity_date,
+                    MIN(units_loan_alias) AS units,
+                    MIN(security_value_loan_alias) AS security
+                FROM alias_v
+                GROUP BY loan_alias_name
+            ),
+            alias_agg AS (
+                SELECT
+                    v.loan_alias_name,
+                    (SELECT STRING_AGG(e.sponsor, ', ') FROM distinct_sponsor e WHERE e.loan_alias_name = v.loan_alias_name) AS sponsor,
+                    MIN(t.default_date) AS default_date,
+                    MIN(t.maturity_date) AS maturity_date,
+                    (SELECT STRING_AGG(d.interest_status, ', ') FROM distinct_interest_status d WHERE d.loan_alias_name = v.loan_alias_name) AS interest_status_alias,
+                    MIN(t.units) AS units,
+                    MIN(t.security) AS security,
+                    (SELECT STRING_AGG(f.exit_plan, ', ') FROM distinct_exit f WHERE f.loan_alias_name = v.loan_alias_name) AS ext,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.principal_balance ELSE 0 END) AS principal,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.outstanding_loan_interest ELSE 0 END) AS outstanding_interest,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.accrued ELSE 0 END) AS accrued,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.outstanding_late_interest ELSE 0 END) AS late_interest,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN ISNULL(a.tax_arrears, 0) ELSE 0 END) AS tax_arrear,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.interest_adjustment_amount ELSE 0 END) AS interest_adjustment,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL
+                        THEN ISNULL(a.outstanding_invoices, 0) + ISNULL(a.est_realization_costs, 0) + ISNULL(a.cost_to_complete, 0)
+                        ELSE 0 END) AS other_cost,
+                    SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.exposure ELSE 0 END) AS total_exposure,
+                    MAX(b.ltv) AS ltv,
+                    CASE
+                        WHEN AVG(v.ltv) < 50 THEN 'Low'
+                        WHEN AVG(v.ltv) BETWEEN 50 AND 75 THEN 'Moderate'
+                        WHEN AVG(v.ltv) BETWEEN 75 AND 100 THEN 'Elevated'
+                        ELSE 'High'
+                    END AS risk_level
+                FROM investor_v v
+                INNER JOIN {_fnExposure}(@as_of_date) a ON a.loan_code = v.loan_code
+                INNER JOIN alias_attrs t ON t.loan_alias_name = v.loan_alias_name
+                LEFT JOIN alias_name_ltv b ON b.loan_alias_name = v.loan_alias_name
+                GROUP BY v.loan_alias_name
+            )
+            SELECT *
+            FROM alias_agg
+            WHERE (@risk IS NULL OR UPPER(@risk) = 'ALL' OR UPPER(risk_level) = UPPER(@risk))
+            """;
+
+        /// <summary>
+        /// fn_management_summary_exposure_analysis with balances summed only over the selected
+        /// investors' loans. KS ranking bands still come from every MLP/SMF loan on the alias.
+        /// </summary>
+        private string BuildInvestorExposureAnalysisSql(int investorCount) => $"""
+            WITH base AS (
+                SELECT
+                    v.loan_alias_name, v.loan_code, v.investor_alias_name,
+                    ISNULL(v.ranking, 0) AS ranking,
+                    CASE WHEN v.syndicate_loan_code IS NULL THEN a.exposure ELSE 0 END AS exposure,
+                    v.ltv, v.net_acres_loan_alias, v.units_loan_alias
+                FROM {_vwLoanAttributes} v
+                INNER JOIN {_fnExposure}(@as_of_date) a ON a.loan_code = v.loan_code
+                WHERE
+            {LoanAttributeFilterPredicate}
+                    AND (@risk IS NULL OR UPPER(@risk) = 'ALL' OR UPPER(
+                        CASE
+                            WHEN v.ltv < 50 THEN 'Low'
+                            WHEN v.ltv BETWEEN 50 AND 75 THEN 'Moderate'
+                            WHEN v.ltv BETWEEN 75 AND 100 THEN 'Elevated'
+                            ELSE 'High'
+                        END) = UPPER(@risk))
+            ),
+            ks_rank AS (
+                SELECT loan_alias_name, MIN(ranking) AS ks_start_ranking, MAX(ranking) AS ks_end_ranking
+                FROM base
+                WHERE investor_alias_name IN ('SMF', 'MLP')
+                GROUP BY loan_alias_name
+            ),
+            distinct_sponsor AS (
+                SELECT DISTINCT loan_alias_name, TRIM(sponsor) AS sponsor FROM {_vwLoanAttributes}
+            ),
+            investor_base AS (
+                SELECT * FROM base WHERE LTRIM(RTRIM(investor_alias_name)) IN ({InvestorAliasInList(investorCount)})
+            )
+            SELECT
+                b.loan_alias_name,
+                (SELECT STRING_AGG(e.sponsor, ', ') FROM distinct_sponsor e WHERE e.loan_alias_name = b.loan_alias_name) AS sponsor,
+                SUM(CASE WHEN b.ranking < k.ks_start_ranking THEN b.exposure
+                    WHEN b.ranking < k.ks_end_ranking AND b.investor_alias_name NOT IN ('SMF', 'MLP') THEN b.exposure
+                    ELSE 0 END) AS external_balance,
+                SUM(CASE WHEN b.investor_alias_name = 'SMF' THEN b.exposure ELSE 0 END) AS smf_balance,
+                SUM(CASE WHEN b.investor_alias_name = 'MLP' THEN b.exposure ELSE 0 END) AS mlp_balance,
+                SUM(CASE WHEN b.ranking > k.ks_end_ranking THEN b.exposure ELSE 0 END) AS subordinate_exposure,
+                SUM(CASE WHEN b.ranking < k.ks_start_ranking THEN b.exposure
+                    WHEN b.ranking < k.ks_end_ranking AND b.investor_alias_name NOT IN ('SMF', 'MLP') THEN b.exposure
+                    ELSE 0 END)
+                    + SUM(CASE WHEN b.investor_alias_name IN ('SMF', 'MLP') THEN b.exposure ELSE 0 END) AS total_ks_exposure,
+                AVG(b.ltv) AS ltv
+            FROM investor_base b
+            INNER JOIN ks_rank k ON b.loan_alias_name = k.loan_alias_name
+            GROUP BY b.loan_alias_name
+            ORDER BY b.loan_alias_name
+            """;
+
         private async Task<List<LoanAliasSummaryRowDto>> LoadDashboardAliasRowsAsync(
             ManagementSummaryDashboardQuery query,
             string? fundingStatus,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<string>? investorAliases = null)
         {
-            var sql = $"""
+            var sql = investorAliases is { Count: > 0 }
+                ? BuildInvestorLoanAliasSql(investorAliases.Count)
+                : $"""
                 select
                     a.loan_alias_name,
                     a.sponsor,
@@ -1213,6 +1410,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            AddInvestorAliasListParameters(command, investorAliases);
 
             var rows = new List<LoanAliasSummaryRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1598,9 +1796,12 @@ namespace kingsightapi.Services
         private async Task<List<ExposureAnalysisRowDto>> LoadDashboardExposureAnalysisAsync(
             ManagementSummaryDashboardQuery query,
             string? fundingStatus,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            IReadOnlyList<string>? investorAliases = null)
         {
-            var sql = $"""
+            var sql = investorAliases is { Count: > 0 }
+                ? BuildInvestorExposureAnalysisSql(investorAliases.Count)
+                : $"""
                 select
                     e.loan_alias_name,
                     e.sponsor,
@@ -1627,6 +1828,7 @@ namespace kingsightapi.Services
             await connection.OpenAsync(cancellationToken);
             await using var command = new SqlCommand(sql, connection);
             AddLoanDetailFilterParameters(command, query, fundingStatus);
+            AddInvestorAliasListParameters(command, investorAliases);
 
             var rows = new List<ExposureAnalysisRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
