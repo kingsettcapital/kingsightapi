@@ -42,5 +42,25 @@ namespace kingsightapi.Services
             string filesRelativePath,
             string? lakehouseId = null,
             CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Saves a property image under <c>external_files/property_images/{loanAliasId}</c>.
+        /// </summary>
+        /// <returns>Final filename stored (not full path).</returns>
+        Task<string> SavePropertyImageAsync(
+            Stream content,
+            long loanAliasId,
+            string sanitizedFileName,
+            CancellationToken cancellationToken);
+
+        Task<Stream> OpenPropertyImageAsync(
+            long loanAliasId,
+            string storedFileName,
+            CancellationToken cancellationToken);
+
+        Task DeletePropertyImageAsync(
+            long loanAliasId,
+            string storedFileName,
+            CancellationToken cancellationToken);
     }
 }

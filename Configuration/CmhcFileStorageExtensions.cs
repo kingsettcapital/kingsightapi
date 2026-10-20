@@ -31,6 +31,7 @@ internal static class CmhcFileStorageExtensions
         }
 
         services.AddScoped<ICmhcUploadService, CmhcUploadService>();
+        services.AddScoped<IPropertyImageService, PropertyImageService>();
         return services;
     }
 }

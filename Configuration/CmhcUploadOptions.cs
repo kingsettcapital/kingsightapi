@@ -42,6 +42,21 @@ public sealed class CmhcUploadOptions
 
     public string TemplateFileName { get; set; } = "CMHC_Upload_Template.xlsx";
 
+    /// <summary>Child folder for loan alias property images (one sub-folder per loan alias id).</summary>
+    public string PropertyImagesDirectory { get; set; } = "property_images";
+
+    public string[] PropertyImageAllowedExtensions { get; set; } = [".jpg", ".jpeg", ".png", ".webp"];
+
+    public long MaxPropertyImageBytes { get; set; } = 10_485_760;
+
+    /// <summary>Relative path under storage root: <c>external_files/property_images/{loanAliasId}</c>.</summary>
+    public string GetPropertyImageRelativePath(long loanAliasId) =>
+        $"{CombinePathSegments(UploadParentDirectory, PropertyImagesDirectory)}/{loanAliasId}";
+
+    /// <summary>OneLake path for a loan alias' property images under <c>Files/</c>.</summary>
+    public string GetFabricPropertyImageDirectoryPath(long loanAliasId) =>
+        BuildFabricUploadDirectoryPath(GetPropertyImageRelativePath(loanAliasId));
+
     public bool UsesFabricStorage =>
         StorageProvider.Equals("Fabric", StringComparison.OrdinalIgnoreCase);
 
