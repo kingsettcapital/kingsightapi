@@ -167,6 +167,66 @@ public sealed class FabricCmhcFileStorage : ICmhcFileStorage
         return (response.Value.Content, Path.GetFileName(normalizedPath));
     }
 
+    public async Task<string> SavePropertyImageAsync(
+        Stream content,
+        long loanAliasId,
+        string sanitizedFileName,
+        CancellationToken cancellationToken)
+    {
+        var directory = GetPropertyImageDirectoryClient(loanAliasId);
+        await directory.CreateIfNotExistsAsync(cancellationToken: cancellationToken);
+
+        var existingNames = await ListUploadFileNamesAsync(directory, cancellationToken);
+        var uniqueName = CmhcFileNameHelper.ResolveUniqueFileName(existingNames, sanitizedFileName);
+        var fileClient = directory.GetFileClient(uniqueName);
+
+        await fileClient.UploadAsync(content, overwrite: false, cancellationToken: cancellationToken);
+
+        _logger.LogInformation(
+            "Saved property image {FileName} to Fabric OneLake path {Path}",
+            uniqueName,
+            _options.GetFabricPropertyImageDirectoryPath(loanAliasId));
+
+        return uniqueName;
+    }
+
+    public async Task<Stream> OpenPropertyImageAsync(
+        long loanAliasId,
+        string storedFileName,
+        CancellationToken cancellationToken)
+    {
+        var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
+        var fileClient = GetPropertyImageDirectoryClient(loanAliasId).GetFileClient(safeName);
+        if (!await fileClient.ExistsAsync(cancellationToken))
+        {
+            throw new FileNotFoundException(
+                $"Property image '{safeName}' was not found for loan alias {loanAliasId}.",
+                safeName);
+        }
+
+        var response = await fileClient.ReadAsync(cancellationToken: cancellationToken);
+        return response.Value.Content;
+    }
+
+    public async Task DeletePropertyImageAsync(
+        long loanAliasId,
+        string storedFileName,
+        CancellationToken cancellationToken)
+    {
+        var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
+        var fileClient = GetPropertyImageDirectoryClient(loanAliasId).GetFileClient(safeName);
+        var deleted = await fileClient.DeleteIfExistsAsync(cancellationToken: cancellationToken);
+        if (deleted.Value)
+        {
+            _logger.LogInformation("Deleted property image {FileName} from Fabric OneLake", safeName);
+        }
+    }
+
+    private DataLakeDirectoryClient GetPropertyImageDirectoryClient(long loanAliasId) =>
+        _serviceClient
+            .GetFileSystemClient(_options.FabricFileSystemName)
+            .GetDirectoryClient(_options.GetFabricPropertyImageDirectoryPath(loanAliasId));
+
     private static string NormalizeLakehouseId(string lakehouseId)
     {
         var trimmed = lakehouseId.Trim();
