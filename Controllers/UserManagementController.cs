@@ -10,15 +10,18 @@ namespace kingsightapi.Controllers
     {
         private readonly IRoleService _roleService;
         private readonly IUserService _userService;
+        private readonly ICurrentUserResolver _currentUserResolver;
         private readonly ILogger<UserManagementController> _logger;
 
         public UserManagementController(
             IRoleService roleService,
             IUserService userService,
+            ICurrentUserResolver currentUserResolver,
             ILogger<UserManagementController> logger)
         {
             _roleService = roleService;
             _userService = userService;
+            _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
 
@@ -179,6 +182,32 @@ namespace kingsightapi.Controllers
             {
                 _logger.LogError(ex, "Error retrieving users");
                 return StatusCode(500, "An error occurred while retrieving users.");
+            }
+        }
+
+        // GET: api/user-management/users/me
+        [HttpGet("users/me")]
+        public async Task<ActionResult<UserDto>> GetCurrentUser(CancellationToken cancellationToken)
+        {
+            var email = _currentUserResolver.GetJwtEmail();
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                return NotFound();
+            }
+
+            try
+            {
+                var result = await _userService.GetByEmailAsync(email, cancellationToken);
+                return result is null ? NotFound() : Ok(result);
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving current user");
+                return StatusCode(500, "An error occurred while retrieving the current user.");
             }
         }
 
