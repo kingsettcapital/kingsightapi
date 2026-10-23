@@ -131,7 +131,7 @@ public sealed partial class InvestorPortalService
                 Period = reader.GetNullableTrimmedString("period"),
                 Type = reader.GetStringOrEmpty("type"),
                 Committed = reader.GetDecimalOrDefault("committed"),
-                Unfunded = reader.GetDecimalOrDefault("unfunded"),
+                Unfunded = reader.GetDecimalOrDefault("unfunded_amount"),
                 CashDist = reader.GetDecimalOrDefault("cash_dist"),
                 GainDist = reader.GetDecimalOrDefault("gain_dist"),
                 PreferredReturn = reader.GetDecimalOrDefault("preferred_return"),
@@ -396,13 +396,14 @@ public sealed partial class InvestorPortalService
 
         if (isLtd)
         {
-            sql.Append(" cast(p.irr_1_year_pct as decimal(18,1)) as irr_1_year_pct, ");
-            sql.Append(" cast(p.irr_3_year_pct as decimal(18,1)) as irr_3_year_pct, ");
-            sql.Append(" cast(p.irr_5_year_pct as decimal(18,1)) as irr_5_year_pct, ");
+            // The query groups by fund, so ITD columns must be aggregated (one ITD row per fund).
+            sql.Append(" cast(max(p.irr_1_year_pct) as decimal(18,1)) as irr_1_year_pct, ");
+            sql.Append(" cast(max(p.irr_3_year_pct) as decimal(18,1)) as irr_3_year_pct, ");
+            sql.Append(" cast(max(p.irr_5_year_pct) as decimal(18,1)) as irr_5_year_pct, ");
             // 7Y IRR is not shown in the UI, but the API DTO still expects this column.
             sql.Append(" cast(0 as decimal(18,1)) as irr_7_year_pct, ");
-            sql.Append(" cast(p.irr_10_year_pct as decimal(18,1)) as irr_10_year_pct, ");
-            sql.Append(" cast(p.irr_ltd_pct as decimal(18,1)) as irr_ltd_pct ");
+            sql.Append(" cast(max(p.irr_10_year_pct) as decimal(18,1)) as irr_10_year_pct, ");
+            sql.Append(" cast(max(p.irr_ltd_pct) as decimal(18,1)) as irr_ltd_pct ");
             return;
         }
 

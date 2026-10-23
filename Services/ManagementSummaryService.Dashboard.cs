@@ -167,8 +167,11 @@ namespace kingsightapi.Services
             var aliasTask = LoadPerFundingStatusAsync(
                 fundingStatuses,
                 status => LoadDashboardAliasRowsAsync(sqlQuery, status, cancellationToken, selectedInvestors));
-            var fundingsUniverseTask = LoadDashboardAliasRowsAsync(
-                queryWithoutFundingStatus, null, cancellationToken, selectedInvestors);
+            // With no status filter the main alias query already is the all-status universe.
+            var fundingsUniverseTask = fundingStatuses is null
+                ? FirstResultAsync(aliasTask)
+                : LoadDashboardAliasRowsAsync(
+                    queryWithoutFundingStatus, null, cancellationToken, selectedInvestors);
             var unfundedUniverseTask = LoadDashboardAliasRowsAsync(
                 queryWithoutFundingStatus, "UNFUNDED", cancellationToken, selectedInvestors);
             var watchlistTask = TryLoadWatchlistTableRowsAsync(null, cancellationToken);
@@ -190,8 +193,10 @@ namespace kingsightapi.Services
                 : LoadPerFundingStatusAsync(
                     fundingStatuses,
                     status => LoadDashboardSponsorSummaryAsync(sqlQuery, status, cancellationToken));
+            var ltvReviewStatusTask = _ltvValidationService.GetLtvReviewStatusAsync(cancellationToken);
 
             await Task.WhenAll(
+                ltvReviewStatusTask,
                 kpisTask,
                 aliasTask,
                 fundingsUniverseTask,
@@ -300,7 +305,7 @@ namespace kingsightapi.Services
                 .ToList();
             var watchlistAsAt = watchlistDates.Count == 0 ? (DateTime?)null : watchlistDates.Max();
 
-            var ltvReviewStatus = await _ltvValidationService.GetLtvReviewStatusAsync(cancellationToken);
+            var ltvReviewStatus = await ltvReviewStatusTask;
             var aliasConfirmFlags = await _ltvValidationService.GetLtvConfirmFlagsByLoanAliasNamesAsync(
                 aliasRows.Select(row => row.LoanAlias).ToArray(),
                 cancellationToken);
@@ -465,6 +470,10 @@ namespace kingsightapi.Services
             var ltvs = list.Where(r => r.Ltv.HasValue).Select(r => r.Ltv!.Value).ToList();
             return ltvs.Count > 0 ? Math.Round(ltvs.Average(), 2) : null;
         }
+
+        private static async Task<List<LoanAliasSummaryRowDto>> FirstResultAsync(
+            Task<IReadOnlyList<List<LoanAliasSummaryRowDto>>> perStatusTask) =>
+            (await perStatusTask)[0];
 
         private static List<LoanAliasSummaryRowDto> MergeAliasRowsAcrossStatuses(
             IReadOnlyList<List<LoanAliasSummaryRowDto>> perStatus)
