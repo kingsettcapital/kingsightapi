@@ -30,10 +30,13 @@ steps:
     platform: '$(buildPlatform)'
     configuration: '$(buildConfiguration)'
 
-- task: VSTest@2
+# .NET 8 tests use dotnet test; VSTest@2 requires VS-hosted vstest.console on the agent.
+- task: DotNetCoreCLI@2
+  displayName: Run unit tests
   inputs:
-    platform: '$(buildPlatform)'
-    configuration: '$(buildConfiguration)'
+    command: test
+    projects: '**/*Tests.csproj'
+    arguments: '--configuration $(buildConfiguration)'
 
 - task: DotNetCoreCLI@2
   inputs:
