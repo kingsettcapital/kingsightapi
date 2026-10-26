@@ -5,7 +5,9 @@ using log4net;
 using log4net.Config;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.OpenApi.Models;
+using System.IO.Compression;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -57,6 +59,17 @@ namespace kingsightapi
                     options.JsonSerializerOptions.Converters.Add(
                         new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
                 });
+
+            builder.Services.AddResponseCompression(options =>
+            {
+                options.EnableForHttps = true;
+                options.Providers.Add<BrotliCompressionProvider>();
+                options.Providers.Add<GzipCompressionProvider>();
+            });
+            builder.Services.Configure<BrotliCompressionProviderOptions>(options =>
+                options.Level = CompressionLevel.Fastest);
+            builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+                options.Level = CompressionLevel.Fastest);
 
             builder.Services.AddEntraAuthentication(configuration);
             builder.Services.Configure<FabricWarehouseOptions>(
@@ -173,6 +186,7 @@ namespace kingsightapi
                 app.UseSwaggerUI();
             }
 
+            app.UseResponseCompression();
             app.UseHttpsRedirection();
             app.UseAngularCors();
             app.UseAuthentication();

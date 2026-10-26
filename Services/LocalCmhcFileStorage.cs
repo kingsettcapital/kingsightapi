@@ -163,6 +163,88 @@ namespace kingsightapi.Services
             return Task.FromResult((stream, Path.GetFileName(fullPath)!));
         }
 
+        public async Task<string> SavePropertyImageAsync(
+            Stream content,
+            long loanAliasId,
+            string sanitizedFileName,
+            CancellationToken cancellationToken)
+        {
+            var storagePath = GetPropertyImageStoragePath(loanAliasId);
+            Directory.CreateDirectory(storagePath);
+
+            var uniqueName = CmhcFileNameHelper.ResolveUniqueFileName(storagePath, sanitizedFileName);
+            var fullPath = Path.Combine(storagePath, uniqueName);
+
+            await using var fileStream = new FileStream(
+                fullPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                useAsync: true);
+
+            await content.CopyToAsync(fileStream, cancellationToken);
+
+            _logger.LogInformation("Saved property image {FileName} to {Path}", uniqueName, fullPath);
+            return uniqueName;
+        }
+
+        public Task<Stream> OpenPropertyImageAsync(
+            long loanAliasId,
+            string storedFileName,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
+            var fullPath = Path.Combine(GetPropertyImageStoragePath(loanAliasId), safeName);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException(
+                    $"Property image '{safeName}' was not found for loan alias {loanAliasId}.",
+                    safeName);
+            }
+
+            Stream stream = new FileStream(
+                fullPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 81920,
+                useAsync: true);
+
+            return Task.FromResult(stream);
+        }
+
+        public Task DeletePropertyImageAsync(
+            long loanAliasId,
+            string storedFileName,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var safeName = CmhcFileNameHelper.SanitizeFileName(storedFileName);
+            var fullPath = Path.Combine(GetPropertyImageStoragePath(loanAliasId), safeName);
+            if (File.Exists(fullPath))
+            {
+                File.Delete(fullPath);
+                _logger.LogInformation("Deleted property image {Path}", fullPath);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private string GetPropertyImageStoragePath(long loanAliasId)
+        {
+            var path = _options.LocalStoragePath;
+            if (!Path.IsPathRooted(path))
+            {
+                path = Path.Combine(_contentRoot, path);
+            }
+
+            return Path.GetFullPath(Path.Combine(path, _options.GetPropertyImageRelativePath(loanAliasId)));
+        }
+
         private static string? ResolveQrSlidePath(string storagePath, string safeName)
         {
             var exactPath = Path.Combine(storagePath, safeName);
