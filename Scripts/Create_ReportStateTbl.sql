@@ -1,5 +1,5 @@
 -- CMHC Dashboard shared report memory (funding-date history, pool baselines, etc.).
--- Run against DEALPATH on victoria\uat.
+-- Run against DEALPATH on yellowknife.
 USE DEALPATH;
 GO
 
