@@ -332,6 +332,7 @@ namespace kingsightapi.Services
                     Ltv = row.Ltv,
                     Risk = row.Risk,
                     IsLtvConfirmed = aliasConfirmFlags.TryGetValue(row.LoanAlias, out var confirmed) && confirmed,
+                    IsInReview = row.IsInReview,
                 })
                 .ToList();
 
@@ -515,7 +516,8 @@ namespace kingsightapi.Services
                         Other = rows.Sum(r => r.Other),
                         TotalExposure = rows.Sum(r => r.TotalExposure),
                         Ltv = ltv,
-                        Risk = MapDashboardRiskBand(ltv)
+                        Risk = MapDashboardRiskBand(ltv),
+                        IsInReview = rows.Any(r => r.IsInReview)
                     };
                 })
                 .OrderBy(row => row.LoanAlias, StringComparer.OrdinalIgnoreCase)
@@ -1421,15 +1423,19 @@ namespace kingsightapi.Services
             AddLoanDetailFilterParameters(command, query, fundingStatus);
             AddInvestorAliasListParameters(command, investorAliases);
 
+            var aliasesInReview = await LoadLoanAliasesInReviewAsync(cancellationToken);
+
             var rows = new List<LoanAliasSummaryRowDto>();
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
                 var ltv = GetNullableDecimal(reader, "ltv");
+                var aliasName = GetString(reader, "loan_alias_name");
                 rows.Add(new LoanAliasSummaryRowDto
                 {
                     LoanAliasKey = 0,
-                    LoanAlias = GetString(reader, "loan_alias_name"),
+                    LoanAlias = aliasName,
+                    IsInReview = aliasesInReview.Contains(aliasName.Trim()),
                     Sponsor = GetNullableString(reader, "sponsor"),
                     DefaultDate = GetNullableDateTime(reader, "default_date"),
                     MaturityDate = GetNullableDateTime(reader, "maturity_date"),
@@ -1479,6 +1485,7 @@ namespace kingsightapi.Services
                 {
                     LoanAliasKey = aliasKey,
                     LoanAlias = current.LoanAlias,
+                    IsInReview = current.IsInReview,
                     Sponsor = current.Sponsor,
                     DefaultDate = current.DefaultDate,
                     MaturityDate = current.MaturityDate,
@@ -1498,6 +1505,43 @@ namespace kingsightapi.Services
                     Risk = current.Risk
                 };
             }
+        }
+
+        /// <summary>
+        /// Loan alias names with at least one loan marked In Review on Loan Alias Assignment.
+        /// Empty (with a warning) until Scripts/Alter_loan_alias_relationship_in_review.sql has been run.
+        /// </summary>
+        private async Task<HashSet<string>> LoadLoanAliasesInReviewAsync(CancellationToken cancellationToken)
+        {
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var sql = $"""
+                select distinct loan_alias_name
+                from {_tblSubjectiveLoanAliasRelationship}
+                where upper(is_in_review) = 'Y'
+                  and loan_alias_name is not null
+                """;
+
+            try
+            {
+                await using var connection = new SqlConnection(_connectionString);
+                await connection.OpenAsync(cancellationToken);
+                await using var command = new SqlCommand(sql, connection);
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                while (await reader.ReadAsync(cancellationToken))
+                {
+                    var name = GetString(reader, "loan_alias_name");
+                    if (!string.IsNullOrWhiteSpace(name))
+                    {
+                        names.Add(name.Trim());
+                    }
+                }
+            }
+            catch (SqlException ex)
+            {
+                _logger.LogWarning(ex, "Could not load In Review loan aliases (is_in_review column missing?).");
+            }
+
+            return names;
         }
 
         private async Task<Dictionary<string, int>> LoadLoanAliasKeyLookupAsync(CancellationToken cancellationToken)
