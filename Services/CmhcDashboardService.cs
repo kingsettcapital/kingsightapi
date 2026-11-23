@@ -155,6 +155,67 @@ namespace kingsightapi.Services
             };
         }
 
+        /// <summary>
+        /// CMHC sub-role filter (ACC-01/03/06/08): Admin and Reviewer keep every row; otherwise a row stays when
+        /// the user is its underwriter (Funder, falling back to Underwriter — the name the dashboard shows)
+        /// or its Originating Originator. A user with no matching role or no linked name gets no rows.
+        /// </summary>
+        public static CmhcPipelineDto FilterForAccess(CmhcPipelineDto pipeline, CmhcMyAccessDto access)
+        {
+            if (access.SeesAllLoans)
+            {
+                return pipeline;
+            }
+
+            var linked = access.LinkedName?.Trim();
+            var columns = pipeline.Columns.ToList();
+            var funderIdx = columns.IndexOf("Funder");
+            var underwriterIdx = columns.IndexOf("Underwriter");
+            var originatorIdx = columns.IndexOf("Originating Originator");
+
+            var rows = new List<object?[]>();
+            var links = new List<string?>();
+            if (access.HasAccess && !string.IsNullOrEmpty(linked))
+            {
+                for (var i = 0; i < pipeline.Rows.Count; i++)
+                {
+                    var row = pipeline.Rows[i];
+                    var funder = CleanName(Cell(row, funderIdx));
+                    var effectiveUnderwriter = funder ?? CleanName(Cell(row, underwriterIdx));
+                    var originator = CleanName(Cell(row, originatorIdx));
+
+                    var keep = (access.IsUnderwriter && SameName(effectiveUnderwriter, linked))
+                        || (access.IsOriginator && SameName(originator, linked));
+                    if (keep)
+                    {
+                        rows.Add(row);
+                        links.Add(i < pipeline.Links.Count ? pipeline.Links[i] : null);
+                    }
+                }
+            }
+
+            return new CmhcPipelineDto
+            {
+                AsOf = pipeline.AsOf,
+                GeneratedAt = pipeline.GeneratedAt,
+                Columns = pipeline.Columns,
+                Rows = rows,
+                Links = links
+            };
+        }
+
+        private static object? Cell(object?[] row, int index) => index >= 0 && index < row.Length ? row[index] : null;
+
+        /// <summary>Same rule as the dashboard's cleanStr: blank or "nan" means no name.</summary>
+        private static string? CleanName(object? value)
+        {
+            var s = value?.ToString()?.Trim();
+            return string.IsNullOrEmpty(s) || s.Equals("nan", StringComparison.OrdinalIgnoreCase) ? null : s;
+        }
+
+        private static bool SameName(string? a, string b) =>
+            a is not null && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
         public async Task<CmhcReportStateDto> GetStateAsync(string key, CancellationToken cancellationToken = default)
         {
             await using var connection = new SqlConnection(_connectionString);

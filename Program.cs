@@ -113,6 +113,7 @@ namespace kingsightapi
             builder.Services.Configure<CmhcDashboardOptions>(
                 configuration.GetSection(CmhcDashboardOptions.SectionName));
             builder.Services.AddSingleton<ICmhcDashboardService, CmhcDashboardService>();
+            builder.Services.AddScoped<ICmhcAccessService, CmhcAccessService>();
             builder.Services.AddSingleton<IRoleService, RoleService>();
             builder.Services.AddSingleton<IUserService, UserService>();
 
