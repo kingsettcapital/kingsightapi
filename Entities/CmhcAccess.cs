@@ -32,7 +32,7 @@ namespace kingsightapi.Entities
         [JsonPropertyName("roles")]
         public IReadOnlyList<string> Roles { get; init; } = Array.Empty<string>();
 
-        /// <summary>Name as it appears in the loan data (Funder/Underwriter or Originating Originator).</summary>
+        /// <summary>Name as it appears in the loan data (Funder/Underwriter, or Current/Originating Originator).</summary>
         [JsonPropertyName("linkedName")]
         public string? LinkedName { get; init; }
 

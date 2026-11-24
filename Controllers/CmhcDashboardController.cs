@@ -23,7 +23,11 @@ public class CmhcDashboardController : ControllerBase
         "Only Admins and Reviewers can change shared CMHC dashboard settings.";
 
     /// <summary>Report state that carries loan-level data; scoped users get an empty copy (ACC-08).</summary>
-    private static readonly IReadOnlySet<string> LoanStateKeys = new HashSet<string>(StringComparer.Ordinal) { "hist" };
+    private static readonly IReadOnlySet<string> LoanStateKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "hist", "alloc-coverage", "alloc-active", "alloc-active-reset", "renewal-milestones", "sponsor-pairs",
+        "wip-marks", "wip-credits", "ffa-stamps"
+    };
 
     public CmhcDashboardController(
         ICmhcDashboardService service,
