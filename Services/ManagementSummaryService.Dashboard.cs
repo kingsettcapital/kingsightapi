@@ -1304,9 +1304,9 @@ namespace kingsightapi.Services
                     SUM(CASE WHEN v.syndicate_loan_code IS NULL THEN a.exposure ELSE 0 END) AS total_exposure,
                     MAX(b.ltv) AS ltv,
                     CASE
-                        WHEN AVG(v.ltv) < 50 THEN 'Low'
-                        WHEN AVG(v.ltv) BETWEEN 50 AND 75 THEN 'Moderate'
-                        WHEN AVG(v.ltv) BETWEEN 75 AND 100 THEN 'Elevated'
+                        WHEN AVG(v.ltv) < 65 THEN 'Low'
+                        WHEN AVG(v.ltv) BETWEEN 65 AND 79 THEN 'Moderate'
+                        WHEN AVG(v.ltv) BETWEEN 80 AND 94 THEN 'Elevated'
                         ELSE 'High'
                     END AS risk_level
                 FROM investor_v v
