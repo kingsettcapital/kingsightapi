@@ -24,6 +24,8 @@ namespace kingsightapi.Entities
         public DateTime? UserUpdatedDate { get; init; }
         /// <summary>True when the row comes from <c>external_serviced_loan</c> (Non-KS).</summary>
         public bool IsNonKs { get; init; }
+        /// <summary><c>loan_alias_relationship.is_in_review = 'Y'</c> (Loan Alias Assignment review flag).</summary>
+        public bool IsInReview { get; init; }
     }
 
     /// <summary>Dropdown options for Loan Attribute Assignment (from <c>loan_alias_master</c>).</summary>

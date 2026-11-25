@@ -14,6 +14,10 @@ namespace kingsightapi.Entities
         /// to the matching <c>shared.dim_status</c> row.
         /// </summary>
         public long? FundingStatusKey { get; init; }
+        /// <summary>
+        /// Loan Alias Assignment only: when set, writes <c>loan_alias_relationship.is_in_review</c> ('Y' / 'N').
+        /// </summary>
+        public bool? IsInReview { get; init; }
         public string UserUpdatedBy { get; init; } = string.Empty;
     }
 

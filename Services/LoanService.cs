@@ -31,6 +31,9 @@ namespace kingsightapi.Services
         private string? _dummyLoanLinkColumn;
         private string? _lateInterestApplicableColumn;
         private string? _lateInterestOffNoteColumn;
+        private string? _inReviewColumn;
+        private string? _inReviewUpdatedByColumn;
+        private string? _inReviewUpdatedDtmColumn;
         private string? _loanStatusKeyColumn;
         private string? _loanStatusDescriptionColumn;
         private string? _eslExtLoanCodeColumn;
@@ -198,6 +201,11 @@ namespace kingsightapi.Services
                             BuildClearAliasByLoanCodeSql(audit), loan, audit, auditDisplayName, connection, cancellationToken);
                     }
 
+                    if (isAliasAssignmentSave && !isAttributeUpdate)
+                    {
+                        clearedRows += await ExecuteInReviewUpdateAsync(loan, auditDisplayName, connection, cancellationToken);
+                    }
+
                     affectedRows += clearedRows;
                     continue;
                 }
@@ -253,6 +261,11 @@ namespace kingsightapi.Services
                         loan,
                         connection,
                         cancellationToken);
+                }
+
+                if (isAliasAssignmentSave && !isAttributeUpdate)
+                {
+                    rowsChanged += await ExecuteInReviewUpdateAsync(loan, auditDisplayName, connection, cancellationToken);
                 }
 
                 affectedRows += rowsChanged;
@@ -361,6 +374,44 @@ namespace kingsightapi.Services
             }
 
             audit.AddUpdateParameters(command, auditDisplayName, DateTime.UtcNow);
+
+            return await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        /// <summary>
+        /// Loan Alias Assignment review flag. No-op when the request leaves it unset, the loan code is blank,
+        /// or the warehouse column is missing (run Scripts/Alter_loan_alias_relationship_in_review.sql).
+        /// </summary>
+        private async Task<int> ExecuteInReviewUpdateAsync(
+            LoanUpdateRequestDto loan,
+            string auditDisplayName,
+            SqlConnection connection,
+            CancellationToken cancellationToken)
+        {
+            if (!loan.IsInReview.HasValue || string.IsNullOrWhiteSpace(loan.LoanCode))
+            {
+                return 0;
+            }
+
+            if (_inReviewColumn is null)
+            {
+                _logger.LogWarning(
+                    "loan_alias_relationship has no is_in_review column; review flag for {LoanCode} not saved.",
+                    loan.LoanCode);
+                return 0;
+            }
+
+            await using var command = new SqlCommand(BuildInReviewUpdateSql(), connection);
+            command.Parameters.AddWithValue("@loan_code", loan.LoanCode.Trim());
+            command.Parameters.AddWithValue("@is_in_review", loan.IsInReview.Value ? "Y" : "N");
+            if (_inReviewUpdatedByColumn is not null)
+            {
+                command.Parameters.AddWithValue("@in_review_updated_by", auditDisplayName);
+            }
+            if (_inReviewUpdatedDtmColumn is not null)
+            {
+                command.Parameters.AddWithValue("@in_review_updated_datetime", DateTime.UtcNow);
+            }
 
             return await command.ExecuteNonQueryAsync(cancellationToken);
         }
@@ -504,6 +555,22 @@ namespace kingsightapi.Services
                 _connectionString,
                 _sql.LoanAliasRelationship,
                 ["late_interest_note", "late_interest_off_note"],
+                cancellationToken);
+            // Scripts/Alter_loan_alias_relationship_in_review.sql
+            _inReviewColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.LoanAliasRelationship,
+                ["is_in_review"],
+                cancellationToken);
+            _inReviewUpdatedByColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.LoanAliasRelationship,
+                ["in_review_updated_by"],
+                cancellationToken);
+            _inReviewUpdatedDtmColumn = await DimLoanColumnProbe.FindFirstAsync(
+                _connectionString,
+                _sql.LoanAliasRelationship,
+                ["in_review_updated_datetime"],
                 cancellationToken);
 
             try
@@ -670,6 +737,32 @@ namespace kingsightapi.Services
                 ? "''"
                 : $"isnull(r.[{_lateInterestOffNoteColumn}], '')";
 
+        private string BuildInReviewSelectExpression() =>
+            _inReviewColumn is null
+                ? "cast(0 as bit)"
+                : $"cast(case when upper(r.[{_inReviewColumn}]) = 'Y' then 1 else 0 end as bit)";
+
+        /// <summary>Sets <c>is_in_review</c> (plus its audit columns when present) for one loan code.</summary>
+        private string BuildInReviewUpdateSql()
+        {
+            var set = new StringBuilder($"r.[{_inReviewColumn}] = @is_in_review");
+            if (_inReviewUpdatedByColumn is not null)
+            {
+                set.Append($", r.[{_inReviewUpdatedByColumn}] = @in_review_updated_by");
+            }
+            if (_inReviewUpdatedDtmColumn is not null)
+            {
+                set.Append($", r.[{_inReviewUpdatedDtmColumn}] = @in_review_updated_datetime");
+            }
+
+            return $"""
+                update r
+                set {set}
+                from {_sql.LoanAliasRelationship} r
+                where r.loan_code = @loan_code
+                """;
+        }
+
         /// <summary>
         /// Loan Alias Assignment list (auditProfile=loan_alias).
         /// Do not select dim_loan funding_status_* onto OuterApply alias <c>l</c> —
@@ -698,7 +791,8 @@ namespace kingsightapi.Services
                        funding_status_name = '',
                        user_updated_by = {audit.BuildSelectUpdatedByExpression()},
                        user_updated_date = {audit.BuildSelectUpdatedDtmExpression()},
-                       is_non_ks = cast(0 as bit)
+                       is_non_ks = cast(0 as bit),
+                       is_in_review = {BuildInReviewSelectExpression()}
                 from {_sql.LoanAliasRelationship} r
                 left join {_sql.LoanAliasMaster} m on r.loan_alias_name = m.loan_alias_name
                 {_sql.SharedDimLoanOuterApplyOnLoanCode("r", "l")}
@@ -748,7 +842,8 @@ namespace kingsightapi.Services
                            funding_status_name = '',
                            user_updated_by = '',
                            user_updated_date = cast(null as datetime2),
-                           is_non_ks = cast(1 as bit)
+                           is_non_ks = cast(1 as bit),
+                           is_in_review = cast(0 as bit)
                     from {_sql.ExternalServicedLoan} e
                     left join {_sql.LoanAliasMaster} m
                         on {aliasExpr} = m.loan_alias_name
@@ -940,7 +1035,10 @@ namespace kingsightapi.Services
                 UserUpdatedDate = updatedDate,
                 IsNonKs = reader.TryGetOrdinal("is_non_ks", out var nonKsOrd)
                     && !reader.IsDBNull(nonKsOrd)
-                    && Convert.ToBoolean(reader.GetValue(nonKsOrd))
+                    && Convert.ToBoolean(reader.GetValue(nonKsOrd)),
+                IsInReview = reader.TryGetOrdinal("is_in_review", out var reviewOrd)
+                    && !reader.IsDBNull(reviewOrd)
+                    && Convert.ToBoolean(reader.GetValue(reviewOrd))
             };
         }
     }

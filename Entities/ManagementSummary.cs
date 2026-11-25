@@ -116,6 +116,12 @@ namespace kingsightapi.Entities
 
         /// <summary>True when all LTV values for this loan alias are locked (<c>is_confirmed = 'Y'</c>).</summary>
         public bool IsLtvConfirmed { get; init; }
+
+        /// <summary>
+        /// True when any loan under this alias is marked In Review on Loan Alias Assignment
+        /// (<c>loan_alias_relationship.is_in_review = 'Y'</c>). The Detailed Loan Summary shows these rows in red.
+        /// </summary>
+        public bool IsInReview { get; init; }
     }
 
     public sealed class ExposureAnalysisRowDto

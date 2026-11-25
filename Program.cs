@@ -110,6 +110,10 @@ namespace kingsightapi
             builder.Services.AddSingleton<INonKsServicedLoansService, NonKsServicedLoansService>();
             builder.Services.AddSingleton<INotificationService, NotificationService>();
             builder.Services.AddSingleton<IManagementSummaryService, ManagementSummaryService>();
+            builder.Services.Configure<CmhcDashboardOptions>(
+                configuration.GetSection(CmhcDashboardOptions.SectionName));
+            builder.Services.AddSingleton<ICmhcDashboardService, CmhcDashboardService>();
+            builder.Services.AddScoped<ICmhcAccessService, CmhcAccessService>();
             builder.Services.AddSingleton<IRoleService, RoleService>();
             builder.Services.AddSingleton<IUserService, UserService>();
 

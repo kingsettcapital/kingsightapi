@@ -42,3 +42,6 @@ Thumbs.db
 
 ## Secrets (keep appsettings.Development.json local-only if needed)
 # appsettings.Development.json
+
+# Local one-off scripts that contain data (never commit)
+Scripts/local/
