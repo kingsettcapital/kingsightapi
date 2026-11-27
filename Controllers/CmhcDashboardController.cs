@@ -13,17 +13,51 @@ namespace kingsightapi.Controllers;
 public class CmhcDashboardController : ControllerBase
 {
     private readonly ICmhcDashboardService _service;
+    private readonly ICmhcAccessService _accessService;
     private readonly ICurrentUserResolver _currentUserResolver;
     private readonly ILogger<CmhcDashboardController> _logger;
 
+    private const string NoAccessMessage =
+        "You don't have an CMHC sub-role. Ask an administrator to assign you one.";
+    private const string SharedStateForbiddenMessage =
+        "Only Admins and Reviewers can change shared CMHC dashboard settings.";
+
+    /// <summary>Report state that carries loan-level data; scoped users get an empty copy (ACC-08).</summary>
+    private static readonly IReadOnlySet<string> LoanStateKeys = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "hist", "alloc-coverage", "alloc-active", "alloc-active-reset", "renewal-milestones", "sponsor-pairs",
+        "wip-marks", "wip-credits", "ffa-stamps"
+    };
+
     public CmhcDashboardController(
         ICmhcDashboardService service,
+        ICmhcAccessService accessService,
         ICurrentUserResolver currentUserResolver,
         ILogger<CmhcDashboardController> logger)
     {
         _service = service;
+        _accessService = accessService;
         _currentUserResolver = currentUserResolver;
         _logger = logger;
+    }
+
+    // GET: api/CmhcDashboard/access/me
+    [HttpGet("access/me")]
+    public async Task<ActionResult<CmhcMyAccessDto>> GetMyAccess(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await _accessService.GetCurrentAsync(cancellationToken));
+        }
+        catch (OperationCanceledException)
+        {
+            return StatusCode(499);
+        }
+        catch (Exception ex)
+        {
+            ConnectionLogging.LogControllerError(_logger, ex, "Error retrieving CMHC dashboard access");
+            return StatusCode(500, "An error occurred while retrieving your dashboard access.");
+        }
     }
 
     // GET: api/CmhcDashboard/pipeline?asOf=yyyy-MM-dd
@@ -34,7 +68,14 @@ public class CmhcDashboardController : ControllerBase
     {
         try
         {
-            return Ok(await _service.GetPipelineAsync(asOf, cancellationToken));
+            var access = await _accessService.GetCurrentAsync(cancellationToken);
+            if (!access.HasAccess)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, NoAccessMessage);
+            }
+
+            var pipeline = await _service.GetPipelineAsync(asOf, cancellationToken);
+            return Ok(CmhcDashboardService.FilterForAccess(pipeline, access));
         }
         catch (ArgumentException ex)
         {
@@ -63,6 +104,17 @@ public class CmhcDashboardController : ControllerBase
 
         try
         {
+            var access = await _accessService.GetCurrentAsync(cancellationToken);
+            if (!access.HasAccess)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, NoAccessMessage);
+            }
+
+            if (!access.SeesAllLoans && LoanStateKeys.Contains(key))
+            {
+                return Ok(new CmhcReportStateDto { Key = key, Value = null, Version = 0 });
+            }
+
             return Ok(await _service.GetStateAsync(key, cancellationToken));
         }
         catch (OperationCanceledException)
@@ -91,6 +143,12 @@ public class CmhcDashboardController : ControllerBase
 
         try
         {
+            var access = await _accessService.GetCurrentAsync(cancellationToken);
+            if (!access.SeesAllLoans)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, SharedStateForbiddenMessage);
+            }
+
             var (displayName, error) = await _currentUserResolver.RequireAuditDisplayNameAsync(
                 null, "updatedBy", cancellationToken);
             if (error is not null)

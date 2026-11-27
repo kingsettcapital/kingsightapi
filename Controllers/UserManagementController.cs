@@ -11,16 +11,19 @@ namespace kingsightapi.Controllers
         private readonly IRoleService _roleService;
         private readonly IUserService _userService;
         private readonly ICurrentUserResolver _currentUserResolver;
+        private readonly ICmhcAccessService _cmhcAccessService;
         private readonly ILogger<UserManagementController> _logger;
 
         public UserManagementController(
             IRoleService roleService,
             IUserService userService,
             ICurrentUserResolver currentUserResolver,
+            ICmhcAccessService cmhcAccessService,
             ILogger<UserManagementController> logger)
         {
             _roleService = roleService;
             _userService = userService;
+            _cmhcAccessService = cmhcAccessService;
             _currentUserResolver = currentUserResolver;
             _logger = logger;
         }
@@ -344,6 +347,80 @@ namespace kingsightapi.Controllers
             {
                 _logger.LogError(ex, "Error deleting user {UserId}", userId);
                 return StatusCode(500, "An error occurred while deleting the user.");
+            }
+        }
+
+        // GET: api/user-management/cmhc-access  — CMHC sub-roles for every user
+        [HttpGet("cmhc-access")]
+        public async Task<ActionResult<IReadOnlyList<CmhcUserAccessDto>>> GetCmhcAccess(CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _cmhcAccessService.GetAllAsync(cancellationToken));
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving CMHC sub-roles");
+                return StatusCode(500, "An error occurred while retrieving CMHC sub-roles.");
+            }
+        }
+
+        // PUT: api/user-management/users/{userId}/cmhc-access  body: { roles: [...], linkedName }  (Admin only)
+        [HttpPut("users/{userId:int}/cmhc-access")]
+        public async Task<ActionResult<CmhcUserAccessDto>> SaveCmhcAccess(
+            int userId,
+            [FromBody] CmhcUserAccessSaveRequest request,
+            CancellationToken cancellationToken)
+        {
+            if (userId <= 0)
+            {
+                return BadRequest("userId must be a positive integer.");
+            }
+
+            try
+            {
+                var email = _currentUserResolver.GetJwtEmail();
+                var caller = string.IsNullOrWhiteSpace(email)
+                    ? null
+                    : await _userService.GetByEmailAsync(email, cancellationToken);
+                if (caller is null || !caller.IsActive || !Configuration.MortgageApproverExtensions.IsAdminRole(caller.RoleName))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, "Only Admins can change CMHC sub-roles.");
+                }
+
+                if (await _userService.GetByIdAsync(userId, cancellationToken) is null)
+                {
+                    return NotFound();
+                }
+
+                var roles = CmhcRoles.Parse(request?.Roles);
+                var linkedName = request?.LinkedName?.Trim();
+                if ((roles.Contains(CmhcRoles.Underwriter) || roles.Contains(CmhcRoles.Originator))
+                    && string.IsNullOrWhiteSpace(linkedName))
+                {
+                    return BadRequest("Underwriters and Originators need the name used in the loan data.");
+                }
+
+                var updatedBy = UserDisplayNameFormatter.Format(caller);
+                var saved = await _cmhcAccessService.SaveAsync(
+                    userId,
+                    new CmhcUserAccessSaveRequest { Roles = roles, LinkedName = linkedName },
+                    updatedBy,
+                    cancellationToken);
+                return Ok(saved);
+            }
+            catch (OperationCanceledException)
+            {
+                return StatusCode(499);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving CMHC sub-roles for user {UserId}", userId);
+                return StatusCode(500, "An error occurred while saving CMHC sub-roles.");
             }
         }
     }

@@ -25,7 +25,10 @@ namespace kingsightapi.Services
     {
         public static readonly IReadOnlySet<string> AllowedStateKeys = new HashSet<string>(StringComparer.Ordinal)
         {
-            "hist", "alloc-locked", "alloc-weights", "alloc-workdays", "tl-hidden"
+            "hist", "alloc-locked", "alloc-weights", "alloc-workdays", "tl-hidden",
+            // v7 team inputs (each mirrors one of the report's own settings; see cmhc-data.service.ts)
+            "alloc-coverage", "alloc-active", "alloc-active-reset", "rev-vacations", "rev-cal-capacity",
+            "renewal-milestones", "sponsor-pairs", "wip-marks", "wip-credits", "ffa-stamps"
         };
 
         private const string DealIdColumn = "DP Deal ID";
@@ -53,7 +56,7 @@ namespace kingsightapi.Services
                 ,d.sponsor                                    AS [Sponsor]
                 ,m.investor                                   AS [Investor]
                 ,m.term_yrs                                   AS [Term (Yrs)]
-                ,m.loan_type                                  AS [Loan Type]
+                ,m.loan_purpose                               AS [Loan Purpose]
                 ,m.affordable                                 AS [Affordable]
                 ,m.otp_approved                               AS [OTP Approved?]
                 ,d.city_rollup + COALESCE(', ' + d.state_rollup, '')
@@ -66,13 +69,25 @@ namespace kingsightapi.Services
                 ,d.mixed_use                                  AS [Mixed Use]
                 ,m.program_type                               AS [Program Type]
                 ,d.source_type                                AS [Source Type]
+                -- v7 Renewals / Maturities fields. Keep [Current Originator] after [Originating Originator]:
+                -- the report's column mapping matches "originator" by first column containing it.
+                ,m.current_originator                         AS [Current Originator]
+                ,TRY_CAST(m.loan_maturity_date AS date)       AS [Loan Maturity Date]   -- nvarchar; some rows say "Various"
+                ,m.renewal_status                             AS [Renewal Status]
+                ,m.renewal_commentary                         AS [Renewal Commentary]
+                ,m.loan_type                                  AS [Priority]
+                ,m.loan_stage                                 AS [Loan Stage]
+                ,m.first_mortgage_lender                      AS [1st Mortgage Lender]
+                ,m.first_mortgage_amount                      AS [1st Mortgage Amount]
+                ,m.first_mortgage_interest_rate               AS [1st Mortgage Interest Rate]
+                ,CAST(m.first_mortgage_maturity_date AS date) AS [1st Mortgage Maturity Date]
             FROM dbo.DealTbl AS d
             INNER JOIN dbo.MasterDealTbl AS m
                     ON m.dp_deal_id = d.dp_deal_id
                    AND m.is_active  = 1
             WHERE d.is_active   = 1
               AND d.deal_type   = 'CMHC'
-              AND d.deal_status IN ('Funded', 'Quote Accepted', 'Commitment Signed', 'Rate Locked')
+              AND d.deal_status IN ('Funded', 'Repaid', 'Quote Accepted', 'Commitment Signed', 'Rate Locked')
             ORDER BY d.deal_status, m.initial_loan_funded_date, d.deal_name;
             """;
 
@@ -154,6 +169,69 @@ namespace kingsightapi.Services
                 Links = links
             };
         }
+
+        /// <summary>
+        /// CMHC sub-role filter (ACC-01/03/06/08): Admin and Reviewer keep every row; otherwise a row stays when
+        /// the user is its underwriter (Funder, falling back to Underwriter — the name the dashboard shows)
+        /// or its originator (Current Originator, falling back to Originating Originator). A user with no matching role or no linked name gets no rows.
+        /// </summary>
+        public static CmhcPipelineDto FilterForAccess(CmhcPipelineDto pipeline, CmhcMyAccessDto access)
+        {
+            if (access.SeesAllLoans)
+            {
+                return pipeline;
+            }
+
+            var linked = access.LinkedName?.Trim();
+            var columns = pipeline.Columns.ToList();
+            var funderIdx = columns.IndexOf("Funder");
+            var underwriterIdx = columns.IndexOf("Underwriter");
+            var currentOriginatorIdx = columns.IndexOf("Current Originator");
+            var originatorIdx = columns.IndexOf("Originating Originator");
+
+            var rows = new List<object?[]>();
+            var links = new List<string?>();
+            if (access.HasAccess && !string.IsNullOrEmpty(linked))
+            {
+                for (var i = 0; i < pipeline.Rows.Count; i++)
+                {
+                    var row = pipeline.Rows[i];
+                    var funder = CleanName(Cell(row, funderIdx));
+                    var effectiveUnderwriter = funder ?? CleanName(Cell(row, underwriterIdx));
+                    // Current-first, like the report: Originating Originator only when Current is blank.
+                    var originator = CleanName(Cell(row, currentOriginatorIdx)) ?? CleanName(Cell(row, originatorIdx));
+
+                    var keep = (access.IsUnderwriter && SameName(effectiveUnderwriter, linked))
+                        || (access.IsOriginator && SameName(originator, linked));
+                    if (keep)
+                    {
+                        rows.Add(row);
+                        links.Add(i < pipeline.Links.Count ? pipeline.Links[i] : null);
+                    }
+                }
+            }
+
+            return new CmhcPipelineDto
+            {
+                AsOf = pipeline.AsOf,
+                GeneratedAt = pipeline.GeneratedAt,
+                Columns = pipeline.Columns,
+                Rows = rows,
+                Links = links
+            };
+        }
+
+        private static object? Cell(object?[] row, int index) => index >= 0 && index < row.Length ? row[index] : null;
+
+        /// <summary>Same rule as the dashboard's cleanStr: blank or "nan" means no name.</summary>
+        private static string? CleanName(object? value)
+        {
+            var s = value?.ToString()?.Trim();
+            return string.IsNullOrEmpty(s) || s.Equals("nan", StringComparison.OrdinalIgnoreCase) ? null : s;
+        }
+
+        private static bool SameName(string? a, string b) =>
+            a is not null && string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
         public async Task<CmhcReportStateDto> GetStateAsync(string key, CancellationToken cancellationToken = default)
         {
