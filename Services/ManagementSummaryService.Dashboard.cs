@@ -516,7 +516,8 @@ namespace kingsightapi.Services
                         Other = rows.Sum(r => r.Other),
                         TotalExposure = rows.Sum(r => r.TotalExposure),
                         Ltv = ltv,
-                        Risk = MapDashboardRiskBand(ltv),
+                        // Keep the warehouse risk_level; when statuses merge, take the highest band.
+                        Risk = WorstRiskLevel(rows.Select(r => r.Risk)),
                         IsInReview = rows.Any(r => r.IsInReview)
                     };
                 })
@@ -1452,8 +1453,7 @@ namespace kingsightapi.Services
                     Other = GetNullableDecimal(reader, "other_cost") ?? 0m,
                     TotalExposure = GetNullableDecimal(reader, "total_exposure") ?? 0m,
                     Ltv = ltv.HasValue ? Math.Round(ltv.Value, 2) : null,
-                    // Derive from LTV — warehouse TVF risk_level uses outdated bands (e.g. 60%).
-                    Risk = MapDashboardRiskBand(ltv.HasValue ? Math.Round(ltv.Value, 2) : null)
+                    Risk = NormalizeRiskLevel(GetNullableString(reader, "risk_level"))
                 });
             }
 
@@ -2063,6 +2063,21 @@ namespace kingsightapi.Services
 
         private static string NormalizeRiskLevel(string? risk) =>
             string.IsNullOrWhiteSpace(risk) ? "LOW" : risk.Trim().ToUpperInvariant();
+
+        private static int RiskRank(string? risk) =>
+            NormalizeRiskLevel(risk) switch
+            {
+                "HIGH" => 4,
+                "ELEVATED" => 3,
+                "MODERATE" => 2,
+                _ => 1
+            };
+
+        private static string WorstRiskLevel(IEnumerable<string?> risks) =>
+            risks
+                .Select(NormalizeRiskLevel)
+                .OrderByDescending(RiskRank)
+                .FirstOrDefault() ?? "LOW";
 
         public async Task<LoanDetailReportDashboardDto> GetLoanDetailReportAsync(
             int loanAliasKey,
